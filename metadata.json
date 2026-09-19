@@ -1,0 +1,6 @@
+{
+  "name": "Clinique Les Archanges",
+  "description": "Système de gestion du flux patient, dossiers médicaux, consultations, laboratoire et facturation pour la Clinique Les Archanges.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
