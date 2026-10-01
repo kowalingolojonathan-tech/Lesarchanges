@@ -54,13 +54,15 @@ export const RoleDashboard: React.FC<RoleDashboardProps> = ({ onNavigate }) => {
           </p>
         </div>
 
-        <button
-          onClick={() => onNavigate('rbac-tester')}
-          className="flex items-center space-x-2 px-4 py-2 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-xl hover:bg-emerald-100 text-xs font-bold transition-all shadow-xs"
-        >
-          <ShieldCheck className="w-4 h-4 text-emerald-600" />
-          <span>Vérifier mes autorisations RBAC</span>
-        </button>
+        {user.role === 'ADMINISTRATEUR' && (
+          <button
+            onClick={() => onNavigate('rbac-tester')}
+            className="flex items-center space-x-2 px-4 py-2 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-xl hover:bg-emerald-100 text-xs font-bold transition-all shadow-xs"
+          >
+            <ShieldCheck className="w-4 h-4 text-emerald-600" />
+            <span>Vérification Sécurité RBAC</span>
+          </button>
+        )}
       </div>
 
       {/* DASHBOARD SPÉCIFIQUE ADMINISTRATEUR */}
@@ -144,7 +146,7 @@ export const RoleDashboard: React.FC<RoleDashboardProps> = ({ onNavigate }) => {
               </div>
               <h3 className="font-bold text-slate-900">2. Triage & Signes Vitaux</h3>
               <p className="text-xs text-slate-600 leading-relaxed">
-                Saisie de la tension (systole/diastole), température, pouls, FR, SpO2, poids, taille, glycémie capillaire, douleur. Calculs automatiques de l'âge, IMC, catégorie OMS et PAM (indicateurs physiologiques).
+                Saisie des 8 constantes vitales (PAS/PAD séparées, température, pouls, FR, SpO2, poids, taille, douleur). La glycémie est réservée au laboratoire. Calculs automatiques de l'âge, IMC, catégorie OMS et PAM (indicateurs physiologiques).
               </p>
             </div>
 

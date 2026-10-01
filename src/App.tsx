@@ -7,13 +7,17 @@ import { RoleDashboard } from './components/dashboard/RoleDashboard.js';
 import { UserManagementView } from './components/admin/UserManagementView.js';
 import { AuditLogsView } from './components/admin/AuditLogsView.js';
 import { ClinicSettingsView } from './components/admin/ClinicSettingsView.js';
+import { TarifsManagementView } from './components/admin/TarifsManagementView.js';
 import { RbacTester } from './components/common/RbacTester.js';
 import { Phase2Placeholder } from './components/common/Phase2Placeholder.js';
 import { ReceptionDashboardView } from './components/reception/ReceptionDashboardView.js';
 import { PatientSearchView } from './components/reception/PatientSearchView.js';
+import { BillingCashierView } from './components/reception/BillingCashierView.js';
 import { TriageVitalsModal } from './components/reception/TriageVitalsModal.js';
 import { AssignDoctorModal } from './components/reception/AssignDoctorModal.js';
 import { DoctorDashboardView } from './components/medical/DoctorDashboardView.js';
+import { LaboratoryQueueView } from './components/medical/LaboratoryQueueView.js';
+import { MobileBottomNav } from './components/layout/MobileBottomNav.js';
 import { Visite } from './types/index.js';
 import { Loader2 } from 'lucide-react';
 
@@ -22,6 +26,24 @@ const MainApp: React.FC = () => {
   const [currentTab, setCurrentTab] = useState<string>('dashboard');
   const [activeTriageVisite, setActiveTriageVisite] = useState<Visite | null>(null);
   const [activeDoctorVisite, setActiveDoctorVisite] = useState<Visite | null>(null);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('archanges_sidebar_collapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleSidebar = () => {
+    setIsSidebarCollapsed(prev => {
+      const next = !prev;
+      try {
+        localStorage.setItem('archanges_sidebar_collapsed', String(next));
+      } catch {}
+      return next;
+    });
+  };
 
   if (isLoading) {
     return (
@@ -40,11 +62,22 @@ const MainApp: React.FC = () => {
   const renderContent = () => {
     switch (currentTab) {
       case 'dashboard':
-        if (user.role === 'RÉCEPTION') {
-          return <ReceptionDashboardView onGoToSearch={() => setCurrentTab('reception-patients')} />;
+        if (user.role === 'RÉCEPTION' || user.role_categorie === 'RÉCEPTION') {
+          return (
+            <ReceptionDashboardView 
+              onGoToSearch={() => setCurrentTab('reception-patients')} 
+              onGoToCashier={() => setCurrentTab('reception-cashier')}
+            />
+          );
         }
-        if (user.role === 'MÉDECIN') {
-          return <DoctorDashboardView />;
+        if (
+          ['MÉDECIN', 'MEDECIN', 'MEDECIN_GENERALISTE', 'MEDECIN_PEDIATRE', 'MEDECIN_EXTERNE', 'DIRECTEUR'].includes(user.role) ||
+          user.role_categorie === 'MÉDECIN' || user.role_categorie === 'DIRECTEUR'
+        ) {
+          return <DoctorDashboardView onNavigate={setCurrentTab} />;
+        }
+        if (user.role === 'LABORATOIRE' || user.role_categorie === 'LABORATOIRE') {
+          return <LaboratoryQueueView />;
         }
         return <RoleDashboard onNavigate={setCurrentTab} />;
 
@@ -54,10 +87,15 @@ const MainApp: React.FC = () => {
       case 'admin-audit':
         return <AuditLogsView />;
       case 'admin-settings':
-        return <ClinicSettingsView />;
+        return <ClinicSettingsView onNavigateToTarifs={() => setCurrentTab('admin-tarifs')} />;
+      case 'admin-tarifs':
+        return <TarifsManagementView />;
 
-      // Outil de test commun
+      // Outil de test RBAC réservé exclusivement à l'ADMINISTRATEUR
       case 'rbac-tester':
+        if (user.role !== 'ADMINISTRATEUR' && user.role_categorie !== 'ADMINISTRATEUR') {
+          return <RoleDashboard onNavigate={setCurrentTab} />;
+        }
         return <RbacTester />;
 
       // Menus Réception — Phase 2A Opérationnelle
@@ -77,24 +115,11 @@ const MainApp: React.FC = () => {
         return <ReceptionDashboardView onGoToSearch={() => setCurrentTab('reception-patients')} />;
 
       case 'reception-cashier':
-        return (
-          <Phase2Placeholder
-            moduleName="Caisse Unique & Encaissements"
-            roleRequired="RÉCEPTION"
-            description="Gestion centralisée de toutes les factures et encaissements de la clinique."
-            workflowSteps={[
-              "Visualisation des factures émises en attente de paiement (Consultations, Laboratoire, Orientations).",
-              "Enregistrement du règlement (Espèces, Mobile Money, Carte) en USD ou CDF.",
-              "Génération d'un reçu de caisse numéroté unique.",
-              "Déblocage instantané de l'autorisation au Laboratoire ou au Médecin."
-            ]}
-            onBack={() => setCurrentTab('dashboard')}
-          />
-        );
+        return <BillingCashierView />;
 
       // Menus Médecin (Phase 2B Opérationnelle)
       case 'doctor-consultations':
-        return <DoctorDashboardView />;
+        return <DoctorDashboardView onNavigate={setCurrentTab} />;
 
       case 'doctor-lab-orders':
         return (
@@ -128,22 +153,9 @@ const MainApp: React.FC = () => {
           />
         );
 
-      // Menus Laboratoire (Phase 2)
+      // Menus Laboratoire (Phase 2C-3 Opérationnelle)
       case 'lab-worklist':
-        return (
-          <Phase2Placeholder
-            moduleName="Paillasse des Analyses Autorisées"
-            roleRequired="LABORATOIRE"
-            description="File des examens ayant fait l'objet d'un paiement préalable validé à la Réception."
-            workflowSteps={[
-              "Affichage exclusif des demandes au statut 'AUTORISÉ À PRÉLEVER' (payées).",
-              "Saisie paillasse des valeurs mesurées, unités et intervalles de référence.",
-              "Validation biologique par le responsable de laboratoire.",
-              "Mise à disposition immédiate des résultats pour le médecin traitant."
-            ]}
-            onBack={() => setCurrentTab('dashboard')}
-          />
-        );
+        return <LaboratoryQueueView />;
 
       case 'lab-sampling':
         return (
@@ -168,13 +180,32 @@ const MainApp: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col font-sans">
-      <Header />
-      <div className="flex-1 flex">
-        <Sidebar currentTab={currentTab} onSelectTab={setCurrentTab} />
-        <main className="flex-1 p-6 md:p-8 max-w-7xl mx-auto w-full overflow-y-auto">
+      <Header 
+        isSidebarCollapsed={isSidebarCollapsed} 
+        onToggleSidebar={toggleSidebar} 
+        onToggleMobileMenu={() => setIsMobileMenuOpen(prev => !prev)}
+        isMobileMenuOpen={isMobileMenuOpen}
+      />
+      <div className="flex-1 flex overflow-hidden">
+        <Sidebar 
+          currentTab={currentTab} 
+          onSelectTab={setCurrentTab} 
+          isCollapsed={isSidebarCollapsed}
+          onToggleCollapse={toggleSidebar}
+          isMobileOpen={isMobileMenuOpen}
+          onCloseMobile={() => setIsMobileMenuOpen(false)}
+        />
+        <main className="flex-1 p-3 sm:p-4 md:p-6 lg:p-8 max-w-7xl mx-auto w-full overflow-y-auto pb-24 md:pb-8">
           {renderContent()}
         </main>
       </div>
+
+      {/* Barre d'accès rapide mobile native (Android / Touch) */}
+      <MobileBottomNav 
+        currentTab={currentTab}
+        onSelectTab={setCurrentTab}
+        onOpenMenu={() => setIsMobileMenuOpen(true)}
+      />
 
       {activeTriageVisite && (
         <TriageVitalsModal

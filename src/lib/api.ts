@@ -21,3 +21,77 @@ export async function apiFetch(input: string | URL, init?: RequestInit): Promise
     headers,
   });
 }
+
+/**
+ * Client API typé standardisé pour les requêtes JSON.
+ */
+export const api = {
+  async get<T = any>(url: string): Promise<T> {
+    const res = await apiFetch(url);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Erreur réseau' }));
+      throw new Error(err.error || `Erreur HTTP ${res.status}`);
+    }
+    return res.json();
+  },
+
+  async post<T = any>(url: string, data?: any): Promise<T> {
+    const headers: Record<string, string> = {};
+    if (data !== undefined) {
+      headers['Content-Type'] = 'application/json';
+    }
+    const res = await apiFetch(url, {
+      method: 'POST',
+      headers,
+      body: data !== undefined ? JSON.stringify(data) : undefined,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Erreur réseau' }));
+      throw new Error(err.error || `Erreur HTTP ${res.status}`);
+    }
+    return res.json();
+  },
+
+  async put<T = any>(url: string, data?: any): Promise<T> {
+    const headers: Record<string, string> = {};
+    if (data !== undefined) {
+      headers['Content-Type'] = 'application/json';
+    }
+    const res = await apiFetch(url, {
+      method: 'PUT',
+      headers,
+      body: data !== undefined ? JSON.stringify(data) : undefined,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Erreur réseau' }));
+      throw new Error(err.error || `Erreur HTTP ${res.status}`);
+    }
+    return res.json();
+  },
+
+  async patch<T = any>(url: string, data?: any): Promise<T> {
+    const headers: Record<string, string> = {};
+    if (data !== undefined) {
+      headers['Content-Type'] = 'application/json';
+    }
+    const res = await apiFetch(url, {
+      method: 'PATCH',
+      headers,
+      body: data !== undefined ? JSON.stringify(data) : undefined,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Erreur réseau' }));
+      throw new Error(err.error || `Erreur HTTP ${res.status}`);
+    }
+    return res.json();
+  },
+
+  async delete<T = any>(url: string): Promise<T> {
+    const res = await apiFetch(url, { method: 'DELETE' });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: 'Erreur réseau' }));
+      throw new Error(err.error || `Erreur HTTP ${res.status}`);
+    }
+    return res.json();
+  }
+};

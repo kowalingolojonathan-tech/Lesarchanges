@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
-import { queryOne, execute } from '../db/database.js';
+import { query, queryOne, execute } from '../db/database.js';
 import { AuthenticatedRequest, Role } from '../middleware/auth.js';
 import { logAudit } from '../utils/auditLogger.js';
 
@@ -19,10 +19,16 @@ export async function login(req: AuthenticatedRequest, res: Response): Promise<v
       username: string;
       password_hash: string;
       nom_complet: string;
+      nom?: string;
+      prenom?: string;
+      fonction?: string;
+      telephone?: string;
+      email?: string;
       role: Role;
+      role_id?: string;
       actif: number;
       must_change_password?: number;
-    }>('SELECT id, username, password_hash, nom_complet, role, actif, COALESCE(must_change_password, 0) as must_change_password FROM users WHERE username = ?', [username.trim()]);
+    }>('SELECT id, username, password_hash, nom_complet, nom, prenom, fonction, telephone, email, role, role_id, actif, COALESCE(must_change_password, 0) as must_change_password FROM users WHERE username = ?', [username.trim()]);
 
     if (!user) {
       await logAudit({
@@ -91,6 +97,55 @@ export async function login(req: AuthenticatedRequest, res: Response): Promise<v
       ipAddress: req.ip,
     });
 
+    // Résolution des permissions et libellé du rôle
+    let permissions: string[] = [];
+    let roleNom = user.role;
+    let roleCat = user.role;
+
+    if (user.role_id) {
+      const roleRow = await queryOne<{ nom: string; categorie: string }>(
+        'SELECT nom, categorie FROM roles WHERE id = ?',
+        [user.role_id]
+      );
+      if (roleRow) {
+        roleNom = roleRow.nom;
+        roleCat = roleRow.categorie;
+      }
+      const pRows = await query<{ permission: string }>(
+        'SELECT permission FROM role_permissions WHERE role_id = ?',
+        [user.role_id]
+      );
+      permissions = pRows.map(p => p.permission);
+    } else {
+      const roleRow = await queryOne<{ id: string; nom: string; categorie: string }>(
+        'SELECT id, nom, categorie FROM roles WHERE code = ?',
+        [user.role]
+      );
+      if (roleRow) {
+        roleNom = roleRow.nom;
+        roleCat = roleRow.categorie;
+        const pRows = await query<{ permission: string }>(
+          'SELECT permission FROM role_permissions WHERE role_id = ?',
+          [roleRow.id]
+        );
+        permissions = pRows.map(p => p.permission);
+      }
+    }
+
+    if (user.role === 'ADMINISTRATEUR' || roleCat === 'ADMINISTRATEUR') {
+      if (permissions.length === 0) {
+        permissions = [
+          'factures:voir', 'factures:ajouter', 'factures:modifier', 'factures:supprimer', 'factures:imprimer',
+          'paiements:voir', 'paiements:ajouter', 'paiements:modifier', 'paiements:annuler', 'paiements:imprimer',
+          'rapports_financiers:voir', 'rapports_financiers:ajouter', 'rapports_financiers:modifier', 'rapports_financiers:supprimer', 'rapports_financiers:imprimer',
+          'patients:voir', 'patients:ajouter', 'patients:modifier', 'patients:supprimer', 'patients:voir_tous',
+          'prescriptions:voir', 'prescriptions:ajouter', 'prescriptions:modifier', 'prescriptions:valider', 'prescriptions:imprimer',
+          'laboratoire:voir', 'laboratoire:demander', 'laboratoire:traiter', 'laboratoire:valider', 'laboratoire:imprimer',
+          'utilisateurs:gerer', 'roles:gerer', 'tarifs:gerer'
+        ];
+      }
+    }
+
     res.json({
       success: true,
       token,
@@ -98,7 +153,16 @@ export async function login(req: AuthenticatedRequest, res: Response): Promise<v
         id: user.id,
         username: user.username,
         nom_complet: user.nom_complet,
+        nom: user.nom || '',
+        prenom: user.prenom || '',
+        fonction: user.fonction || '',
+        telephone: user.telephone || '',
+        email: user.email || '',
         role: user.role,
+        role_id: user.role_id || '',
+        role_nom: roleNom,
+        role_categorie: roleCat,
+        permissions,
         actif: Boolean(user.actif),
         must_change_password: Boolean(user.must_change_password),
       },

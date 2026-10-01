@@ -148,26 +148,32 @@ export async function query<T = any>(sql: string, params: QueryParam[] = []): Pr
   }
 }
 
+export const queryAll = query;
+
 export async function queryOne<T = any>(sql: string, params: QueryParam[] = []): Promise<T | null> {
   const rows = await query<T>(sql, params);
   return rows.length > 0 ? rows[0] : null;
 }
 
-export async function execute(sql: string, params: QueryParam[] = []): Promise<void> {
+export async function execute(sql: string, params: QueryParam[] = []): Promise<{ changes: number }> {
   return withWriteLock(async () => {
     const db = await getDb();
+    let changes = 0;
     if (params.length === 0) {
       db.exec(sql);
+      changes = db.getRowsModified();
     } else {
       const stmt = db.prepare(sql);
       try {
         const cleanParams = sanitizeParams(params);
         stmt.run(cleanParams);
+        changes = db.getRowsModified();
       } finally {
         stmt.free();
       }
     }
     saveDb();
+    return { changes };
   });
 }
 

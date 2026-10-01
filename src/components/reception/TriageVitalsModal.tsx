@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import { Visite } from '../../types/index.js';
-import { Activity, AlertCircle, CheckCircle2, Heart, Thermometer, Wind, Scale, User, X, ShieldAlert } from 'lucide-react';
+import { Activity, AlertCircle, CheckCircle2, Heart, Thermometer, Wind, Scale, X, Ruler } from 'lucide-react';
 import { apiFetch } from '../../lib/api';
 
 interface TriageVitalsModalProps {
@@ -10,98 +10,180 @@ interface TriageVitalsModalProps {
 }
 
 export const TriageVitalsModal: React.FC<TriageVitalsModalProps> = ({ visite, onClose, onSuccess }) => {
+  // 8 champs de constantes séparés avec leurs valeurs respectives
   const [temperature, setTemperature] = useState<string>('37.0');
-  const [tensionSys, setTensionSys] = useState<string>('120');
-  const [tensionDia, setTensionDia] = useState<string>('80');
   const [pouls, setPouls] = useState<string>('75');
-  const [freqResp, setFreqResp] = useState<string>('16');
-  const [spo2, setSpo2] = useState<string>('98');
   const [poids, setPoids] = useState<string>('70');
   const [taille, setTaille] = useState<string>('170');
-  const [glycemie, setGlycemie] = useState<string>('1.00');
+  const [spo2, setSpo2] = useState<string>('98');
+  const [freqResp, setFreqResp] = useState<string>('16');
+  const [tensionSys, setTensionSys] = useState<string>('120'); // PAS
+  const [tensionDia, setTensionDia] = useState<string>('80');  // PAD
+
+  // Évaluation complémentaire de la douleur
   const [douleur, setDouleur] = useState<number>(0);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [errorDetails, setErrorDetails] = useState<string[]>([]);
 
-  // Calculs physiologiques instantanés
-  const ageCalcule = useMemo(() => {
-    if (!visite.patient_date_naissance) return null;
-    const birth = new Date(visite.patient_date_naissance);
-    const now = new Date();
-    let age = now.getFullYear() - birth.getFullYear();
-    const m = now.getMonth() - birth.getMonth();
-    if (m < 0 || (m === 0 && now.getDate() < birth.getDate())) {
-      age--;
-    }
-    return Math.max(0, age);
-  }, [visite.patient_date_naissance]);
+  // Validation frontend stricte des 8 constantes (types numériques et valeurs impossibles)
+  const validateForm = (): boolean => {
+    const errors: Record<string, string> = {};
+    const details: string[] = [];
 
-  const pamCalculee = useMemo(() => {
-    const sys = Number(tensionSys);
-    const dia = Number(tensionDia);
-    if (!isNaN(sys) && !isNaN(dia) && sys > dia && sys > 0 && dia > 0) {
-      const pam = (sys + 2 * dia) / 3;
-      return Math.round(pam * 10) / 10;
-    }
-    return null;
-  }, [tensionSys, tensionDia]);
-
-  const imcCalcule = useMemo(() => {
-    const p = Number(poids);
-    let t = Number(taille);
-    if (!isNaN(p) && !isNaN(t) && p > 0 && t > 0) {
-      if (t <= 2.5) t = t * 100; // Si entré en mètres
-      const tailleM = t / 100;
-      const imc = p / (tailleM * tailleM);
-      const imcRound = Math.round(imc * 10) / 10;
-
-      let categorie = 'Poids normal';
-      let couleur = 'text-emerald-700 bg-emerald-50 border-emerald-200';
-      if (imcRound < 18.5) {
-        categorie = 'Insuffisance pondérale';
-        couleur = 'text-amber-700 bg-amber-50 border-amber-200';
-      } else if (imcRound < 25.0) {
-        categorie = 'Poids normal';
-        couleur = 'text-emerald-700 bg-emerald-50 border-emerald-200';
-      } else if (imcRound < 30.0) {
-        categorie = 'Surpoids';
-        couleur = 'text-amber-700 bg-amber-50 border-amber-200';
-      } else if (imcRound < 35.0) {
-        categorie = 'Obésité modérée (Classe I)';
-        couleur = 'text-orange-700 bg-orange-50 border-orange-200';
-      } else if (imcRound < 40.0) {
-        categorie = 'Obésité sévère (Classe II)';
-        couleur = 'text-red-700 bg-red-50 border-red-200';
-      } else {
-        categorie = 'Obésité morbide (Classe III)';
-        couleur = 'text-red-800 bg-red-100 border-red-300';
+    // 1. Température (°C)
+    if (!temperature || temperature.trim() === '') {
+      errors.temperature = 'La température est requise.';
+      details.push('Température obligatoire (°C).');
+    } else {
+      const t = parseFloat(temperature);
+      if (isNaN(t) || t < 30.0 || t > 45.0) {
+        errors.temperature = 'Température invalide (plage autorisée : 30.0 à 45.0 °C).';
+        details.push('Température invalide : doit être comprise entre 30.0 et 45.0 °C.');
       }
-
-      return { imc: imcRound, categorie, couleur };
     }
-    return null;
-  }, [poids, taille]);
+
+    // 2. Pouls / Fréquence cardiaque (bpm)
+    if (!pouls || pouls.trim() === '') {
+      errors.pouls = 'Le pouls est requis.';
+      details.push('Pouls obligatoire (bpm).');
+    } else {
+      const p = Number(pouls);
+      if (isNaN(p) || !Number.isInteger(p) || p < 30 || p > 250) {
+        errors.pouls = 'Pouls invalide (plage autorisée : 30 à 250 bpm, nombre entier).';
+        details.push('Pouls invalide : entier compris entre 30 et 250 bpm.');
+      }
+    }
+
+    // 3. Poids (kg)
+    if (!poids || poids.trim() === '') {
+      errors.poids = 'Le poids est requis.';
+      details.push('Poids obligatoire (kg).');
+    } else {
+      const w = parseFloat(poids);
+      if (isNaN(w) || w < 0.5 || w > 400) {
+        errors.poids = 'Poids invalide (plage autorisée : 0.5 à 400 kg).';
+        details.push('Poids invalide : doit être compris entre 0.5 et 400 kg.');
+      }
+    }
+
+    // 4. Taille (cm) — Pas de conversion automatique en mètres
+    if (!taille || taille.trim() === '') {
+      errors.taille = 'La taille est requise.';
+      details.push('Taille obligatoire (cm).');
+    } else {
+      const h = parseFloat(taille);
+      if (isNaN(h)) {
+        errors.taille = 'Taille invalide (doit être un nombre).';
+        details.push('Taille invalide : valeur numérique requise.');
+      } else if (h <= 2.5) {
+        errors.taille = 'Taille invalide : saisir en centimètres (ex: 170), ne pas saisir en mètres.';
+        details.push('Taille invalide : la valeur doit être saisie en centimètres (30 à 250 cm), et non en mètres.');
+      } else if (h < 30 || h > 250) {
+        errors.taille = 'Taille invalide (plage autorisée : 30 à 250 cm).';
+        details.push('Taille invalide : doit être comprise entre 30 et 250 cm.');
+      }
+    }
+
+    // 5. SpO₂ (%)
+    if (!spo2 || spo2.trim() === '') {
+      errors.spo2 = 'La SpO₂ est requise.';
+      details.push('Saturation SpO₂ obligatoire (%).');
+    } else {
+      const s = Number(spo2);
+      if (isNaN(s) || !Number.isInteger(s) || s < 50 || s > 100) {
+        errors.spo2 = 'SpO₂ invalide (plage autorisée : 50 à 100 %, nombre entier).';
+        details.push('SpO₂ invalide : entier compris entre 50 et 100 %.');
+      }
+    }
+
+    // 6. Fréquence respiratoire (cycles/min)
+    if (!freqResp || freqResp.trim() === '') {
+      errors.freqResp = 'La fréquence respiratoire est requise.';
+      details.push('Fréquence respiratoire obligatoire (cycles/min).');
+    } else {
+      const fr = Number(freqResp);
+      if (isNaN(fr) || !Number.isInteger(fr) || fr < 6 || fr > 80) {
+        errors.freqResp = 'Fréquence respiratoire invalide (plage autorisée : 6 à 80 cycles/min).';
+        details.push('Fréquence respiratoire invalide : entier compris entre 6 et 80 cycles/min.');
+      }
+    }
+
+    // 7. Pression artérielle systolique (PAS) (mmHg)
+    let sysVal: number | null = null;
+    if (!tensionSys || tensionSys.trim() === '') {
+      errors.tensionSys = 'La PAS est requise.';
+      details.push('Pression artérielle systolique (PAS) obligatoire.');
+    } else {
+      const sys = Number(tensionSys);
+      if (isNaN(sys) || !Number.isInteger(sys) || sys < 50 || sys > 300) {
+        errors.tensionSys = 'PAS invalide (plage autorisée : 50 à 300 mmHg, nombre entier).';
+        details.push('PAS invalide : entier compris entre 50 et 300 mmHg.');
+      } else {
+        sysVal = sys;
+      }
+    }
+
+    // 8. Pression artérielle diastolique (PAD) (mmHg)
+    let diaVal: number | null = null;
+    if (!tensionDia || tensionDia.trim() === '') {
+      errors.tensionDia = 'La PAD est requise.';
+      details.push('Pression artérielle diastolique (PAD) obligatoire.');
+    } else {
+      const dia = Number(tensionDia);
+      if (isNaN(dia) || !Number.isInteger(dia) || dia < 30 || dia > 200) {
+        errors.tensionDia = 'PAD invalide (plage autorisée : 30 à 200 mmHg, nombre entier).';
+        details.push('PAD invalide : entier compris entre 30 et 200 mmHg.');
+      } else {
+        diaVal = dia;
+      }
+    }
+
+    // Cohérence PAS > PAD
+    if (sysVal !== null && diaVal !== null && sysVal <= diaVal) {
+      errors.tensionSys = 'La PAS doit être strictement supérieure à la PAD.';
+      errors.tensionDia = 'La PAD doit être strictement inférieure à la PAS.';
+      details.push('Incohérence tensionnelle : la pression systolique (PAS) doit être strictement supérieure à la diastolique (PAD).');
+    }
+
+    setFieldErrors(errors);
+    setErrorDetails(details);
+
+    if (details.length > 0) {
+      setErrorMessage('Veuillez corriger les valeurs physiologiques erronées ci-dessous.');
+      return false;
+    }
+
+    return true;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsSubmitting(true);
     setErrorMessage(null);
     setErrorDetails([]);
 
+    // Validation frontend
+    if (!validateForm()) {
+      return;
+    }
+
+    setIsSubmitting(true);
+
     try {
+      // 8 constantes clairement séparées avec conservation des types numériques
+      // NOTE IMPORTANTE : PAS DE CHAMP GLYCÉMIE À LA RÉCEPTION (Workflow réservé au laboratoire)
       const payload = {
-        temperature: temperature ? parseFloat(temperature) : null,
-        tension_systolique: tensionSys ? parseInt(tensionSys, 10) : null,
-        tension_diastolique: tensionDia ? parseInt(tensionDia, 10) : null,
-        pouls: pouls ? parseInt(pouls, 10) : null,
-        frequence_respiratoire: freqResp ? parseInt(freqResp, 10) : null,
-        spo2: spo2 ? parseInt(spo2, 10) : null,
-        poids: poids ? parseFloat(poids) : null,
-        taille: taille ? parseFloat(taille) : null,
-        glycemie_mesuree: glycemie ? parseFloat(glycemie) : null,
-        douleur: douleur !== null ? Number(douleur) : null,
+        temperature: parseFloat(temperature),
+        tension_systolique: parseInt(tensionSys, 10),
+        tension_diastolique: parseInt(tensionDia, 10),
+        pouls: parseInt(pouls, 10),
+        frequence_respiratoire: parseInt(freqResp, 10),
+        spo2: parseInt(spo2, 10),
+        poids: parseFloat(poids),
+        taille: parseFloat(taille),
+        douleur: douleur !== null ? Number(douleur) : 0,
       };
 
       const res = await apiFetch(`/api/visites/${visite.id}/vitals`, {
@@ -112,7 +194,7 @@ export const TriageVitalsModal: React.FC<TriageVitalsModalProps> = ({ visite, on
 
       const data = await res.json();
       if (!res.ok) {
-        setErrorMessage(data.message || data.error || 'Erreur lors de l\'enregistrement des signes vitaux.');
+        setErrorMessage(data.message || data.error || 'Erreur lors de l\'enregistrement des constantes.');
         if (Array.isArray(data.details)) {
           setErrorDetails(data.details);
         }
@@ -122,7 +204,7 @@ export const TriageVitalsModal: React.FC<TriageVitalsModalProps> = ({ visite, on
 
       onSuccess(data.visite);
     } catch (err: any) {
-      setErrorMessage(err.message || 'Erreur de connexion au serveur.');
+      setErrorMessage(err.message || 'Erreur de communication avec le serveur.');
       setIsSubmitting(false);
     }
   };
@@ -137,7 +219,7 @@ export const TriageVitalsModal: React.FC<TriageVitalsModalProps> = ({ visite, on
               <Activity className="w-5 h-5 text-emerald-400" />
             </div>
             <div>
-              <h3 className="text-base font-bold">Poste de Triage & Signes Vitaux</h3>
+              <h3 className="text-base font-bold">Poste de Triage — Saisie des Constantes Réception</h3>
               <p className="text-xs text-slate-300">
                 Patient : <span className="font-semibold text-white">{visite.patient_nom} {visite.patient_prenom}</span> — Dossier permanent : <span className="font-mono text-emerald-300">{visite.numero_dossier}</span>
               </p>
@@ -170,252 +252,274 @@ export const TriageVitalsModal: React.FC<TriageVitalsModalProps> = ({ visite, on
             </div>
           )}
 
-          {/* Grille des mesures */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-            {/* Température */}
-            <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
+          {/* Grille des 8 constantes clairement séparées */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* 1. Température (°C) */}
+            <div className={`p-4 rounded-lg border ${fieldErrors.temperature ? 'bg-red-50/50 border-red-300' : 'bg-slate-50 border-slate-200'}`}>
               <label className="flex items-center text-xs font-semibold text-slate-700 mb-1.5">
-                <Thermometer className="w-4 h-4 mr-1 text-red-500" />
-                Température (°C)
+                <Thermometer className="w-4 h-4 mr-1 text-red-500 shrink-0" />
+                <span>1. Température corporelle</span>
               </label>
-              <input
-                type="number"
-                step="0.1"
-                min="30"
-                max="45"
-                required
-                value={temperature}
-                onChange={(e) => setTemperature(e.target.value)}
-                className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-md focus:ring-2 focus:ring-emerald-500 focus:outline-hidden font-mono"
-                placeholder="Ex: 37.2"
-              />
-              <span className="text-[11px] text-slate-400 mt-1 block">Norme : 36.5 - 37.5 °C</span>
-            </div>
-
-            {/* Pression Artérielle */}
-            <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
-              <label className="flex items-center text-xs font-semibold text-slate-700 mb-1.5">
-                <Heart className="w-4 h-4 mr-1 text-rose-500" />
-                Pression Artérielle (mmHg)
-              </label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="relative">
                 <input
                   type="number"
-                  min="50"
-                  max="300"
+                  step="0.1"
+                  min="30"
+                  max="45"
                   required
-                  value={tensionSys}
-                  onChange={(e) => setTensionSys(e.target.value)}
-                  className="px-3 py-2 text-sm bg-white border border-slate-300 rounded-md focus:ring-2 focus:ring-emerald-500 focus:outline-hidden font-mono text-center"
-                  placeholder="Sys (120)"
+                  value={temperature}
+                  onChange={(e) => {
+                    setTemperature(e.target.value);
+                    if (fieldErrors.temperature) setFieldErrors(prev => ({ ...prev, temperature: '' }));
+                  }}
+                  className={`w-full px-3 py-2 pr-10 text-sm bg-white border rounded-md focus:ring-2 focus:ring-emerald-500 focus:outline-hidden font-mono ${fieldErrors.temperature ? 'border-red-400 text-red-900' : 'border-slate-300'}`}
+                  placeholder="37.0"
                 />
+                <span className="absolute right-3 top-2 text-xs font-semibold text-slate-500">°C</span>
+              </div>
+              {fieldErrors.temperature ? (
+                <p className="text-[11px] text-red-600 mt-1">{fieldErrors.temperature}</p>
+              ) : (
+                <span className="text-[11px] text-slate-400 mt-1 block">Norme : 36.5 - 37.5 °C</span>
+              )}
+            </div>
+
+            {/* 2. Pouls / Fréquence cardiaque (bpm) */}
+            <div className={`p-4 rounded-lg border ${fieldErrors.pouls ? 'bg-red-50/50 border-red-300' : 'bg-slate-50 border-slate-200'}`}>
+              <label className="flex items-center text-xs font-semibold text-slate-700 mb-1.5">
+                <Activity className="w-4 h-4 mr-1 text-emerald-600 shrink-0" />
+                <span>2. Pouls / Fréq. cardiaque</span>
+              </label>
+              <div className="relative">
                 <input
                   type="number"
                   min="30"
-                  max="200"
+                  max="250"
                   required
-                  value={tensionDia}
-                  onChange={(e) => setTensionDia(e.target.value)}
-                  className="px-3 py-2 text-sm bg-white border border-slate-300 rounded-md focus:ring-2 focus:ring-emerald-500 focus:outline-hidden font-mono text-center"
-                  placeholder="Dia (80)"
+                  value={pouls}
+                  onChange={(e) => {
+                    setPouls(e.target.value);
+                    if (fieldErrors.pouls) setFieldErrors(prev => ({ ...prev, pouls: '' }));
+                  }}
+                  className={`w-full px-3 py-2 pr-12 text-sm bg-white border rounded-md focus:ring-2 focus:ring-emerald-500 focus:outline-hidden font-mono ${fieldErrors.pouls ? 'border-red-400 text-red-900' : 'border-slate-300'}`}
+                  placeholder="75"
                 />
+                <span className="absolute right-3 top-2 text-xs font-semibold text-slate-500">bpm</span>
               </div>
-              <span className="text-[11px] text-slate-400 mt-1 block">Systolique / Diastolique</span>
+              {fieldErrors.pouls ? (
+                <p className="text-[11px] text-red-600 mt-1">{fieldErrors.pouls}</p>
+              ) : (
+                <span className="text-[11px] text-slate-400 mt-1 block">Norme : 60 - 100 bpm</span>
+              )}
             </div>
 
-            {/* Pouls */}
-            <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
+            {/* 3. Poids (kg) */}
+            <div className={`p-4 rounded-lg border ${fieldErrors.poids ? 'bg-red-50/50 border-red-300' : 'bg-slate-50 border-slate-200'}`}>
               <label className="flex items-center text-xs font-semibold text-slate-700 mb-1.5">
-                <Activity className="w-4 h-4 mr-1 text-emerald-600" />
-                Pouls (bpm)
+                <Scale className="w-4 h-4 mr-1 text-slate-700 shrink-0" />
+                <span>3. Poids</span>
               </label>
-              <input
-                type="number"
-                min="30"
-                max="250"
-                required
-                value={pouls}
-                onChange={(e) => setPouls(e.target.value)}
-                className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-md focus:ring-2 focus:ring-emerald-500 focus:outline-hidden font-mono"
-                placeholder="Ex: 75"
-              />
-              <span className="text-[11px] text-slate-400 mt-1 block">Norme repos : 60 - 100 bpm</span>
+              <div className="relative">
+                <input
+                  type="number"
+                  step="0.1"
+                  min="0.5"
+                  max="400"
+                  required
+                  value={poids}
+                  onChange={(e) => {
+                    setPoids(e.target.value);
+                    if (fieldErrors.poids) setFieldErrors(prev => ({ ...prev, poids: '' }));
+                  }}
+                  className={`w-full px-3 py-2 pr-10 text-sm bg-white border rounded-md focus:ring-2 focus:ring-emerald-500 focus:outline-hidden font-mono ${fieldErrors.poids ? 'border-red-400 text-red-900' : 'border-slate-300'}`}
+                  placeholder="70.0"
+                />
+                <span className="absolute right-3 top-2 text-xs font-semibold text-slate-500">kg</span>
+              </div>
+              {fieldErrors.poids ? (
+                <p className="text-[11px] text-red-600 mt-1">{fieldErrors.poids}</p>
+              ) : (
+                <span className="text-[11px] text-slate-400 mt-1 block">Unité : kg (ex: 70.5)</span>
+              )}
             </div>
 
-            {/* Fréquence respiratoire */}
-            <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
+            {/* 4. Taille (cm) */}
+            <div className={`p-4 rounded-lg border ${fieldErrors.taille ? 'bg-red-50/50 border-red-300' : 'bg-slate-50 border-slate-200'}`}>
               <label className="flex items-center text-xs font-semibold text-slate-700 mb-1.5">
-                <Wind className="w-4 h-4 mr-1 text-blue-500" />
-                Fréquence Respiratoire (cpm)
+                <Ruler className="w-4 h-4 mr-1 text-indigo-600 shrink-0" />
+                <span>4. Taille</span>
               </label>
-              <input
-                type="number"
-                min="6"
-                max="80"
-                value={freqResp}
-                onChange={(e) => setFreqResp(e.target.value)}
-                className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-md focus:ring-2 focus:ring-emerald-500 focus:outline-hidden font-mono"
-                placeholder="Ex: 16"
-              />
-              <span className="text-[11px] text-slate-400 mt-1 block">Norme adulte : 12 - 20 cpm</span>
+              <div className="relative">
+                <input
+                  type="number"
+                  step="0.1"
+                  min="30"
+                  max="250"
+                  required
+                  value={taille}
+                  onChange={(e) => {
+                    setTaille(e.target.value);
+                    if (fieldErrors.taille) setFieldErrors(prev => ({ ...prev, taille: '' }));
+                  }}
+                  className={`w-full px-3 py-2 pr-10 text-sm bg-white border rounded-md focus:ring-2 focus:ring-emerald-500 focus:outline-hidden font-mono ${fieldErrors.taille ? 'border-red-400 text-red-900' : 'border-slate-300'}`}
+                  placeholder="170"
+                />
+                <span className="absolute right-3 top-2 text-xs font-semibold text-slate-500">cm</span>
+              </div>
+              {fieldErrors.taille ? (
+                <p className="text-[11px] text-red-600 mt-1">{fieldErrors.taille}</p>
+              ) : (
+                <span className="text-[11px] text-slate-400 mt-1 block">Unité : cm (ex: 170)</span>
+              )}
             </div>
 
-            {/* Saturation SpO2 */}
-            <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
+            {/* 5. SpO₂ (%) */}
+            <div className={`p-4 rounded-lg border ${fieldErrors.spo2 ? 'bg-red-50/50 border-red-300' : 'bg-slate-50 border-slate-200'}`}>
               <label className="flex items-center text-xs font-semibold text-slate-700 mb-1.5">
-                <Activity className="w-4 h-4 mr-1 text-cyan-600" />
-                Saturation en O₂ (SpO₂)
+                <Activity className="w-4 h-4 mr-1 text-cyan-600 shrink-0" />
+                <span>5. Saturation O₂ (SpO₂)</span>
               </label>
               <div className="relative">
                 <input
                   type="number"
                   min="50"
                   max="100"
+                  required
                   value={spo2}
-                  onChange={(e) => setSpo2(e.target.value)}
-                  className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-md focus:ring-2 focus:ring-emerald-500 focus:outline-hidden font-mono"
-                  placeholder="Ex: 98"
+                  onChange={(e) => {
+                    setSpo2(e.target.value);
+                    if (fieldErrors.spo2) setFieldErrors(prev => ({ ...prev, spo2: '' }));
+                  }}
+                  className={`w-full px-3 py-2 pr-10 text-sm bg-white border rounded-md focus:ring-2 focus:ring-emerald-500 focus:outline-hidden font-mono ${fieldErrors.spo2 ? 'border-red-400 text-red-900' : 'border-slate-300'}`}
+                  placeholder="98"
                 />
-                <span className="absolute right-3 top-2.5 text-xs text-slate-400 font-semibold">%</span>
+                <span className="absolute right-3 top-2 text-xs font-semibold text-slate-500">%</span>
               </div>
-              <span className="text-[11px] text-slate-400 mt-1 block">Norme : ≥ 95%</span>
+              {fieldErrors.spo2 ? (
+                <p className="text-[11px] text-red-600 mt-1">{fieldErrors.spo2}</p>
+              ) : (
+                <span className="text-[11px] text-slate-400 mt-1 block">Norme : ≥ 95%</span>
+              )}
             </div>
 
-            {/* Glycémie */}
-            <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
+            {/* 6. Fréquence respiratoire (cycles/min) */}
+            <div className={`p-4 rounded-lg border ${fieldErrors.freqResp ? 'bg-red-50/50 border-red-300' : 'bg-slate-50 border-slate-200'}`}>
               <label className="flex items-center text-xs font-semibold text-slate-700 mb-1.5">
-                <Activity className="w-4 h-4 mr-1 text-purple-600" />
-                Glycémie capillaire (g/L)
+                <Wind className="w-4 h-4 mr-1 text-blue-500 shrink-0" />
+                <span>6. Fréq. respiratoire</span>
               </label>
-              <input
-                type="number"
-                step="0.01"
-                min="0.2"
-                max="40"
-                value={glycemie}
-                onChange={(e) => setGlycemie(e.target.value)}
-                className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-md focus:ring-2 focus:ring-emerald-500 focus:outline-hidden font-mono"
-                placeholder="Ex: 1.05"
-              />
-              <span className="text-[11px] text-slate-400 mt-1 block">Norme à jeun : 0.70 - 1.10 g/L</span>
+              <div className="relative">
+                <input
+                  type="number"
+                  min="6"
+                  max="80"
+                  required
+                  value={freqResp}
+                  onChange={(e) => {
+                    setFreqResp(e.target.value);
+                    if (fieldErrors.freqResp) setFieldErrors(prev => ({ ...prev, freqResp: '' }));
+                  }}
+                  className={`w-full px-3 py-2 pr-20 text-sm bg-white border rounded-md focus:ring-2 focus:ring-emerald-500 focus:outline-hidden font-mono ${fieldErrors.freqResp ? 'border-red-400 text-red-900' : 'border-slate-300'}`}
+                  placeholder="16"
+                />
+                <span className="absolute right-3 top-2 text-xs font-semibold text-slate-500">cycles/min</span>
+              </div>
+              {fieldErrors.freqResp ? (
+                <p className="text-[11px] text-red-600 mt-1">{fieldErrors.freqResp}</p>
+              ) : (
+                <span className="text-[11px] text-slate-400 mt-1 block">Norme adulte : 12 - 20</span>
+              )}
             </div>
 
-            {/* Poids & Taille */}
-            <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 md:col-span-2">
+            {/* 7. Pression artérielle systolique (PAS) (mmHg) — Champ distinct */}
+            <div className={`p-4 rounded-lg border ${fieldErrors.tensionSys ? 'bg-red-50/50 border-red-300' : 'bg-slate-50 border-slate-200'}`}>
               <label className="flex items-center text-xs font-semibold text-slate-700 mb-1.5">
-                <Scale className="w-4 h-4 mr-1 text-slate-700" />
-                Biométrie : Poids & Taille
+                <Heart className="w-4 h-4 mr-1 text-rose-500 shrink-0" />
+                <span>7. PA Systolique (PAS)</span>
               </label>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="relative">
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="1"
-                    max="350"
-                    required
-                    value={poids}
-                    onChange={(e) => setPoids(e.target.value)}
-                    className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-md focus:ring-2 focus:ring-emerald-500 focus:outline-hidden font-mono"
-                    placeholder="Poids"
-                  />
-                  <span className="absolute right-3 top-2.5 text-xs text-slate-400">kg</span>
-                </div>
-                <div className="relative">
-                  <input
-                    type="number"
-                    step="0.1"
-                    min="30"
-                    max="250"
-                    required
-                    value={taille}
-                    onChange={(e) => setTaille(e.target.value)}
-                    className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-md focus:ring-2 focus:ring-emerald-500 focus:outline-hidden font-mono"
-                    placeholder="Taille"
-                  />
-                  <span className="absolute right-3 top-2.5 text-xs text-slate-400">cm</span>
-                </div>
+              <div className="relative">
+                <input
+                  type="number"
+                  min="50"
+                  max="300"
+                  required
+                  value={tensionSys}
+                  onChange={(e) => {
+                    setTensionSys(e.target.value);
+                    if (fieldErrors.tensionSys) setFieldErrors(prev => ({ ...prev, tensionSys: '' }));
+                  }}
+                  className={`w-full px-3 py-2 pr-14 text-sm bg-white border rounded-md focus:ring-2 focus:ring-emerald-500 focus:outline-hidden font-mono ${fieldErrors.tensionSys ? 'border-red-400 text-red-900' : 'border-slate-300'}`}
+                  placeholder="120"
+                />
+                <span className="absolute right-3 top-2 text-xs font-semibold text-slate-500">mmHg</span>
               </div>
-              <span className="text-[11px] text-slate-400 mt-1 block">Poids en kilogrammes et taille en centimètres (ex: 170 cm)</span>
+              {fieldErrors.tensionSys ? (
+                <p className="text-[11px] text-red-600 mt-1">{fieldErrors.tensionSys}</p>
+              ) : (
+                <span className="text-[11px] text-slate-400 mt-1 block">Norme : 90 - 139 mmHg</span>
+              )}
             </div>
 
-            {/* Échelle de la douleur */}
-            <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
-              <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs font-semibold text-slate-700">Échelle douleur : {douleur}/10</label>
-                <span className={`text-[11px] font-bold px-2 py-0.5 rounded-sm ${
-                  douleur === 0 ? 'bg-emerald-100 text-emerald-800' :
-                  douleur <= 3 ? 'bg-blue-100 text-blue-800' :
-                  douleur <= 6 ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800'
-                }`}>
-                  {douleur === 0 ? 'Absente' : douleur <= 3 ? 'Légère' : douleur <= 6 ? 'Modérée' : 'Sévère'}
-                </span>
+            {/* 8. Pression artérielle diastolique (PAD) (mmHg) — Champ distinct */}
+            <div className={`p-4 rounded-lg border ${fieldErrors.tensionDia ? 'bg-red-50/50 border-red-300' : 'bg-slate-50 border-slate-200'}`}>
+              <label className="flex items-center text-xs font-semibold text-slate-700 mb-1.5">
+                <Heart className="w-4 h-4 mr-1 text-rose-400 shrink-0" />
+                <span>8. PA Diastolique (PAD)</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="number"
+                  min="30"
+                  max="200"
+                  required
+                  value={tensionDia}
+                  onChange={(e) => {
+                    setTensionDia(e.target.value);
+                    if (fieldErrors.tensionDia) setFieldErrors(prev => ({ ...prev, tensionDia: '' }));
+                  }}
+                  className={`w-full px-3 py-2 pr-14 text-sm bg-white border rounded-md focus:ring-2 focus:ring-emerald-500 focus:outline-hidden font-mono ${fieldErrors.tensionDia ? 'border-red-400 text-red-900' : 'border-slate-300'}`}
+                  placeholder="80"
+                />
+                <span className="absolute right-3 top-2 text-xs font-semibold text-slate-500">mmHg</span>
               </div>
-              <input
-                type="range"
-                min="0"
-                max="10"
-                value={douleur}
-                onChange={(e) => setDouleur(parseInt(e.target.value, 10))}
-                className="w-full accent-emerald-600 cursor-pointer"
-              />
-              <div className="flex justify-between text-[10px] text-slate-400 px-0.5 mt-1">
-                <span>0 (Nulle)</span>
-                <span>5 (Moyenne)</span>
-                <span>10 (Maximale)</span>
-              </div>
+              {fieldErrors.tensionDia ? (
+                <p className="text-[11px] text-red-600 mt-1">{fieldErrors.tensionDia}</p>
+              ) : (
+                <span className="text-[11px] text-slate-400 mt-1 block">Norme : 60 - 89 mmHg</span>
+              )}
             </div>
           </div>
 
-          {/* BANDEAU DES CALCULS AUTOMATIQUES DU SERVEUR */}
-          <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-4">
-            <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-900 mb-3 flex items-center">
-              <CheckCircle2 className="w-4 h-4 mr-1.5 text-emerald-600" />
-              Calculs physiologiques automatiques (archivés avec la visite)
-            </h4>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {/* Âge calculé */}
-              <div className="bg-white p-3 rounded-lg border border-emerald-200">
-                <span className="text-xs text-slate-500 block">Âge au jour de la visite</span>
-                <span className="text-lg font-bold text-slate-800 font-mono">
-                  {ageCalcule !== null ? `${ageCalcule} ans` : 'N/D'}
-                </span>
-                <span className="text-[11px] text-slate-400 block mt-0.5">Calculé depuis la date de naissance</span>
-              </div>
-
-              {/* PAM */}
-              <div className="bg-white p-3 rounded-lg border border-emerald-200">
-                <span className="text-xs text-slate-500 block">Pression Artérielle Moyenne (PAM)</span>
-                <span className="text-lg font-bold text-slate-800 font-mono">
-                  {pamCalculee !== null ? `${pamCalculee} mmHg` : '—'}
-                </span>
-                <span className="text-[11px] text-slate-400 block mt-0.5">Formule : (Sys + 2×Dia)/3</span>
-              </div>
-
-              {/* IMC */}
-              <div className="bg-white p-3 rounded-lg border border-emerald-200">
-                <span className="text-xs text-slate-500 block">Indice de Masse Corporelle (IMC)</span>
-                <div className="flex items-baseline space-x-2">
-                  <span className="text-lg font-bold text-slate-800 font-mono">
-                    {imcCalcule ? `${imcCalcule.imc} kg/m²` : '—'}
-                  </span>
-                </div>
-                {imcCalcule && (
-                  <span className={`inline-block text-[11px] font-semibold px-2 py-0.5 rounded-full border mt-1 ${imcCalcule.couleur}`}>
-                    {imcCalcule.categorie}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {/* Avertissement de conformité médicale */}
-            <div className="mt-3 flex items-center space-x-2 text-[11px] text-emerald-800 bg-emerald-100/50 p-2.5 rounded-lg border border-emerald-200/60">
-              <ShieldAlert className="w-4 h-4 text-emerald-700 shrink-0" />
-              <span>
-                <strong>Règle de conformité clinique :</strong> L'IMC et sa catégorie OMS constituent un indicateur biométrique calculé d'aide au suivi et <strong>ne constituent pas un diagnostic médical</strong>.
+          {/* Échelle de la douleur complémentaire */}
+          <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-xs font-semibold text-slate-700">Évaluation de la douleur : {douleur}/10</label>
+              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-sm ${
+                douleur === 0 ? 'bg-emerald-100 text-emerald-800' :
+                douleur <= 3 ? 'bg-blue-100 text-blue-800' :
+                douleur <= 6 ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800'
+              }`}>
+                {douleur === 0 ? 'Absente' : douleur <= 3 ? 'Légère' : douleur <= 6 ? 'Modérée' : 'Sévère'}
               </span>
             </div>
+            <input
+              type="range"
+              min="0"
+              max="10"
+              value={douleur}
+              onChange={(e) => setDouleur(parseInt(e.target.value, 10))}
+              className="w-full accent-emerald-600 cursor-pointer"
+            />
+            <div className="flex justify-between text-[10px] text-slate-400 px-0.5 mt-1">
+              <span>0 (Aucune douleur)</span>
+              <span>5 (Douleur modérée)</span>
+              <span>10 (Douleur maximale inimaginable)</span>
+            </div>
+          </div>
+
+          {/* Note sur la traçabilité */}
+          <div className="bg-blue-50/60 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
+            <strong>Traçabilité clinique :</strong> Les 8 constantes saisies (Température en °C, Pouls en bpm, Poids en kg, Taille en cm, SpO₂ en %, Fréquence respiratoire en cycles/min, PAS et PAD distinctes en mmHg) sont archivées de manière permanente avec la visite en cours. La glycémie est réservée au workflow d'analyses de laboratoire.
           </div>
 
           {/* Boutons d'action */}
@@ -430,16 +534,14 @@ export const TriageVitalsModal: React.FC<TriageVitalsModalProps> = ({ visite, on
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-5 py-2 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg transition-colors flex items-center space-x-1.5 shadow-sm disabled:opacity-50"
+              className="px-5 py-2 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg transition-colors flex items-center space-x-1.5 shadow-sm disabled:opacity-50 cursor-pointer"
             >
               {isSubmitting ? (
-                <>
-                  <span>Validation serveur...</span>
-                </>
+                <span>Validation en cours...</span>
               ) : (
                 <>
                   <CheckCircle2 className="w-4 h-4 mr-1" />
-                  <span>Enregistrer le triage & Passer à l'affectation médecin</span>
+                  <span>Enregistrer les constantes & Affecter un médecin</span>
                 </>
               )}
             </button>

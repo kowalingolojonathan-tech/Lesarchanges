@@ -3,18 +3,23 @@ import { Visite, ReceptionDashboardStats, VisiteStatut } from '../../types/index
 import { 
   Users, Activity, Stethoscope, Clock, UserPlus, Search, 
   RefreshCw, CheckCircle2, AlertTriangle, ArrowRight, ShieldCheck,
-  Heart, Thermometer, Scale, ChevronRight
+  Heart, Thermometer, Scale, ChevronRight, FileSearch, Printer, Calendar,
+  Bell, CreditCard
 } from 'lucide-react';
 import { TriageVitalsModal } from './TriageVitalsModal.js';
 import { AssignDoctorModal } from './AssignDoctorModal.js';
 import { NewPatientModal } from './NewPatientModal.js';
+import { InterpretationVisiteModal } from './InterpretationVisiteModal';
+import { ReceptionPrescriptionsModal } from './ReceptionPrescriptionsModal';
+import { ReceptionAppointmentsModal } from './ReceptionAppointmentsModal';
 import { apiFetch } from '../../lib/api';
 
 interface ReceptionDashboardViewProps {
   onGoToSearch: () => void;
+  onGoToCashier?: () => void;
 }
 
-export const ReceptionDashboardView: React.FC<ReceptionDashboardViewProps> = ({ onGoToSearch }) => {
+export const ReceptionDashboardView: React.FC<ReceptionDashboardViewProps> = ({ onGoToSearch, onGoToCashier }) => {
   const [stats, setStats] = useState<ReceptionDashboardStats>({
     total_visites_jour: 0,
     attente_triage: 0,
@@ -32,6 +37,9 @@ export const ReceptionDashboardView: React.FC<ReceptionDashboardViewProps> = ({ 
   const [selectedVisiteForVitals, setSelectedVisiteForVitals] = useState<Visite | null>(null);
   const [selectedVisiteForDoctor, setSelectedVisiteForDoctor] = useState<Visite | null>(null);
   const [showNewPatientModal, setShowNewPatientModal] = useState(false);
+  const [showInterpretationModal, setShowInterpretationModal] = useState(false);
+  const [showPrescriptionsModal, setShowPrescriptionsModal] = useState(false);
+  const [showAppointmentsModal, setShowAppointmentsModal] = useState(false);
 
   // Charger les statistiques et les visites du jour
   const loadData = async () => {
@@ -83,24 +91,27 @@ export const ReceptionDashboardView: React.FC<ReceptionDashboardViewProps> = ({ 
   return (
     <div className="space-y-6">
       {/* Bandeau d'actions rapides et état de synchronisation */}
-      <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-lg font-bold text-slate-800 flex items-center space-x-2">
-            <span>Guichet d'Accueil, Dossiers & Triage</span>
-            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+          <div className="flex items-center space-x-2">
+            <h2 className="text-base sm:text-lg font-bold text-slate-800">
+              Guichet d'Accueil & Triage
+            </h2>
+            <span className="text-[10px] sm:text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
               V1 Opérationnelle
             </span>
-          </h2>
+          </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            Flux clinique continu : Identification du dossier permanent → Visite d'accueil → Signes vitaux (calculs auto) → Affectation praticien.
+            Dossiers permanents, arrivées du jour, prise de constantes et orientation vers les praticiens.
           </p>
         </div>
 
-        <div className="flex items-center space-x-2.5 shrink-0">
+        {/* Boutons d'action sur tablette/desktop */}
+        <div className="hidden md:flex items-center flex-wrap gap-2 shrink-0">
           <button
             onClick={loadData}
             title="Rafraîchir les données"
-            className="p-2 text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+            className="p-2 text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors min-h-[38px] min-w-[38px] flex items-center justify-center"
           >
             <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
           </button>
@@ -110,8 +121,36 @@ export const ReceptionDashboardView: React.FC<ReceptionDashboardViewProps> = ({ 
             className="px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg transition-colors flex items-center space-x-1.5"
           >
             <Search className="w-4 h-4 text-slate-500" />
-            <span>Rechercher Patient / Visite</span>
+            <span>Rechercher Patient</span>
           </button>
+
+          <button
+            onClick={() => setShowPrescriptionsModal(true)}
+            className="px-3.5 py-2 text-xs font-bold text-sky-900 bg-sky-50 border border-sky-300 hover:bg-sky-100 rounded-lg transition-colors flex items-center space-x-1.5 shadow-xs"
+            title="Délivrance et impression des ordonnances"
+          >
+            <Printer className="w-4 h-4 text-sky-700" />
+            <span>Ordonnances</span>
+          </button>
+
+          <button
+            onClick={() => setShowAppointmentsModal(true)}
+            className="px-3.5 py-2 text-xs font-bold text-indigo-900 bg-indigo-50 border border-indigo-300 hover:bg-indigo-100 rounded-lg transition-colors flex items-center space-x-1.5 shadow-xs"
+            title="Planning général des rendez-vous"
+          >
+            <Calendar className="w-4 h-4 text-indigo-700" />
+            <span>Rendez-vous</span>
+          </button>
+
+          {onGoToCashier && (
+            <button
+              onClick={onGoToCashier}
+              className="px-3.5 py-2 text-xs font-bold text-emerald-900 bg-emerald-50 border border-emerald-300 hover:bg-emerald-100 rounded-lg transition-colors flex items-center space-x-1.5 shadow-xs"
+            >
+              <CreditCard className="w-4 h-4 text-emerald-700" />
+              <span>Caisse & Paiements</span>
+            </button>
+          )}
 
           <button
             onClick={() => setShowNewPatientModal(true)}
@@ -119,6 +158,78 @@ export const ReceptionDashboardView: React.FC<ReceptionDashboardViewProps> = ({ 
           >
             <UserPlus className="w-4 h-4" />
             <span>Nouveau Patient</span>
+          </button>
+        </div>
+      </div>
+
+      {/* BLOC ACTIONS RAPIDES MOBILE (Mis en évidence sur téléphone Android - Règle 8) */}
+      <div className="md:hidden bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs space-y-2.5">
+        <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+          <span className="text-xs font-bold uppercase tracking-wider text-slate-700">
+            Actions Réception Rapides
+          </span>
+          <button
+            onClick={loadData}
+            className="p-1 text-slate-500 hover:text-slate-800 rounded"
+            title="Rafraîchir"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {/* 1. Nouveau Patient */}
+          <button
+            onClick={() => setShowNewPatientModal(true)}
+            className="p-3 bg-emerald-700 text-white rounded-xl font-bold text-xs flex flex-col items-center justify-center text-center space-y-1 shadow-xs min-h-[56px] active:scale-95 transition-transform"
+          >
+            <UserPlus className="w-5 h-5" />
+            <span>Nouveau Patient</span>
+          </button>
+
+          {/* 2. Rendez-vous */}
+          <button
+            onClick={() => setShowAppointmentsModal(true)}
+            className="p-3 bg-indigo-50 border border-indigo-200 text-indigo-900 rounded-xl font-bold text-xs flex flex-col items-center justify-center text-center space-y-1 hover:bg-indigo-100 min-h-[56px] active:scale-95 transition-transform"
+          >
+            <Calendar className="w-5 h-5 text-indigo-700" />
+            <span>Rendez-vous</span>
+          </button>
+
+          {/* 3. Arrivées / Recherche */}
+          <button
+            onClick={onGoToSearch}
+            className="p-3 bg-slate-50 border border-slate-200 text-slate-800 rounded-xl font-bold text-xs flex flex-col items-center justify-center text-center space-y-1 hover:bg-slate-100 min-h-[56px] active:scale-95 transition-transform"
+          >
+            <Search className="w-5 h-5 text-slate-600" />
+            <span>Arrivées / Dossiers</span>
+          </button>
+
+          {/* 4. Paiements / Caisse */}
+          <button
+            onClick={onGoToCashier ? onGoToCashier : () => setShowInterpretationModal(true)}
+            className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl font-bold text-xs flex flex-col items-center justify-center text-center space-y-1 hover:bg-emerald-100 min-h-[56px] active:scale-95 transition-transform"
+          >
+            <CreditCard className="w-5 h-5 text-emerald-700" />
+            <span>Paiements / Caisse</span>
+          </button>
+
+          {/* 5. Ordonnances */}
+          <button
+            onClick={() => setShowPrescriptionsModal(true)}
+            className="p-3 bg-sky-50 border border-sky-200 text-sky-900 rounded-xl font-bold text-xs flex flex-col items-center justify-center text-center space-y-1 hover:bg-sky-100 min-h-[56px] active:scale-95 transition-transform"
+          >
+            <Printer className="w-5 h-5 text-sky-700" />
+            <span>Ordonnances</span>
+          </button>
+
+          {/* 6. Notifications */}
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent('open-notifications'))}
+            className="p-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl font-bold text-xs flex flex-col items-center justify-center text-center space-y-1 hover:bg-amber-100 min-h-[56px] active:scale-95 transition-transform"
+          >
+            <Bell className="w-5 h-5 text-amber-700" />
+            <span>Notifications</span>
           </button>
         </div>
       </div>
@@ -255,8 +366,8 @@ export const ReceptionDashboardView: React.FC<ReceptionDashboardViewProps> = ({ 
           </span>
         </div>
 
-        {/* Table responsive */}
-        <div className="overflow-x-auto">
+        {/* Table desktop (hidden sur mobile) */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-100/75 text-slate-600 border-b border-slate-200 font-semibold uppercase tracking-wider text-[10px]">
               <tr>
@@ -293,9 +404,11 @@ export const ReceptionDashboardView: React.FC<ReceptionDashboardViewProps> = ({ 
                         <div className="flex items-center space-x-1 mt-1">
                           <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-sm ${
                             vis.type_visite === 'URGENCE' ? 'bg-rose-100 text-rose-800 border border-rose-200' :
-                            vis.type_visite === 'CONTROLE' ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-700'
+                            vis.type_visite === 'CONTROLE' ? 'bg-blue-100 text-blue-800' :
+                            vis.type_visite === 'INTERPRETATION_RESULTATS' ? 'bg-purple-100 text-purple-900 border border-purple-300 font-bold' :
+                            'bg-slate-100 text-slate-700'
                           }`}>
-                            {vis.type_visite}
+                            {vis.type_visite === 'INTERPRETATION_RESULTATS' ? 'INTERPRÉTATION RÉSULTATS' : vis.type_visite}
                           </span>
                           <span className="font-mono text-[10px] text-slate-400">{vis.numero_visite}</span>
                         </div>
@@ -372,6 +485,18 @@ export const ReceptionDashboardView: React.FC<ReceptionDashboardViewProps> = ({ 
                            vis.statut === 'ATTENTE_MEDECIN' ? 'En attente médecin' : vis.statut}
                         </span>
 
+                        <div className="mt-1">
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                            vis.statut_paiement === 'PAYÉ' 
+                              ? 'bg-emerald-100 text-emerald-800 border-emerald-300' 
+                              : vis.statut_paiement === 'PARTIELLEMENT PAYÉ'
+                              ? 'bg-amber-100 text-amber-800 border-amber-300'
+                              : 'bg-rose-100 text-rose-800 border-rose-300'
+                          }`}>
+                            Paiement : {vis.statut_paiement || 'NON PAYÉ'}
+                          </span>
+                        </div>
+
                         {vis.medecin_nom && (
                           <div className="text-[11px] text-slate-600 mt-1 flex items-center space-x-1">
                             <Stethoscope className="w-3.5 h-3.5 text-purple-600 shrink-0" />
@@ -424,6 +549,146 @@ export const ReceptionDashboardView: React.FC<ReceptionDashboardViewProps> = ({ 
             </tbody>
           </table>
         </div>
+
+        {/* VUE MOBILE : Cartes empilées sans débordement horizontal (Règle 5) */}
+        <div className="md:hidden divide-y divide-slate-200">
+          {filteredVisites.length === 0 ? (
+            <div className="py-10 px-4 text-center text-slate-400">
+              <Clock className="w-8 h-8 mx-auto mb-2 opacity-40 text-slate-400" />
+              <p className="font-semibold text-slate-600 text-sm">Aucune visite dans cette file.</p>
+              <p className="text-xs text-slate-400 mt-1">Utilisez les boutons d'action rapide ci-dessus pour enregistrer une arrivée.</p>
+            </div>
+          ) : (
+            filteredVisites.map((vis) => {
+              const arrivalTime = new Date(vis.date_arrivee).toLocaleTimeString('fr-FR', {
+                hour: '2-digit', minute: '2-digit'
+              });
+
+              return (
+                <div key={vis.id} className="p-4 space-y-3 bg-white">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <span className="font-bold text-slate-900 text-base leading-tight">
+                          {vis.patient_nom} {vis.patient_prenom}
+                        </span>
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-sm ${
+                          vis.patient_sexe === 'M' ? 'bg-blue-100 text-blue-800' : 'bg-rose-100 text-rose-800'
+                        }`}>
+                          {vis.patient_sexe}
+                        </span>
+                      </div>
+                      <div className="flex items-center space-x-2 text-xs text-slate-500 mt-1">
+                        <span className="font-mono font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                          {vis.numero_dossier}
+                        </span>
+                        <span>•</span>
+                        <span>Arrivé à <strong className="text-slate-800 font-mono">{arrivalTime}</strong></span>
+                      </div>
+                    </div>
+
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
+                      vis.type_visite === 'URGENCE' ? 'bg-rose-100 text-rose-800 border border-rose-200' :
+                      vis.type_visite === 'INTERPRETATION_RESULTATS' ? 'bg-purple-100 text-purple-900 border border-purple-300' :
+                      'bg-slate-100 text-slate-700'
+                    }`}>
+                      {vis.type_visite === 'INTERPRETATION_RESULTATS' ? 'INTERPRÉTATION' : vis.type_visite}
+                    </span>
+                  </div>
+
+                  {/* Motif & Constantes */}
+                  <div className="text-xs text-slate-600 bg-slate-50 p-2.5 rounded-lg border border-slate-200/80 space-y-1">
+                    <div>
+                      <span className="text-slate-400">Motif :</span>{' '}
+                      <span className="font-medium text-slate-800">{vis.motif_venue || 'Consultation générale'}</span>
+                    </div>
+
+                    {vis.temperature ? (
+                      <div className="text-[11px] text-slate-700 pt-1.5 border-t border-slate-200/60 flex flex-wrap gap-2">
+                        <span className="font-medium">🌡️ {vis.temperature}°C</span>
+                        <span className="font-medium">🩺 {vis.tension_systolique}/{vis.tension_diastolique} mmHg</span>
+                        <span className="font-medium">💓 {vis.pouls} bpm</span>
+                        {vis.imc && (
+                          <span className="font-mono text-emerald-800 bg-emerald-50 px-1 rounded">
+                            IMC: {vis.imc}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-[11px] text-amber-700 font-medium pt-1">
+                        ⚠️ Constantes non encore saisies
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Badges statut & praticien */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
+                        vis.statut === 'ATTENTE_TRIAGE' ? 'bg-amber-100 text-amber-800 border border-amber-200' :
+                        vis.statut === 'TRIAGE_TERMINE' ? 'bg-blue-100 text-blue-800 border border-blue-200' :
+                        vis.statut === 'ATTENTE_MEDECIN' ? 'bg-purple-100 text-purple-800 border border-purple-200' :
+                        'bg-slate-100 text-slate-700'
+                      }`}>
+                        {vis.statut === 'ATTENTE_TRIAGE' ? 'Attente triage' :
+                         vis.statut === 'TRIAGE_TERMINE' ? 'Triage terminé' :
+                         vis.statut === 'ATTENTE_MEDECIN' ? 'Attente médecin' : vis.statut}
+                      </span>
+
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                        vis.statut_paiement === 'PAYÉ' 
+                          ? 'bg-emerald-100 text-emerald-800 border-emerald-300' 
+                          : 'bg-rose-100 text-rose-800 border-rose-300'
+                      }`}>
+                        {vis.statut_paiement || 'NON PAYÉ'}
+                      </span>
+                    </div>
+
+                    {vis.medecin_nom && (
+                      <span className="text-xs text-slate-700 font-semibold flex items-center gap-1">
+                        <Stethoscope className="w-3.5 h-3.5 text-purple-600" />
+                        Dr. {vis.medecin_nom}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Boutons d'action tactiles pleines largeurs */}
+                  {vis.statut === 'ATTENTE_TRIAGE' && (
+                    <button
+                      onClick={() => setSelectedVisiteForVitals(vis)}
+                      className="w-full py-2.5 px-3 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition-colors flex items-center justify-center space-x-1.5 shadow-xs min-h-[44px]"
+                    >
+                      <Activity className="w-4 h-4" />
+                      <span>Prendre Signes Vitaux (Triage)</span>
+                    </button>
+                  )}
+
+                  {vis.statut === 'TRIAGE_TERMINE' && (
+                    <button
+                      onClick={() => setSelectedVisiteForDoctor(vis)}
+                      className="w-full py-2.5 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-colors flex items-center justify-center space-x-1.5 shadow-xs min-h-[44px]"
+                    >
+                      <Stethoscope className="w-4 h-4" />
+                      <span>Affecter un Médecin</span>
+                    </button>
+                  )}
+
+                  {vis.statut === 'ATTENTE_MEDECIN' && (
+                    <div className="flex items-center justify-between bg-purple-50 p-2.5 rounded-lg border border-purple-200 text-xs">
+                      <span className="font-semibold text-purple-900">En attente d'appel médecin</span>
+                      <button
+                        onClick={() => setSelectedVisiteForDoctor(vis)}
+                        className="text-xs text-purple-700 underline font-semibold p-1"
+                      >
+                        Changer de médecin
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
       </div>
 
       {/* Modals de flux */}
@@ -448,6 +713,34 @@ export const ReceptionDashboardView: React.FC<ReceptionDashboardViewProps> = ({ 
           onClose={() => setShowNewPatientModal(false)}
           onSuccess={() => {
             setShowNewPatientModal(false);
+            loadData();
+          }}
+        />
+      )}
+
+      {showInterpretationModal && (
+        <InterpretationVisiteModal
+          onClose={() => setShowInterpretationModal(false)}
+          onSuccess={() => {
+            setShowInterpretationModal(false);
+            loadData();
+          }}
+        />
+      )}
+
+      {showPrescriptionsModal && (
+        <ReceptionPrescriptionsModal
+          onClose={() => {
+            setShowPrescriptionsModal(false);
+            loadData();
+          }}
+        />
+      )}
+
+      {showAppointmentsModal && (
+        <ReceptionAppointmentsModal
+          onClose={() => {
+            setShowAppointmentsModal(false);
             loadData();
           }}
         />

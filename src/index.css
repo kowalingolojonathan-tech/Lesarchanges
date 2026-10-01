@@ -1,1 +1,32 @@
 @import "tailwindcss";
+
+@media print {
+  /* Masquer toute l'application et les modales superflues */
+  body * {
+    visibility: hidden;
+  }
+
+  /* Afficher uniquement la zone dédiée au document officiel */
+  #printable-document,
+  #printable-document * {
+    visibility: visible;
+  }
+
+  #printable-document {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 1.5cm !important;
+    background: white !important;
+    color: black !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  .no-print,
+  .no-print * {
+    display: none !important;
+  }
+}

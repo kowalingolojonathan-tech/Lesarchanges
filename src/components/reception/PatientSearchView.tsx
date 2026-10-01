@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Patient, Visite } from '../../types/index.js';
-import { Search, UserPlus, FilePlus2, User, Phone, Calendar, Heart, AlertCircle, Clock, ShieldCheck, ArrowRight, Loader2 } from 'lucide-react';
+import { Search, UserPlus, FilePlus2, User, Phone, Calendar, Heart, AlertCircle, Clock, ShieldCheck, ArrowRight, Loader2, FileSearch } from 'lucide-react';
 import { NewPatientModal } from './NewPatientModal.js';
 import { NewVisiteModal } from './NewVisiteModal.js';
+import { InterpretationVisiteModal } from './InterpretationVisiteModal';
 import { apiFetch } from '../../lib/api';
 
 interface PatientSearchViewProps {
@@ -18,10 +19,12 @@ export const PatientSearchView: React.FC<PatientSearchViewProps> = ({ onVisiteCr
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingVisites, setIsLoadingVisites] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [mobileTab, setMobileTab] = useState<'LIST' | 'DOSSIER'>('LIST');
 
   // Modals
   const [showNewPatientModal, setShowNewPatientModal] = useState(false);
   const [showNewVisiteModal, setShowNewVisiteModal] = useState(false);
+  const [showInterpretationModal, setShowInterpretationModal] = useState(false);
 
   // Recherche des patients (debounced ou déclenchée)
   useEffect(() => {
@@ -54,6 +57,7 @@ export const PatientSearchView: React.FC<PatientSearchViewProps> = ({ onVisiteCr
   // Charger les visites du patient sélectionné
   const handleSelectPatient = async (patient: Patient) => {
     setSelectedPatient(patient);
+    setMobileTab('DOSSIER');
     setIsLoadingVisites(true);
     try {
       const res = await apiFetch(`/api/visites?patient_id=${patient.id}`);
@@ -73,6 +77,7 @@ export const PatientSearchView: React.FC<PatientSearchViewProps> = ({ onVisiteCr
     setSelectedPatient(newPatient);
     setSearchTerm(newPatient.numero_dossier);
     setSearchResults([newPatient]);
+    setMobileTab('DOSSIER');
 
     if (createVisiteImmediately) {
       setShowNewVisiteModal(true);
@@ -89,17 +94,17 @@ export const PatientSearchView: React.FC<PatientSearchViewProps> = ({ onVisiteCr
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       {/* Barre d'outils supérieure */}
-      <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-white p-4 sm:p-5 rounded-xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
         <div className="flex-1 relative">
-          <Search className="w-5 h-5 absolute left-3.5 top-3 text-slate-400" />
+          <Search className="w-5 h-5 absolute left-3.5 top-3.5 text-slate-400" />
           <input
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Rechercher par N° Dossier (ex: ARCH-2026-...), Nom, Prénom, Téléphone (+243...) ou Date de naissance..."
-            className="w-full pl-11 pr-4 py-2.5 text-sm bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-hidden transition-all"
+            placeholder="N° Dossier, Nom, Prénom, Tél (+243)..."
+            className="w-full pl-11 pr-10 py-3 text-base sm:text-sm bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-hidden transition-all min-h-[44px]"
           />
           {isLoading && (
             <Loader2 className="w-4 h-4 animate-spin text-emerald-600 absolute right-3.5 top-3.5" />
@@ -108,17 +113,45 @@ export const PatientSearchView: React.FC<PatientSearchViewProps> = ({ onVisiteCr
 
         <button
           onClick={() => setShowNewPatientModal(true)}
-          className="px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold transition-colors flex items-center space-x-2 shadow-xs shrink-0"
+          className="w-full sm:w-auto px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold transition-colors flex items-center justify-center space-x-2 shadow-xs shrink-0 min-h-[44px]"
         >
           <UserPlus className="w-4 h-4" />
-          <span>Créer un Nouveau Patient</span>
+          <span>Nouveau Dossier Patient</span>
         </button>
       </div>
 
+      {/* Onglets tactiles sur écran mobile lorsqu'un patient est sélectionné */}
+      {selectedPatient && (
+        <div className="lg:hidden flex bg-slate-200/80 p-1 rounded-xl gap-1">
+          <button
+            onClick={() => setMobileTab('LIST')}
+            className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all text-center min-h-[40px] flex items-center justify-center space-x-1 ${
+              mobileTab === 'LIST' 
+                ? 'bg-white text-slate-900 shadow-xs' 
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Search className="w-3.5 h-3.5" />
+            <span>Recherche ({searchResults.length})</span>
+          </button>
+          <button
+            onClick={() => setMobileTab('DOSSIER')}
+            className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all text-center min-h-[40px] flex items-center justify-center space-x-1 ${
+              mobileTab === 'DOSSIER' 
+                ? 'bg-emerald-700 text-white shadow-xs' 
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <User className="w-3.5 h-3.5" />
+            <span>Dossier : {selectedPatient.nom}</span>
+          </button>
+        </div>
+      )}
+
       {/* Grille principale : Résultats / Fiche sélectionnée */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Colonne gauche : Liste des résultats (4/12) */}
-        <div className="lg:col-span-5 space-y-4">
+        {/* Colonne gauche : Liste des résultats (5/12) */}
+        <div className={`lg:col-span-5 space-y-4 ${selectedPatient && mobileTab === 'DOSSIER' ? 'hidden lg:block' : 'block'}`}>
           <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
             <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex justify-between items-center">
               <span className="text-xs font-bold uppercase tracking-wider text-slate-700">
@@ -186,22 +219,28 @@ export const PatientSearchView: React.FC<PatientSearchViewProps> = ({ onVisiteCr
         </div>
 
         {/* Colonne droite : Détail du dossier permanent & Historique des visites (7/12) */}
-        <div className="lg:col-span-7 space-y-4">
+        <div className={`lg:col-span-7 space-y-4 ${selectedPatient && mobileTab === 'LIST' ? 'hidden lg:block' : 'block'}`}>
           {selectedPatient ? (
             <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
               {/* Header patient */}
-              <div className="bg-slate-800 text-white p-5 flex flex-col sm:flex-row justify-between sm:items-center gap-4">
+              <div className="bg-slate-800 text-white p-4 sm:p-5 flex flex-col sm:flex-row justify-between sm:items-center gap-4">
                 <div>
+                  <button
+                    onClick={() => setMobileTab('LIST')}
+                    className="lg:hidden text-xs text-emerald-300 hover:text-white flex items-center space-x-1 mb-2 font-medium min-h-[36px]"
+                  >
+                    <span>← Retour à la liste de recherche</span>
+                  </button>
                   <div className="flex items-center space-x-3">
-                    <div className="w-10 h-10 rounded-full bg-emerald-600 flex items-center justify-center font-bold text-base text-white">
+                    <div className="w-10 h-10 rounded-full bg-emerald-600 flex items-center justify-center font-bold text-base text-white shrink-0">
                       {selectedPatient.nom.charAt(0)}{selectedPatient.prenom.charAt(0)}
                     </div>
                     <div>
-                      <h2 className="text-lg font-bold text-white leading-tight">
+                      <h2 className="text-base sm:text-lg font-bold text-white leading-tight">
                         {selectedPatient.nom} {selectedPatient.prenom}
                       </h2>
                       <div className="flex items-center space-x-2 text-xs text-slate-300">
-                        <span>Dossier permanent :</span>
+                        <span>Dossier :</span>
                         <span className="font-mono font-bold text-emerald-300 bg-emerald-950/60 px-2 py-0.5 rounded-sm">
                           {selectedPatient.numero_dossier}
                         </span>
@@ -210,13 +249,23 @@ export const PatientSearchView: React.FC<PatientSearchViewProps> = ({ onVisiteCr
                   </div>
                 </div>
 
-                <button
-                  onClick={() => setShowNewVisiteModal(true)}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-colors flex items-center space-x-1.5 shadow-xs shrink-0 self-start sm:self-auto"
-                >
-                  <FilePlus2 className="w-4 h-4" />
-                  <span>Ouvrir une Nouvelle Visite</span>
-                </button>
+                <div className="flex items-center space-x-2 self-start sm:self-auto shrink-0">
+                  <button
+                    onClick={() => setShowInterpretationModal(true)}
+                    className="px-3.5 py-2 bg-purple-700 hover:bg-purple-800 text-white rounded-lg text-xs font-bold transition-colors flex items-center space-x-1.5 shadow-xs"
+                  >
+                    <FileSearch className="w-4 h-4" />
+                    <span>Interprétation Résultats</span>
+                  </button>
+
+                  <button
+                    onClick={() => setShowNewVisiteModal(true)}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-colors flex items-center space-x-1.5 shadow-xs"
+                  >
+                    <FilePlus2 className="w-4 h-4" />
+                    <span>Ouvrir une Nouvelle Visite</span>
+                  </button>
+                </div>
               </div>
 
               {/* Informations du dossier */}
@@ -356,6 +405,14 @@ export const PatientSearchView: React.FC<PatientSearchViewProps> = ({ onVisiteCr
         <NewVisiteModal
           patient={selectedPatient}
           onClose={() => setShowNewVisiteModal(false)}
+          onSuccess={handleVisiteCreated}
+        />
+      )}
+
+      {showInterpretationModal && selectedPatient && (
+        <InterpretationVisiteModal
+          initialPatient={selectedPatient}
+          onClose={() => setShowInterpretationModal(false)}
           onSuccess={handleVisiteCreated}
         />
       )}

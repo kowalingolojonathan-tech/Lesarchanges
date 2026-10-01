@@ -12,7 +12,18 @@
     "lint": "tsc --noEmit",
     "test:audit": "tsx server/tests/technicalAudit.test.ts",
     "test:phase2a": "tsx server/tests/phase2a.test.ts",
-    "test:phase2b": "tsx server/tests/phase2b.test.ts"
+    "test:phase2b": "tsx server/tests/phase2b.test.ts",
+    "test:phase2c1": "tsx server/tests/phase2c1.test.ts",
+    "test:phase2c2": "tsx server/tests/phase2c2.test.ts",
+    "test:phase2c3": "tsx server/tests/phase2c3.test.ts",
+    "test:etape1": "tsx server/tests/etape1_nouveau_patient.test.ts",
+    "test:etape2": "tsx server/tests/etape2_constantes_reception.test.ts",
+    "test:diagnostic": "tsx server/tests/etape_diagnostic.test.ts",
+    "test:etape5": "tsx server/tests/etape5_temps_attente.test.ts",
+    "test:etape6": "tsx server/tests/etape6_impression_prescription.test.ts",
+    "test:etape7": "tsx server/tests/etape7_rendez_vous.test.ts",
+    "test:etape8": "tsx server/tests/etape8_facturation.test.ts",
+    "test:etape9": "tsx server/tests/etape9_administration.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

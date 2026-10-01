@@ -2,15 +2,7 @@ import { Request, Response } from 'express';
 import crypto from 'crypto';
 import { query, queryOne, execute, transaction } from '../db/database.js';
 import { auditLogger } from '../utils/auditLogger.js';
-
-interface AuthenticatedRequest extends Request {
-  user?: {
-    id: string;
-    username: string;
-    role: string;
-    nom_complet: string;
-  };
-}
+import { AuthenticatedRequest, isDoctorRole } from '../middleware/auth.js';
 
 /**
  * Génère un numéro de dossier permanent unique au format ARCH-YYYY-XXXX
@@ -19,23 +11,32 @@ async function generateUniqueNumeroDossier(): Promise<string> {
   const currentYear = new Date().getFullYear();
   const prefix = `ARCH-${currentYear}-`;
 
-  const lastPatient = await queryOne<{ numero_dossier: string }>(
-    `SELECT numero_dossier FROM patients WHERE numero_dossier LIKE ? ORDER BY numero_dossier DESC LIMIT 1`,
+  const rows = await query<{ numero_dossier: string }>(
+    `SELECT numero_dossier FROM patients WHERE numero_dossier LIKE ?`,
     [`${prefix}%`]
   );
 
-  let nextSequence = 1;
-  if (lastPatient && lastPatient.numero_dossier) {
-    const parts = lastPatient.numero_dossier.split('-');
-    if (parts.length === 3) {
-      const parsedSeq = parseInt(parts[2], 10);
-      if (!isNaN(parsedSeq)) {
-        nextSequence = parsedSeq + 1;
+  let maxSeq = 0;
+  for (const row of rows) {
+    const numPart = row.numero_dossier.replace(prefix, '');
+    if (/^\d+$/.test(numPart)) {
+      const val = parseInt(numPart, 10);
+      if (!isNaN(val) && val > maxSeq) {
+        maxSeq = val;
       }
     }
   }
 
-  return `${prefix}${String(nextSequence).padStart(4, '0')}`;
+  let nextSeq = maxSeq + 1;
+  let candidate = `${prefix}${String(nextSeq).padStart(4, '0')}`;
+
+  // Garantie absolue d'unicité dans la base
+  while (await queryOne('SELECT id FROM patients WHERE numero_dossier = ?', [candidate])) {
+    nextSeq++;
+    candidate = `${prefix}${String(nextSeq).padStart(4, '0')}`;
+  }
+
+  return candidate;
 }
 
 /**
@@ -44,25 +45,30 @@ async function generateUniqueNumeroDossier(): Promise<string> {
  */
 export async function searchPatients(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
-    const { q, numero_dossier, nom, prenom, telephone, date_naissance } = req.query;
+    const { q, query: queryParam, search, numero_dossier, nom, post_nom, prenom, telephone, date_naissance } = req.query;
+    const searchTerm = (q || search || queryParam) as string | undefined;
+    const isReception = req.user?.role === 'RÉCEPTION';
 
-    let sql = `SELECT id, numero_dossier, nom, prenom, date_naissance, sexe, telephone, adresse, 
-                      contact_urgence_nom, contact_urgence_telephone, groupe_sanguin, allergies, antecedents, 
+    let sql = `SELECT id, numero_dossier, nom, post_nom, prenom, date_naissance, sexe, 
+                      lieu_naissance, pays_naissance, profession, etat_civil, telephone, adresse, 
+                      contact_urgence_nom, contact_urgence_telephone, groupe_sanguin,
+                      ${isReception ? 'NULL as allergies, NULL as antecedents' : 'allergies, antecedents'}, 
                       actif, created_at, updated_at 
                FROM patients WHERE actif = 1`;
     const params: (string | number)[] = [];
 
     // Recherche globale rapide par mot-clé
-    if (q && typeof q === 'string' && q.trim().length > 0) {
-      const term = `%${q.trim().toLowerCase()}%`;
+    if (searchTerm && typeof searchTerm === 'string' && searchTerm.trim().length > 0) {
+      const term = `%${searchTerm.trim().toLowerCase()}%`;
       sql += ` AND (
         LOWER(numero_dossier) LIKE ? OR
         LOWER(nom) LIKE ? OR
+        LOWER(COALESCE(post_nom, '')) LIKE ? OR
         LOWER(prenom) LIKE ? OR
         LOWER(telephone) LIKE ? OR
         date_naissance LIKE ?
       )`;
-      params.push(term, term, term, term, term);
+      params.push(term, term, term, term, term, term);
     } else {
       // Filtres ciblés
       if (numero_dossier && typeof numero_dossier === 'string') {
@@ -72,6 +78,10 @@ export async function searchPatients(req: AuthenticatedRequest, res: Response): 
       if (nom && typeof nom === 'string') {
         sql += ` AND LOWER(nom) LIKE ?`;
         params.push(`%${nom.trim().toLowerCase()}%`);
+      }
+      if (post_nom && typeof post_nom === 'string') {
+        sql += ` AND LOWER(COALESCE(post_nom, '')) LIKE ?`;
+        params.push(`%${post_nom.trim().toLowerCase()}%`);
       }
       if (prenom && typeof prenom === 'string') {
         sql += ` AND LOWER(prenom) LIKE ?`;
@@ -85,6 +95,19 @@ export async function searchPatients(req: AuthenticatedRequest, res: Response): 
         sql += ` AND date_naissance = ?`;
         params.push(date_naissance.trim());
       }
+    }
+
+    // ÉTAPE 9 : Par défaut, un médecin ne voit QUE les patients qui lui sont attribués.
+    // Un médecin autorisé par l'administrateur (ex: Directeur ou permission 'patients:voir_tous') peut voir tous les dossiers.
+    const isDoctor = req.user && isDoctorRole(req.user);
+    const hasViewAll = req.user?.role === 'ADMINISTRATEUR' || req.user?.permissions?.includes('patients:voir_tous');
+    if (isDoctor && !hasViewAll && req.user) {
+      sql += ` AND (
+        EXISTS (SELECT 1 FROM visites v WHERE v.patient_id = patients.id AND v.medecin_id = ?)
+        OR EXISTS (SELECT 1 FROM rendez_vous r WHERE r.patient_id = patients.id AND r.medecin_id = ?)
+        OR EXISTS (SELECT 1 FROM consultations c WHERE c.patient_id = patients.id AND c.medecin_id = ?)
+      )`;
+      params.push(req.user.id, req.user.id, req.user.id);
     }
 
     sql += ` ORDER BY updated_at DESC LIMIT 50`;
@@ -101,13 +124,39 @@ export async function searchPatients(req: AuthenticatedRequest, res: Response): 
  * Récupère le dossier administratif d'un patient et l'historique de ses visites
  * GET /api/patients/:id
  * SÉCURITÉ : Cloisonnement strict du secret médical respecté pour le rôle RÉCEPTION.
+ * ÉTAPE 9 : Contrôle d'accès backend pour les médecins non autorisés à voir tous les dossiers.
  */
 export async function getPatientById(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const { id } = req.params;
+    const isReception = req.user?.role === 'RÉCEPTION';
+
+    // Contrôle d'accès médecin attribué
+    const isDoctor = req.user && isDoctorRole(req.user);
+    const hasViewAll = req.user?.role === 'ADMINISTRATEUR' || req.user?.permissions?.includes('patients:voir_tous');
+    if (isDoctor && !hasViewAll && req.user) {
+      const isAttributed = await queryOne(
+        `SELECT 1 FROM patients p
+         WHERE p.id = ? AND (
+           EXISTS (SELECT 1 FROM visites v WHERE v.patient_id = p.id AND v.medecin_id = ?)
+           OR EXISTS (SELECT 1 FROM rendez_vous r WHERE r.patient_id = p.id AND r.medecin_id = ?)
+           OR EXISTS (SELECT 1 FROM consultations c WHERE c.patient_id = p.id AND c.medecin_id = ?)
+         )`,
+        [id, req.user.id, req.user.id, req.user.id]
+      );
+      if (!isAttributed) {
+        res.status(403).json({
+          error: "Accès refusé. Par défaut, un médecin ne voit que les patients qui lui sont attribués."
+        });
+        return;
+      }
+    }
+
     const patient = await queryOne(
-      `SELECT id, numero_dossier, nom, prenom, date_naissance, sexe, telephone, adresse, 
-              contact_urgence_nom, contact_urgence_telephone, groupe_sanguin, allergies, antecedents, 
+      `SELECT id, numero_dossier, nom, post_nom, prenom, date_naissance, sexe, 
+              lieu_naissance, pays_naissance, profession, etat_civil, telephone, adresse, 
+              contact_urgence_nom, contact_urgence_telephone, groupe_sanguin,
+              ${isReception ? 'NULL as allergies, NULL as antecedents' : 'allergies, antecedents'}, 
               actif, created_at, updated_at 
        FROM patients WHERE id = ? AND actif = 1`,
       [id]
@@ -121,8 +170,9 @@ export async function getPatientById(req: AuthenticatedRequest, res: Response): 
     // Historique des visites du patient (métadonnées administratives autorisées pour la réception)
     const visites = await query(
       `SELECT v.id, v.numero_visite, v.patient_id, v.medecin_id, v.date_arrivee, v.statut, 
-              v.motif_venue, v.type_visite, v.cloturee_le, v.created_at,
-              u.nom_complet as medecin_nom
+              v.motif_venue, v.type_visite, v.cloturee_le, v.heure_orientation, 
+              v.heure_prise_en_charge, v.heure_debut_consultation, v.heure_fin_consultation,
+              v.created_at, u.nom_complet as medecin_nom
        FROM visites v
        LEFT JOIN users u ON v.medecin_id = u.id
        WHERE v.patient_id = ? AND v.actif = 1
@@ -146,9 +196,14 @@ export async function createPatient(req: AuthenticatedRequest, res: Response): P
   try {
     const {
       nom,
+      post_nom,
       prenom,
       date_naissance,
       sexe,
+      lieu_naissance,
+      pays_naissance,
+      profession,
+      etat_civil,
       telephone,
       adresse,
       contact_urgence_nom,
@@ -158,13 +213,25 @@ export async function createPatient(req: AuthenticatedRequest, res: Response): P
       antecedents,
     } = req.body;
 
-    // 1. Validations obligatoires
+    // 1. Validations obligatoires d'identité (Les 5 champs obligatoires stricts)
     if (!nom || typeof nom !== 'string' || nom.trim().length === 0) {
       res.status(400).json({ error: 'Le nom du patient est obligatoire.' });
       return;
     }
+    if (!post_nom || typeof post_nom !== 'string' || post_nom.trim().length === 0) {
+      res.status(400).json({ error: 'Le post-nom du patient est obligatoire.' });
+      return;
+    }
     if (!prenom || typeof prenom !== 'string' || prenom.trim().length === 0) {
       res.status(400).json({ error: 'Le prénom du patient est obligatoire.' });
+      return;
+    }
+    if (!lieu_naissance || typeof lieu_naissance !== 'string' || lieu_naissance.trim().length === 0) {
+      res.status(400).json({ error: 'Le lieu de naissance du patient est obligatoire.' });
+      return;
+    }
+    if (!pays_naissance || typeof pays_naissance !== 'string' || pays_naissance.trim().length === 0) {
+      res.status(400).json({ error: 'Le pays de naissance du patient est obligatoire.' });
       return;
     }
     if (!date_naissance || isNaN(new Date(date_naissance).getTime())) {
@@ -181,21 +248,27 @@ export async function createPatient(req: AuthenticatedRequest, res: Response): P
     }
 
     const cleanNom = nom.trim().toUpperCase();
+    const cleanPostNom = post_nom.trim().toUpperCase();
     const cleanPrenom = prenom.trim();
     const cleanDateNaissance = date_naissance.trim();
     const cleanTelephone = telephone.trim();
+    const cleanLieuNaissance = lieu_naissance.trim();
+    const cleanPaysNaissance = pays_naissance.trim();
+    const cleanProfession = profession ? profession.trim() : null;
+    const cleanEtatCivil = etat_civil ? etat_civil.trim() : null;
 
     // 2. Détection de doublon
     // Un patient existant avec même nom, prénom, date de naissance et téléphone ne doit pas être dupliqué !
     const existingDuplicate = await queryOne(
-      `SELECT id, numero_dossier, nom, prenom, telephone, date_naissance 
+      `SELECT id, numero_dossier, nom, post_nom, prenom, telephone, date_naissance 
        FROM patients 
        WHERE LOWER(nom) = LOWER(?) 
+         AND (LOWER(COALESCE(post_nom, '')) = LOWER(?) OR ? = '' OR post_nom IS NULL)
          AND LOWER(prenom) = LOWER(?) 
          AND date_naissance = ? 
          AND telephone = ? 
          AND actif = 1`,
-      [cleanNom, cleanPrenom, cleanDateNaissance, cleanTelephone]
+      [cleanNom, cleanPostNom, cleanPostNom, cleanPrenom, cleanDateNaissance, cleanTelephone]
     );
 
     if (existingDuplicate) {
@@ -203,6 +276,7 @@ export async function createPatient(req: AuthenticatedRequest, res: Response): P
         error: 'DUPLICATE_PATIENT',
         message: `Un dossier patient permanent existe déjà pour cette personne (Dossier N° ${existingDuplicate.numero_dossier}). Ne pas créer de nouveau patient : réutiliser le dossier existant.`,
         patient: existingDuplicate,
+        existingDossier: existingDuplicate.numero_dossier,
       });
       return;
     }
@@ -214,17 +288,24 @@ export async function createPatient(req: AuthenticatedRequest, res: Response): P
 
     await execute(
       `INSERT INTO patients (
-        id, numero_dossier, nom, prenom, date_naissance, sexe, telephone, adresse,
-        contact_urgence_nom, contact_urgence_telephone, groupe_sanguin, allergies, antecedents,
+        id, numero_dossier, nom, post_nom, prenom, date_naissance, sexe, 
+        lieu_naissance, pays_naissance, profession, etat_civil,
+        telephone, adresse, contact_urgence_nom, contact_urgence_telephone, 
+        groupe_sanguin, allergies, antecedents,
         actif, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
       [
         patientId,
         numeroDossier,
         cleanNom,
+        cleanPostNom,
         cleanPrenom,
         cleanDateNaissance,
         sexe.toUpperCase(),
+        cleanLieuNaissance,
+        cleanPaysNaissance,
+        cleanProfession,
+        cleanEtatCivil,
         cleanTelephone,
         adresse ? adresse.trim() : null,
         contact_urgence_nom ? contact_urgence_nom.trim() : null,
@@ -246,17 +327,19 @@ export async function createPatient(req: AuthenticatedRequest, res: Response): P
       details: JSON.stringify({
         numero_dossier: numeroDossier,
         nom: cleanNom,
+        post_nom: cleanPostNom,
         prenom: cleanPrenom,
         sexe: sexe.toUpperCase(),
+        telephone: cleanTelephone,
       }),
-      ipAddress: req.ip || req.socket.remoteAddress || '127.0.0.1',
+      ipAddress: req.ip || req.socket?.remoteAddress || '127.0.0.1',
     });
 
     const createdPatient = await queryOne('SELECT * FROM patients WHERE id = ?', [patientId]);
     res.status(201).json({ patient: createdPatient });
   } catch (error: any) {
     console.error('Erreur création patient:', error);
-    res.status(500).json({ error: 'Erreur interne lors de la création du dossier patient' });
+    res.status(500).json({ error: 'Erreur interne lors de la création du patient' });
   }
 }
 
@@ -268,6 +351,11 @@ export async function updatePatient(req: AuthenticatedRequest, res: Response): P
   try {
     const { id } = req.params;
     const {
+      post_nom,
+      lieu_naissance,
+      pays_naissance,
+      profession,
+      etat_civil,
       telephone,
       adresse,
       contact_urgence_nom,
@@ -286,7 +374,12 @@ export async function updatePatient(req: AuthenticatedRequest, res: Response): P
     const nowIso = new Date().toISOString();
     await execute(
       `UPDATE patients 
-       SET telephone = COALESCE(?, telephone),
+       SET post_nom = COALESCE(?, post_nom),
+           lieu_naissance = COALESCE(?, lieu_naissance),
+           pays_naissance = COALESCE(?, pays_naissance),
+           profession = COALESCE(?, profession),
+           etat_civil = COALESCE(?, etat_civil),
+           telephone = COALESCE(?, telephone),
            adresse = COALESCE(?, adresse),
            contact_urgence_nom = COALESCE(?, contact_urgence_nom),
            contact_urgence_telephone = COALESCE(?, contact_urgence_telephone),
@@ -296,13 +389,18 @@ export async function updatePatient(req: AuthenticatedRequest, res: Response): P
            updated_at = ?
        WHERE id = ?`,
       [
-        telephone ? telephone.trim() : null,
-        adresse ? adresse.trim() : null,
-        contact_urgence_nom ? contact_urgence_nom.trim() : null,
-        contact_urgence_telephone ? contact_urgence_telephone.trim() : null,
-        groupe_sanguin ? groupe_sanguin.trim().toUpperCase() : null,
-        allergies ? allergies.trim() : null,
-        antecedents ? antecedents.trim() : null,
+        post_nom !== undefined ? (post_nom ? post_nom.trim().toUpperCase() : null) : null,
+        lieu_naissance !== undefined ? (lieu_naissance ? lieu_naissance.trim() : null) : null,
+        pays_naissance !== undefined ? (pays_naissance ? pays_naissance.trim() : null) : null,
+        profession !== undefined ? (profession ? profession.trim() : null) : null,
+        etat_civil !== undefined ? (etat_civil ? etat_civil.trim() : null) : null,
+        telephone !== undefined ? (telephone ? telephone.trim() : null) : null,
+        adresse !== undefined ? (adresse ? adresse.trim() : null) : null,
+        contact_urgence_nom !== undefined ? (contact_urgence_nom ? contact_urgence_nom.trim() : null) : null,
+        contact_urgence_telephone !== undefined ? (contact_urgence_telephone ? contact_urgence_telephone.trim() : null) : null,
+        groupe_sanguin !== undefined ? (groupe_sanguin ? groupe_sanguin.trim().toUpperCase() : null) : null,
+        allergies !== undefined ? (allergies ? allergies.trim() : null) : null,
+        antecedents !== undefined ? (antecedents ? antecedents.trim() : null) : null,
         nowIso,
         id,
       ]
@@ -314,7 +412,7 @@ export async function updatePatient(req: AuthenticatedRequest, res: Response): P
       ressourceType: 'PATIENT',
       ressourceId: id,
       details: JSON.stringify({ numero_dossier: patient.numero_dossier }),
-      ipAddress: req.ip || req.socket.remoteAddress || '127.0.0.1',
+      ipAddress: req.ip || req.socket?.remoteAddress || '127.0.0.1',
     });
 
     const updated = await queryOne('SELECT * FROM patients WHERE id = ?', [id]);

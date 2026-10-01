@@ -19,12 +19,22 @@ export interface VitalsInput {
   douleur?: number | null;
 }
 
+export interface VitalAlert {
+  type: 'TEMPERATURE' | 'SPO2' | 'POULS' | 'TENSION' | 'FREQUENCE_RESPIRATOIRE';
+  niveau: 'INFO' | 'ATTENTION' | 'CRITIQUE';
+  message: string;
+}
+
 export interface CalculatedVitals {
   age_calcule?: number;
   imc?: number | null;
   categorie_imc?: string | null;
   pam?: number | null;
+  pam_interpretation?: string | null;
+  surface_corporelle?: number | null;
+  pression_pulsee?: number | null;
   taille_normalisee_cm?: number | null;
+  alertes?: VitalAlert[];
 }
 
 export interface VitalsValidationResult {
@@ -52,7 +62,7 @@ export function calculateAge(dateNaissanceStr: string, referenceDate: Date = new
 
 /**
  * Calcule la Pression Artérielle Moyenne (PAM / MAP) en mmHg
- * Formule médicale standard : PAM = (Systolique + 2 * Diastolique) / 3
+ * Formule médicale standard : PAM = PAD + (PAS - PAD) / 3 = (PAS + 2 * PAD) / 3
  */
 export function calculatePAM(systolique: number, diastolique: number): number {
   const pam = (systolique + 2 * diastolique) / 3;
@@ -60,10 +70,48 @@ export function calculatePAM(systolique: number, diastolique: number): number {
 }
 
 /**
- * Calcule l'IMC (Indice de Masse Corporelle) en kg/m² et sa catégorie descriptive (OMS)
- * Mention obligatoire : Indicateur calculé informatif, non diagnostique.
+ * Interprétation clinique de la Pression Artérielle Moyenne
  */
-export function calculateIMC(poidsKg: number, tailleCm: number): { imc: number; categorie: string } {
+export function interpretPAM(pam: number): { statut: 'BASSE' | 'NORMALE' | 'ELEVEE'; message: string } {
+  if (pam < 70) {
+    return { statut: 'BASSE', message: 'PAM basse (< 70 mmHg) : Risque d’hypoperfusion tissulaire' };
+  } else if (pam <= 105) {
+    return { statut: 'NORMALE', message: 'PAM normale (70 - 105 mmHg)' };
+  } else {
+    return { statut: 'ELEVEE', message: 'PAM élevée (> 105 mmHg)' };
+  }
+}
+
+/**
+ * Calcule la Pression Pulsée (PP) en mmHg
+ * Formule : PP = PAS - PAD
+ */
+export function calculatePressionPulsee(systolique: number, diastolique: number): number {
+  return Math.round(systolique - diastolique);
+}
+
+/**
+ * Calcule la Surface Corporelle (BSA) en m² selon la formule de Mosteller
+ * Formule : RacineCarrée( (Taille en cm * Poids en kg) / 3600 )
+ */
+export function calculateSurfaceCorporelle(poidsKg: number, tailleCm: number): number {
+  if (tailleCm <= 0 || poidsKg <= 0) {
+    throw new Error('Poids et taille doivent être supérieurs à zéro pour le calcul de la surface corporelle');
+  }
+  const bsa = Math.sqrt((tailleCm * poidsKg) / 3600);
+  return Math.round(bsa * 100) / 100;
+}
+
+/**
+ * Calcule l'IMC (Indice de Masse Corporelle) en kg/m² et sa catégorie descriptive (OMS)
+ * Règle impérative : distinction stricte Adulte (>= 18 ans) vs Pédiatrie (< 18 ans).
+ */
+export function calculateIMC(
+  poidsKg: number, 
+  tailleCm: number, 
+  age?: number, 
+  sexe?: string
+): { imc: number; categorie: string } {
   if (tailleCm <= 0 || poidsKg <= 0) {
     throw new Error('Poids et taille doivent être supérieurs à zéro pour le calcul de l\'IMC');
   }
@@ -72,6 +120,16 @@ export function calculateIMC(poidsKg: number, tailleCm: number): { imc: number; 
   const imcRaw = poidsKg / (tailleM * tailleM);
   const imc = Math.round(imcRaw * 10) / 10;
 
+  // Cas Pédiatrique (< 18 ans) : Ne jamais appliquer les seuils adultes
+  if (age !== undefined && age < 18) {
+    let categorie = 'Interprétation pédiatrique requise selon les courbes OMS âge/sexe.';
+    if (!sexe || (sexe !== 'M' && sexe !== 'F')) {
+      categorie = 'Interprétation pédiatrique requise — sexe manquant pour courbes OMS.';
+    }
+    return { imc, categorie };
+  }
+
+  // Cas Adulte (>= 18 ans ou âge non renseigné)
   let categorie = 'Poids normal';
   if (imc < 18.5) {
     categorie = 'Insuffisance pondérale';
@@ -91,11 +149,80 @@ export function calculateIMC(poidsKg: number, tailleCm: number): { imc: number; 
 }
 
 /**
+ * Génère les alertes cliniques sur les constantes physiologiques
+ */
+export function generateVitalsAlerts(input: VitalsInput, age?: number): VitalAlert[] {
+  const alerts: VitalAlert[] = [];
+
+  // Température
+  if (input.temperature !== undefined && input.temperature !== null) {
+    const t = Number(input.temperature);
+    if (t >= 39.5) {
+      alerts.push({ type: 'TEMPERATURE', niveau: 'CRITIQUE', message: `Hyperthermie majeure (${t}°C) — Alerte vitale` });
+    } else if (t >= 38.0) {
+      alerts.push({ type: 'TEMPERATURE', niveau: 'ATTENTION', message: `Fièvre (${t}°C) — Valeur à surveiller` });
+    } else if (t < 35.5) {
+      alerts.push({ type: 'TEMPERATURE', niveau: 'ATTENTION', message: `Hypothermie (${t}°C) — Valeur à surveiller` });
+    }
+  }
+
+  // SpO2
+  if (input.spo2 !== undefined && input.spo2 !== null) {
+    const s = Number(input.spo2);
+    if (s < 90) {
+      alerts.push({ type: 'SPO2', niveau: 'CRITIQUE', message: `Désaturation critique (${s}%) — Alerte vitale` });
+    } else if (s < 95) {
+      alerts.push({ type: 'SPO2', niveau: 'ATTENTION', message: `Hypoxie modérée (${s}%) — Valeur à surveiller` });
+    }
+  }
+
+  // Pouls (FC)
+  if (input.pouls !== undefined && input.pouls !== null) {
+    const p = Number(input.pouls);
+    if (p > 120) {
+      alerts.push({ type: 'POULS', niveau: 'ATTENTION', message: `Tachycardie marquée (${p} bpm) — Valeur à surveiller` });
+    } else if (p > 100) {
+      alerts.push({ type: 'POULS', niveau: 'ATTENTION', message: `Tachycardie (${p} bpm) — Valeur à surveiller` });
+    } else if (p < 50) {
+      alerts.push({ type: 'POULS', niveau: 'ATTENTION', message: `Bradycardie (${p} bpm) — Valeur à surveiller` });
+    }
+  }
+
+  // Tension artérielle
+  if (input.tension_systolique !== undefined && input.tension_systolique !== null) {
+    const sys = Number(input.tension_systolique);
+    const dia = input.tension_diastolique ? Number(input.tension_diastolique) : 0;
+    if (sys >= 180 || dia >= 110) {
+      alerts.push({ type: 'TENSION', niveau: 'CRITIQUE', message: `Crise hypertensive possible (${sys}/${dia} mmHg) — Alerte vitale` });
+    } else if (sys >= 140 || dia >= 90) {
+      alerts.push({ type: 'TENSION', niveau: 'ATTENTION', message: `Tension artérielle élevée (${sys}/${dia} mmHg) — Valeur à surveiller` });
+    } else if (sys < 90) {
+      alerts.push({ type: 'TENSION', niveau: 'ATTENTION', message: `Hypotension artérielle (${sys}/${dia} mmHg) — Valeur à surveiller` });
+    }
+  }
+
+  // Fréquence respiratoire
+  if (input.frequence_respiratoire !== undefined && input.frequence_respiratoire !== null) {
+    const fr = Number(input.frequence_respiratoire);
+    if (fr > 30) {
+      alerts.push({ type: 'FREQUENCE_RESPIRATOIRE', niveau: 'CRITIQUE', message: `Tachypnée sévère (${fr} cpm) — Alerte vitale` });
+    } else if (fr > 24) {
+      alerts.push({ type: 'FREQUENCE_RESPIRATOIRE', niveau: 'ATTENTION', message: `Polypnée (${fr} cpm) — Valeur à surveiller` });
+    } else if (fr < 10) {
+      alerts.push({ type: 'FREQUENCE_RESPIRATOIRE', niveau: 'ATTENTION', message: `Bradypnée (${fr} cpm) — Valeur à surveiller` });
+    }
+  }
+
+  return alerts;
+}
+
+/**
  * Validation physiologique rigoureuse côté serveur des constantes biométriques
  */
 export function validateAndComputeVitals(
   input: VitalsInput,
-  dateNaissanceStr?: string
+  dateNaissanceStr?: string,
+  sexe?: string
 ): VitalsValidationResult {
   const errors: string[] = [];
   const calculated: CalculatedVitals = {};
@@ -146,6 +273,8 @@ export function validateAndComputeVitals(
       errors.push('Incohérence tensionnelle : la pression systolique doit être strictement supérieure à la diastolique.');
     } else {
       calculated.pam = calculatePAM(sys, dia);
+      calculated.pam_interpretation = interpretPAM(calculated.pam).message;
+      calculated.pression_pulsee = calculatePressionPulsee(sys, dia);
     }
   }
 
@@ -187,47 +316,36 @@ export function validateAndComputeVitals(
   }
 
   if (input.taille !== undefined && input.taille !== null) {
-    let h = Number(input.taille);
+    const h = Number(input.taille);
     if (isNaN(h) || h <= 0) {
       errors.push('Taille invalide.');
+    } else if (h < 30 || h > 250) {
+      errors.push('Taille invalide : la valeur doit être comprise entre 30 et 250 cm (ne pas saisir en mètres).');
     } else {
-      // Normaliser si saisie en mètres (ex: 1.75 -> 175 cm)
-      if (h <= 2.5) {
-        h = h * 100;
-      }
-      if (h < 30 || h > 250) {
-        errors.push('Taille invalide (plage autorisée : 30 cm à 250 cm).');
-      } else {
-        tailleCmVal = Math.round(h * 10) / 10;
-        calculated.taille_normalisee_cm = tailleCmVal;
-      }
+      tailleCmVal = Math.round(h * 10) / 10;
+      calculated.taille_normalisee_cm = tailleCmVal;
     }
   }
 
-  // Calcul automatique de l'IMC si poids et taille présents
+  // Calcul automatique de l'IMC et de la Surface Corporelle si poids et taille présents
   if (poidsVal !== null && tailleCmVal !== null && tailleCmVal > 0) {
     try {
-      const imcResult = calculateIMC(poidsVal, tailleCmVal);
+      const imcResult = calculateIMC(poidsVal, tailleCmVal, calculated.age_calcule, sexe);
       calculated.imc = imcResult.imc;
       calculated.categorie_imc = imcResult.categorie;
+      calculated.surface_corporelle = calculateSurfaceCorporelle(poidsVal, tailleCmVal);
     } catch {
-      errors.push('Impossible de calculer l\'IMC avec les mesures fournies.');
+      errors.push('Impossible de calculer l\'IMC ou la surface corporelle avec les mesures fournies.');
     }
   }
 
-  // 8. Glycémie (g/L) : 0.2 à 40.0 g/L (ou mg/dL si > 40 converti)
+  // 8. Glycémie (g/L) : 0.2 à 40.0 g/L
   if (input.glycemie_mesuree !== undefined && input.glycemie_mesuree !== null) {
-    let gly = Number(input.glycemie_mesuree);
+    const gly = Number(input.glycemie_mesuree);
     if (isNaN(gly) || gly <= 0) {
       errors.push('Valeur de glycémie invalide.');
-    } else {
-      // Si la glycémie a été saisie en mg/dL (ex: 110 mg/dL -> 1.10 g/L)
-      if (gly > 40) {
-        gly = Math.round((gly / 100) * 100) / 100;
-      }
-      if (gly < 0.2 || gly > 40.0) {
-        errors.push('Glycémie manifestement invalide (plage autorisée : 0.20 g/L à 40.0 g/L).');
-      }
+    } else if (gly < 0.2 || gly > 40.0) {
+      errors.push('Glycémie manifestement invalide (plage autorisée : 0.20 g/L à 40.0 g/L).');
     }
   }
 
@@ -238,6 +356,9 @@ export function validateAndComputeVitals(
       errors.push('Échelle de douleur invalide (doit être un entier compris entre 0 et 10).');
     }
   }
+
+  // 10. Alertes cliniques
+  calculated.alertes = generateVitalsAlerts(input, calculated.age_calcule);
 
   return {
     isValid: errors.length === 0,
