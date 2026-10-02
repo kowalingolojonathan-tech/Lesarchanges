@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Patient, Visite, VisiteType, PrestationTarif } from '../../types/index.js';
-import { FilePlus2, X, AlertCircle, CheckCircle2, ShieldCheck, Tag, Coins } from 'lucide-react';
+import { FilePlus2, X, AlertCircle, CheckCircle2, ShieldCheck, Tag, Coins, CreditCard, Banknote, Receipt } from 'lucide-react';
 import { apiFetch } from '../../lib/api';
 import { InterpretationVisiteModal } from './InterpretationVisiteModal';
 
@@ -20,6 +20,14 @@ export const NewVisiteModal: React.FC<NewVisiteModalProps> = ({ patient, onClose
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Paramètres d'encaissement direct au guichet (Rôle Réception = Caisse)
+  const [typeEncaissement, setTypeEncaissement] = useState<'COMPLET' | 'PARTIEL' | 'NON_PAYE'>('COMPLET');
+  const [devisePaiement, setDevisePaiement] = useState<'USD' | 'FC'>('USD');
+  const [modePaiement, setModePaiement] = useState<'ESPECES' | 'MOBILE_MONEY' | 'CARTE_BANCAIRE'>('ESPECES');
+  const [montantPayeCustom, setMontantPayeCustom] = useState<string>('');
+  const [montantRecuClient, setMontantRecuClient] = useState<string>('');
+  const [motifNonPaiement, setMotifNonPaiement] = useState<string>('');
+
   const scrollAreaRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -34,21 +42,27 @@ export const NewVisiteModal: React.FC<NewVisiteModalProps> = ({ patient, onClose
       try {
         const [tarifsRes, rateRes] = await Promise.all([
           apiFetch('/api/tarifs?actif=true'),
-          apiFetch('/api/settings/exchange-rate')
+          apiFetch('/api/billing/exchange-rate')
         ]);
 
         if (tarifsRes.ok) {
-          const tData = await tarifsRes.json();
-          setTarifs(tData.tarifs || []);
-          const defConsult = (tData.tarifs || []).find((t: PrestationTarif) => t.id === 'tar-csl-01' || t.nom.toLowerCase().includes('consultation'));
-          if (defConsult) {
-            setSelectedTarifId(defConsult.id);
+          const contentType = tarifsRes.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            const tData = await tarifsRes.json();
+            setTarifs(tData.tarifs || []);
+            const defConsult = (tData.tarifs || []).find((t: PrestationTarif) => t.id === 'tar-csl-01' || t.nom.toLowerCase().includes('consultation'));
+            if (defConsult) {
+              setSelectedTarifId(defConsult.id);
+            }
           }
         }
 
         if (rateRes.ok) {
-          const rData = await rateRes.json();
-          if (rData.rate) setExchangeRate(rData.rate);
+          const contentType = rateRes.headers.get('content-type') || '';
+          if (contentType.includes('application/json')) {
+            const rData = await rateRes.json();
+            if (rData.rate) setExchangeRate(rData.rate);
+          }
         }
       } catch (err) {
         console.error('Erreur chargement tarifs:', err);
@@ -66,6 +80,21 @@ export const NewVisiteModal: React.FC<NewVisiteModalProps> = ({ patient, onClose
 
   const prixUsd = selectedTarif ? Number(selectedTarif.prix_usd) : 20;
   const prixFc = Math.round(prixUsd * exchangeRate);
+
+  // Montant effectif à régler selon option
+  const montantPayeNum = montantPayeCustom !== '' 
+    ? parseFloat(montantPayeCustom) 
+    : (devisePaiement === 'USD' ? prixUsd : prixFc);
+
+  // Calcul du solde restant et rendu de monnaie
+  const totalDueInDevise = devisePaiement === 'USD' ? prixUsd : prixFc;
+  const soldeRestantUsd = typeEncaissement === 'PARTIEL' 
+    ? Math.max(0, prixUsd - (devisePaiement === 'USD' ? (montantPayeNum || 0) : (montantPayeNum || 0) / exchangeRate))
+    : (typeEncaissement === 'NON_PAYE' ? prixUsd : 0);
+
+  const monnaieRendue = montantRecuClient && !isNaN(parseFloat(montantRecuClient))
+    ? Math.max(0, parseFloat(montantRecuClient) - montantPayeNum)
+    : null;
 
   if (showInterpretation) {
     return (
@@ -99,6 +128,12 @@ export const NewVisiteModal: React.FC<NewVisiteModalProps> = ({ patient, onClose
     setIsSubmitting(true);
     setErrorMessage(null);
 
+    if (typeEncaissement === 'NON_PAYE' && (!motifNonPaiement || motifNonPaiement.trim().length < 4)) {
+      setErrorMessage('Un motif explicite est strictement obligatoire pour déroger au paiement immédiat (ex: Urgence vitale).');
+      setIsSubmitting(false);
+      return;
+    }
+
     try {
       const res = await apiFetch('/api/visites', {
         method: 'POST',
@@ -108,7 +143,13 @@ export const NewVisiteModal: React.FC<NewVisiteModalProps> = ({ patient, onClose
           motif_venue: motifVenue,
           type_visite: typeVisite,
           tarif_id: selectedTarifId,
-          create_facture: true
+          create_facture: true,
+          reglement_immediat: true,
+          type_encaissement: typeEncaissement,
+          montant_paye: typeEncaissement === 'NON_PAYE' ? 0 : montantPayeNum,
+          devise: devisePaiement,
+          mode_paiement: modePaiement,
+          motif_non_paiement: typeEncaissement === 'NON_PAYE' ? motifNonPaiement.trim() : undefined
         }),
       });
 
@@ -137,8 +178,8 @@ export const NewVisiteModal: React.FC<NewVisiteModalProps> = ({ patient, onClose
               <FilePlus2 className="w-5 h-5 text-emerald-400" />
             </div>
             <div>
-              <h3 className="text-base font-bold">Nouvelle Visite d'Accueil</h3>
-              <p className="text-xs text-slate-300">Épisode de soin du jour — Statut initial : ATTENTE_TRIAGE</p>
+              <h3 className="text-base font-bold">Nouvelle Visite & Encaissement</h3>
+              <p className="text-xs text-slate-300">Guichet Réception faisant office de Caisse Centrale</p>
             </div>
           </div>
           <button 
@@ -240,15 +281,15 @@ export const NewVisiteModal: React.FC<NewVisiteModalProps> = ({ patient, onClose
               </div>
             </div>
 
-            {/* Prestation & Facturation liée automatique */}
-            <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3.5 space-y-2">
+            {/* Prestation & Tarif */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 space-y-2">
               <div className="flex items-center justify-between text-xs">
-                <span className="font-bold text-emerald-950 flex items-center space-x-1.5">
+                <span className="font-bold text-slate-800 flex items-center space-x-1.5">
                   <Tag className="w-3.5 h-3.5 text-emerald-700" />
-                  <span>Prestation & Facturation Liée</span>
+                  <span>Prestation à Facturer</span>
                 </span>
-                <span className="text-[11px] font-mono text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-sm font-semibold">
-                  Taux : 1 $ = {exchangeRate.toLocaleString('fr-FR')} FC
+                <span className="text-[11px] font-mono text-emerald-800 bg-emerald-100/70 px-2 py-0.5 rounded-sm font-semibold">
+                  Taux officiel : 1 $ = {exchangeRate.toLocaleString('fr-FR')} FC
                 </span>
               </div>
 
@@ -262,7 +303,7 @@ export const NewVisiteModal: React.FC<NewVisiteModalProps> = ({ patient, onClose
                       setMotifVenue(selected.nom);
                     }
                   }}
-                  className="w-full px-3 py-2 text-xs bg-white border border-emerald-300 rounded-md focus:ring-2 focus:ring-emerald-500 focus:outline-hidden font-medium text-slate-800"
+                  className="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-md focus:ring-2 focus:ring-emerald-500 focus:outline-hidden font-medium text-slate-800"
                 >
                   {tarifs
                     .filter(t => t.categorie === 'CONSULTATION' || t.categorie === 'TYPE_VISITE')
@@ -274,17 +315,189 @@ export const NewVisiteModal: React.FC<NewVisiteModalProps> = ({ patient, onClose
                 </select>
               </div>
 
-              <div className="p-2.5 bg-white rounded-lg border border-emerald-200 flex items-center justify-between text-xs">
-                <span className="text-slate-600 font-medium">Prix automatique configuré :</span>
+              <div className="p-2.5 bg-white rounded-lg border border-slate-200 flex items-center justify-between text-xs">
+                <span className="text-slate-600 font-medium">Tarif officiel :</span>
                 <div className="text-right">
                   <span className="font-bold font-mono text-emerald-800 text-sm">{prixUsd.toFixed(2)} USD</span>
                   <span className="text-slate-500 text-xs ml-1.5">({prixFc.toLocaleString('fr-FR')} FC)</span>
                 </div>
               </div>
+            </div>
 
-              <p className="text-[11px] text-emerald-800 italic">
-                * Une facture liée à la visite est générée automatiquement au statut <strong>NON PAYÉ</strong> pour enregistrement immédiat ou ultérieur à la caisse.
-              </p>
+            {/* SECTION ENCAISSEMENT DIRECT (RÉCEPTION FAISANT OFFICE DE CAISSE) */}
+            <div className="bg-emerald-950/5 border-2 border-emerald-500/40 rounded-xl p-3.5 space-y-3">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-emerald-950 flex items-center space-x-1.5">
+                  <CreditCard className="w-4 h-4 text-emerald-700" />
+                  <span>Encaissement Réception (Caisse Directe)</span>
+                </span>
+                <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                  Paiement préalable obligatoire
+                </span>
+              </div>
+
+              {/* Sélection Type d'encaissement */}
+              <div className="grid grid-cols-3 gap-1.5 text-xs">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTypeEncaissement('COMPLET');
+                    setMontantPayeCustom('');
+                  }}
+                  className={`py-2 px-1.5 rounded-lg font-bold border text-center transition-all ${
+                    typeEncaissement === 'COMPLET'
+                      ? 'bg-emerald-700 text-white border-emerald-800 shadow-xs'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  Payé Total ({devisePaiement === 'USD' ? `${prixUsd} $` : `${prixFc.toLocaleString('fr-FR')} FC`})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTypeEncaissement('PARTIEL');
+                    if (!montantPayeCustom) {
+                      setMontantPayeCustom(devisePaiement === 'USD' ? String(Math.round(prixUsd / 2)) : String(Math.round(prixFc / 2)));
+                    }
+                  }}
+                  className={`py-2 px-1.5 rounded-lg font-bold border text-center transition-all ${
+                    typeEncaissement === 'PARTIEL'
+                      ? 'bg-amber-600 text-white border-amber-700 shadow-xs'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  Paiement Partiel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTypeEncaissement('NON_PAYE')}
+                  className={`py-2 px-1.5 rounded-lg font-bold border text-center transition-all ${
+                    typeEncaissement === 'NON_PAYE'
+                      ? 'bg-rose-700 text-white border-rose-800 shadow-xs'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  Dérogation / Non Payé
+                </button>
+              </div>
+
+              {/* Détails du règlement si Payé ou Partiel */}
+              {typeEncaissement !== 'NON_PAYE' ? (
+                <div className="space-y-2.5 pt-1 border-t border-emerald-200/60">
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                        Devise de paiement
+                      </label>
+                      <div className="grid grid-cols-2 gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDevisePaiement('USD');
+                            setMontantPayeCustom('');
+                          }}
+                          className={`py-1.5 text-xs font-bold rounded-md border text-center transition-colors ${
+                            devisePaiement === 'USD' ? 'bg-emerald-700 text-white border-emerald-800' : 'bg-white text-slate-700 border-slate-300'
+                          }`}
+                        >
+                          USD ($)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDevisePaiement('FC');
+                            setMontantPayeCustom('');
+                          }}
+                          className={`py-1.5 text-xs font-bold rounded-md border text-center transition-colors ${
+                            devisePaiement === 'FC' ? 'bg-emerald-700 text-white border-emerald-800' : 'bg-white text-slate-700 border-slate-300'
+                          }`}
+                        >
+                          FC (CDF)
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                        Mode de paiement
+                      </label>
+                      <select
+                        value={modePaiement}
+                        onChange={(e: any) => setModePaiement(e.target.value)}
+                        className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-md font-medium text-slate-800"
+                      >
+                        <option value="ESPECES">Espèces (Cash)</option>
+                        <option value="MOBILE_MONEY">Mobile Money (M-Pesa, Orange, Airtel)</option>
+                        <option value="CARTE_BANCAIRE">Carte Bancaire</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                        Montant à encaisser ({devisePaiement}) *
+                      </label>
+                      <input
+                        type="number"
+                        step={devisePaiement === 'USD' ? '1' : '500'}
+                        value={typeEncaissement === 'COMPLET' ? totalDueInDevise : (montantPayeCustom || '')}
+                        disabled={typeEncaissement === 'COMPLET'}
+                        onChange={(e) => setMontantPayeCustom(e.target.value)}
+                        className="w-full px-3 py-1.5 text-sm font-bold text-slate-900 bg-white border border-emerald-400 rounded-md focus:ring-2 focus:ring-emerald-500 font-mono disabled:bg-slate-100"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                        Montant remis par le patient
+                      </label>
+                      <input
+                        type="number"
+                        placeholder="Calcul monnaie"
+                        value={montantRecuClient}
+                        onChange={(e) => setMontantRecuClient(e.target.value)}
+                        className="w-full px-3 py-1.5 text-sm font-medium text-slate-800 bg-white border border-slate-300 rounded-md font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  {monnaieRendue !== null && monnaieRendue > 0 && (
+                    <div className="p-2 bg-emerald-100/70 border border-emerald-300 rounded-lg text-xs flex items-center justify-between">
+                      <span className="font-semibold text-emerald-900">Monnaie à rendre :</span>
+                      <span className="font-mono font-bold text-emerald-900 text-sm">
+                        {monnaieRendue.toLocaleString('fr-FR')} {devisePaiement}
+                      </span>
+                    </div>
+                  )}
+
+                  {typeEncaissement === 'PARTIEL' && soldeRestantUsd > 0 && (
+                    <div className="p-2 bg-amber-100/70 border border-amber-300 rounded-lg text-xs flex items-center justify-between">
+                      <span className="font-semibold text-amber-900">Solde restant dû :</span>
+                      <span className="font-mono font-bold text-amber-900 text-xs">
+                        {soldeRestantUsd.toFixed(2)} USD ({Math.round(soldeRestantUsd * exchangeRate).toLocaleString('fr-FR')} FC)
+                      </span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-1.5 pt-1 border-t border-rose-200">
+                  <label className="block text-[11px] font-semibold text-rose-800">
+                    Motif obligatoire de dérogation financière *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={motifNonPaiement}
+                    onChange={(e) => setMotifNonPaiement(e.target.value)}
+                    placeholder="Ex: Urgence vitale absolue, Entente administrative, Accord direction..."
+                    className="w-full px-3 py-2 text-xs bg-white border border-rose-300 rounded-md focus:ring-2 focus:ring-rose-500 font-medium text-rose-900"
+                  />
+                  <p className="text-[10px] text-rose-700 italic">
+                    * L'admission sera autorisée avec le motif dérogatoire consigné dans le journal financier d'audit.
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Motif de venue */}
@@ -305,7 +518,7 @@ export const NewVisiteModal: React.FC<NewVisiteModalProps> = ({ patient, onClose
             <div className="flex items-center space-x-2 text-[11px] text-slate-500 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
               <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
               <span>
-                <strong>Règle d'intégrité :</strong> Cette visite est enregistrée sous le dossier permanent <strong>{patient.numero_dossier}</strong> sans altération des visites antérieures.
+                <strong>Règle d'intégrité :</strong> L'encaissement et la visite sont enregistrés sous le dossier <strong>{patient.numero_dossier}</strong> avant l'orientation au triage.
               </span>
             </div>
           </div>
@@ -325,11 +538,17 @@ export const NewVisiteModal: React.FC<NewVisiteModalProps> = ({ patient, onClose
               className="w-full sm:w-auto px-5 py-2.5 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg transition-colors flex items-center justify-center space-x-1.5 shadow-sm disabled:opacity-50 min-h-[44px] cursor-pointer"
             >
               {isSubmitting ? (
-                <span>Création & facturation...</span>
+                <span>Enregistrement caisse & visite...</span>
               ) : (
                 <>
                   <CheckCircle2 className="w-4 h-4 mr-1" />
-                  <span>Ouvrir la Visite & Diriger vers le Triage</span>
+                  <span>
+                    {typeEncaissement === 'COMPLET' 
+                      ? `Encaisser ${devisePaiement === 'USD' ? `${prixUsd} $` : `${prixFc.toLocaleString('fr-FR')} FC`} & Diriger vers le Triage`
+                      : (typeEncaissement === 'PARTIEL' 
+                          ? `Valider Acompte (${montantPayeNum} ${devisePaiement}) & Triage` 
+                          : 'Valider avec Dérogation & Triage')}
+                  </span>
                 </>
               )}
             </button>

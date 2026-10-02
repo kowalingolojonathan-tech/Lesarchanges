@@ -56,17 +56,27 @@ export const TarifsManagementView: React.FC = () => {
     try {
       // 1. Taux de change
       const rateRes = await apiFetch('/api/billing/exchange-rate');
-      const rateData = await rateRes.json();
-      if (rateRes.ok && rateData.rate) {
-        setExchangeRate(rateData);
-        setNewRateInput(String(rateData.rate));
+      if (rateRes.ok) {
+        const contentType = rateRes.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const rateData = await rateRes.json();
+          if (rateData && rateData.rate) {
+            setExchangeRate(rateData);
+            setNewRateInput(String(rateData.rate));
+          }
+        }
       }
 
       // 2. Tarifs
       const tarifsRes = await apiFetch('/api/tarifs');
-      const tarifsData = await tarifsRes.json();
-      if (tarifsRes.ok && Array.isArray(tarifsData.tarifs)) {
-        setTarifs(tarifsData.tarifs);
+      if (tarifsRes.ok) {
+        const contentType = tarifsRes.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const tarifsData = await tarifsRes.json();
+          if (Array.isArray(tarifsData.tarifs)) {
+            setTarifs(tarifsData.tarifs);
+          }
+        }
       }
     } catch (err) {
       console.error('Erreur chargement tarifs:', err);

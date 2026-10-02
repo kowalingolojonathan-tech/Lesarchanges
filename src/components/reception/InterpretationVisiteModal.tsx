@@ -16,7 +16,8 @@ import {
   Square,
   Clock,
   Tag,
-  Coins
+  Coins,
+  CreditCard
 } from 'lucide-react';
 import { apiFetch } from '../../lib/api';
 
@@ -61,6 +62,31 @@ export const InterpretationVisiteModal: React.FC<InterpretationVisiteModalProps>
   // Soumission
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Encaissement Réception (Caisse Directe)
+  const [typeEncaissement, setTypeEncaissement] = useState<'COMPLET' | 'PARTIEL' | 'NON_PAYE'>('COMPLET');
+  const [devisePaiement, setDevisePaiement] = useState<'USD' | 'FC'>('USD');
+  const [modePaiement, setModePaiement] = useState<'ESPECES' | 'MOBILE_MONEY' | 'CARTE_BANCAIRE'>('ESPECES');
+  const [montantPayeCustom, setMontantPayeCustom] = useState<string>('');
+  const [montantRecuClient, setMontantRecuClient] = useState<string>('');
+  const [motifNonPaiement, setMotifNonPaiement] = useState<string>('');
+
+  const tarifInterpretationUsd = 10;
+  const exchangeRate = 2850;
+  const tarifInterpretationFc = Math.round(tarifInterpretationUsd * exchangeRate);
+
+  const montantPayeNum = montantPayeCustom !== '' 
+    ? parseFloat(montantPayeCustom) 
+    : (devisePaiement === 'USD' ? tarifInterpretationUsd : tarifInterpretationFc);
+
+  const totalDueInDevise = devisePaiement === 'USD' ? tarifInterpretationUsd : tarifInterpretationFc;
+  const soldeRestantUsd = typeEncaissement === 'PARTIEL' 
+    ? Math.max(0, tarifInterpretationUsd - (devisePaiement === 'USD' ? (montantPayeNum || 0) : (montantPayeNum || 0) / exchangeRate))
+    : (typeEncaissement === 'NON_PAYE' ? tarifInterpretationUsd : 0);
+
+  const monnaieRendue = montantRecuClient && !isNaN(parseFloat(montantRecuClient))
+    ? Math.max(0, parseFloat(montantRecuClient) - montantPayeNum)
+    : null;
 
   // Charger la liste des médecins actifs
   useEffect(() => {
@@ -193,6 +219,11 @@ export const InterpretationVisiteModal: React.FC<InterpretationVisiteModalProps>
       return;
     }
 
+    if (typeEncaissement === 'NON_PAYE' && (!motifNonPaiement || motifNonPaiement.trim().length < 4)) {
+      setErrorMessage('Un motif explicite est strictement obligatoire pour déroger au paiement immédiat (ex: Urgence vitale).');
+      return;
+    }
+
     setIsSubmitting(true);
     setErrorMessage(null);
 
@@ -207,6 +238,12 @@ export const InterpretationVisiteModal: React.FC<InterpretationVisiteModalProps>
           : selectedElements.length > 0
           ? `Interprétation des résultats : ${selectedElements.join(', ')}`
           : 'Interprétation des résultats d’analyses',
+        reglement_immediat: true,
+        type_encaissement: typeEncaissement,
+        montant_paye: typeEncaissement === 'NON_PAYE' ? 0 : montantPayeNum,
+        devise: devisePaiement,
+        mode_paiement: modePaiement,
+        motif_non_paiement: typeEncaissement === 'NON_PAYE' ? motifNonPaiement.trim() : undefined
       };
 
       const res = await apiFetch('/api/visites/interpretation', {
@@ -555,22 +592,46 @@ export const InterpretationVisiteModal: React.FC<InterpretationVisiteModalProps>
             </div>
           )}
 
-          {/* ACTIONS */}
-          <div className="flex justify-end space-x-3 pt-3 border-t border-slate-200">
+            {/* Facturation liée automatique */}
+            <div className="bg-purple-50/70 border border-purple-200 rounded-xl p-3.5 space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-purple-950 flex items-center space-x-1.5">
+                  <Tag className="w-3.5 h-3.5 text-purple-700" />
+                  <span>Prestation : Interprétation des Résultats</span>
+                </span>
+                <span className="text-[11px] font-mono text-purple-800 bg-purple-100 px-2 py-0.5 rounded-sm font-semibold">
+                  Taux officiel : 1 USD = 2 850 FC
+                </span>
+              </div>
+              <div className="p-2.5 bg-white rounded-lg border border-purple-200 flex items-center justify-between text-xs">
+                <span className="text-slate-600 font-medium">Prix automatique configuré :</span>
+                <div className="text-right">
+                  <span className="font-bold font-mono text-purple-900 text-sm">10.00 USD</span>
+                  <span className="text-slate-500 text-xs ml-1.5">(28 500 FC)</span>
+                </div>
+              </div>
+              <p className="text-[11px] text-purple-800 italic">
+                * Une facture liée à cette prestation est automatiquement émise au statut <strong>NON PAYÉ</strong> pour enregistrement immédiat ou ultérieur à la caisse.
+              </p>
+            </div>
+          </div>
+
+          {/* ACTIONS FIXÉES EN BAS */}
+          <div className="shrink-0 bg-slate-50 px-4 sm:px-6 py-3 border-t border-slate-200 flex flex-col-reverse sm:flex-row justify-end gap-2">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
+              className="w-full sm:w-auto px-4 py-2.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors min-h-[44px] flex items-center justify-center cursor-pointer"
             >
               Annuler
             </button>
             <button
               type="submit"
               disabled={isSubmitting || !selectedPatient || !selectedDoctorId}
-              className="px-5 py-2.5 text-xs font-bold text-white bg-purple-700 hover:bg-purple-800 rounded-lg transition-colors flex items-center space-x-2 shadow-sm disabled:opacity-50"
+              className="w-full sm:w-auto px-5 py-2.5 text-xs font-bold text-white bg-purple-700 hover:bg-purple-800 rounded-lg transition-colors flex items-center justify-center space-x-2 shadow-sm disabled:opacity-50 min-h-[44px] cursor-pointer"
             >
               {isSubmitting ? (
-                <span>Validation en cours...</span>
+                <span>Validation & facturation...</span>
               ) : (
                 <>
                   <CheckCircle2 className="w-4 h-4 mr-1" />

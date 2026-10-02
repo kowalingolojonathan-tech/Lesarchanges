@@ -4,7 +4,7 @@ import { query, queryOne, execute, transaction, saveDb } from '../db/database.js
 import { auditLogger } from '../utils/auditLogger.js';
 import { validateAndComputeVitals, VitalsInput } from '../utils/vitalsCalculator.js';
 import { AuthenticatedRequest, isDoctorRole } from '../middleware/auth.js';
-import { createLinkedFactureCore, getFactureFinancialDetails } from './billingController.js';
+import { createLinkedFactureCore, getFactureFinancialDetails, processPaiementDirectCore } from './billingController.js';
 
 /**
  * Génère un identifiant unique de visite au format VIS-YYYYMMDD-XXXX
@@ -176,7 +176,14 @@ export async function createVisite(req: AuthenticatedRequest, res: Response): Pr
       medecin_id,
       rendez_vous_id,
       tarif_id,
-      create_facture = true
+      create_facture = true,
+      reglement_immediat,
+      type_encaissement = 'COMPLET',
+      montant_paye,
+      devise = 'USD',
+      mode_paiement = 'ESPECES',
+      reference_transaction,
+      motif_non_paiement
     } = req.body;
 
     if (!patient_id) {
@@ -322,6 +329,45 @@ export async function createVisite(req: AuthenticatedRequest, res: Response): Pr
       }
     }
 
+    let paiementInfo: any = null;
+
+    // Encaissement direct immédiat par la Réception (faisant office de Caisse)
+    if (reglement_immediat && linkedFacture) {
+      const devisePaiement = (devise === 'CDF' || devise === 'FC') ? 'FC' : 'USD';
+
+      if (type_encaissement === 'COMPLET' || type_encaissement === 'PARTIEL') {
+        const totalUsd = linkedFacture.solde_usd !== undefined ? linkedFacture.solde_usd : (linkedFacture.montant_total_usd || 20);
+        let verser = parseFloat(String(montant_paye));
+        if (isNaN(verser) || verser <= 0) {
+          verser = devisePaiement === 'USD' ? totalUsd : Math.round(totalUsd * 2850);
+        }
+
+        try {
+          const directPay = await processPaiementDirectCore({
+            facture_id: linkedFacture.id,
+            montant_paye: verser,
+            devise: devisePaiement,
+            mode_paiement,
+            reference_transaction,
+            notes: `Règlement direct perçu à l'accueil / caisse lors de la création de la visite`,
+            encaisse_par_id: req.user?.id || 'usr-recep-01',
+            ip_address: req.ip || '127.0.0.1'
+          });
+          paiementInfo = directPay.paiement;
+          linkedFacture = directPay.facture;
+        } catch (payErr: any) {
+          console.error('Erreur encaissement direct visite:', payErr);
+        }
+      } else if (type_encaissement === 'NON_PAYE') {
+        const derogStr = `[DÉROGATION ACCUEIL/CAISSE - Par ${req.user?.nom_complet || 'Réception'}] Motif non-règlement : ${motif_non_paiement?.trim() || 'Urgence vitale / Entente administrative'}`;
+        await execute(
+          `UPDATE factures SET notes = COALESCE(notes || ' | ', '') || ?, updated_at = ? WHERE id = ?`,
+          [derogStr, nowIso, linkedFacture.id]
+        );
+        linkedFacture = await getFactureFinancialDetails(linkedFacture.id);
+      }
+    }
+
     saveDb();
 
     const createdVisite = await queryOne(
@@ -337,7 +383,9 @@ export async function createVisite(req: AuthenticatedRequest, res: Response): Pr
 
     res.status(201).json({ 
       visite: createdVisite,
-      facture: linkedFacture
+      facture: linkedFacture,
+      paiement: paiementInfo,
+      recu: paiementInfo?.numero_recu || null
     });
   } catch (error: any) {
     console.error('Erreur création visite:', error);
@@ -780,7 +828,14 @@ export async function createInterpretationVisite(req: AuthenticatedRequest, res:
       consultation_origine_id,
       elements_a_interpreter,
       medecin_id,
-      motif_venue
+      motif_venue,
+      reglement_immediat,
+      type_encaissement = 'COMPLET',
+      montant_paye,
+      devise = 'USD',
+      mode_paiement = 'ESPECES',
+      reference_transaction,
+      motif_non_paiement
     } = req.body;
 
     if (!patient_id) {
@@ -892,6 +947,46 @@ export async function createInterpretationVisite(req: AuthenticatedRequest, res:
       ip_address: req.ip || '127.0.0.1'
     });
 
+    let linkedFacture = factureResult.facture;
+    let paiementInfo: any = null;
+
+    // Encaissement direct immédiat par la Réception (faisant office de Caisse)
+    if (reglement_immediat && linkedFacture) {
+      const devisePaiement = (devise === 'CDF' || devise === 'FC') ? 'FC' : 'USD';
+
+      if (type_encaissement === 'COMPLET' || type_encaissement === 'PARTIEL') {
+        const totalUsd = linkedFacture.solde_usd !== undefined ? linkedFacture.solde_usd : (linkedFacture.montant_total_usd || 10);
+        let verser = parseFloat(String(montant_paye));
+        if (isNaN(verser) || verser <= 0) {
+          verser = devisePaiement === 'USD' ? totalUsd : Math.round(totalUsd * 2850);
+        }
+
+        try {
+          const directPay = await processPaiementDirectCore({
+            facture_id: linkedFacture.id,
+            montant_paye: verser,
+            devise: devisePaiement,
+            mode_paiement,
+            reference_transaction,
+            notes: `Règlement direct perçu à l'accueil / caisse pour visite d'interprétation`,
+            encaisse_par_id: req.user?.id || 'usr-recep-01',
+            ip_address: req.ip || '127.0.0.1'
+          });
+          paiementInfo = directPay.paiement;
+          linkedFacture = directPay.facture;
+        } catch (payErr: any) {
+          console.error('Erreur encaissement direct interprétation:', payErr);
+        }
+      } else if (type_encaissement === 'NON_PAYE') {
+        const derogStr = `[DÉROGATION ACCUEIL/CAISSE - Par ${req.user?.nom_complet || 'Réception'}] Motif non-règlement : ${motif_non_paiement?.trim() || 'Urgence vitale / Entente administrative'}`;
+        await execute(
+          `UPDATE factures SET notes = COALESCE(notes || ' | ', '') || ?, updated_at = ? WHERE id = ?`,
+          [derogStr, nowIso, linkedFacture.id]
+        );
+        linkedFacture = await getFactureFinancialDetails(linkedFacture.id);
+      }
+    }
+
     saveDb();
 
     const createdVisite = await queryOne(
@@ -902,16 +997,18 @@ export async function createInterpretationVisite(req: AuthenticatedRequest, res:
        JOIN patients p ON v.patient_id = p.id
        LEFT JOIN users u ON v.medecin_id = u.id
        WHERE v.id = ?`,
-      [factureResult.facture?.statut || 'NON PAYÉ', visiteId]
+      [linkedFacture?.statut || 'NON PAYÉ', visiteId]
     );
 
     res.status(201).json({
       success: true,
       visite: createdVisite,
-      facture: factureResult.facture,
+      facture: linkedFacture,
+      paiement: paiementInfo,
+      recu: paiementInfo?.numero_recu || null,
       message: targetMedecinId 
-        ? `Visite créée et orientée vers le Dr. ${targetMedecinNom}. Facture liée émise.`
-        : 'Visite d\'interprétation créée avec succès. Facture liée émise.'
+        ? `Visite créée, encaissée et orientée vers le Dr. ${targetMedecinNom}.`
+        : 'Visite d\'interprétation créée et encaissée avec succès.'
     });
   } catch (error: any) {
     console.error('Erreur création visite interprétation:', error);

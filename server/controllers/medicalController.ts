@@ -3,6 +3,8 @@ import crypto from 'crypto';
 import { query, queryOne, execute, transaction } from '../db/database.js';
 import { auditLogger } from '../utils/auditLogger.js';
 import { AuthenticatedRequest, isDoctorRole } from '../middleware/auth.js';
+import { createLinkedFactureCore } from './billingController.js';
+import { saveDb } from '../db/database.js';
 
 /**
  * Récupère le tableau de bord et la file d'attente du médecin connecté
@@ -2362,12 +2364,106 @@ export async function createLabOrder(req: AuthenticatedRequest, res: Response): 
       });
     }
 
+    // Facturation automatique liée des examens de laboratoire
+    let totalAmountUsd = 0;
+    const billedItems: any[] = [];
+    const exchangeRateRow = await queryOne<any>("SELECT value FROM clinic_settings WHERE key = 'EXCHANGE_RATE_USD_FC' OR key = 'EXCHANGE_RATE_USD_CDF' LIMIT 1");
+    const officialRate = exchangeRateRow && exchangeRateRow.value ? parseFloat(exchangeRateRow.value) : 2850;
+
+    for (const an of analysesArray) {
+      const tarifRow = await queryOne<any>(
+        `SELECT * FROM tarifs WHERE (categorie = 'EXAMEN_LABORATOIRE' OR categorie = 'LABORATOIRE') AND (nom LIKE ? OR id = ?) AND actif = 1 LIMIT 1`,
+        [`%${an.nom_analyse}%`, an.tarif_id || '']
+      ) || await queryOne<any>(
+        `SELECT * FROM tarifs WHERE categorie = 'EXAMEN_LABORATOIRE' AND actif = 1 LIMIT 1`
+      );
+
+      const itemPrice = tarifRow && tarifRow.prix_usd ? parseFloat(tarifRow.prix_usd) : 10;
+      totalAmountUsd += itemPrice;
+      billedItems.push({
+        tarif_id: tarifRow?.id || null,
+        description: `Examen: ${an.nom_analyse}`,
+        categorie: 'EXAMEN_LABORATOIRE',
+        quantite: 1,
+        prix_unitaire: itemPrice
+      });
+    }
+
+    let linkedFacture: any = null;
+    try {
+      const factureResult = await createLinkedFactureCore({
+        patient_id: consultation.patient_id,
+        visite_id: consultation.visite_id,
+        type_prestation: 'LABORATOIRE',
+        items: billedItems.length > 0 ? billedItems : [{
+          description: 'Examens de laboratoire',
+          categorie: 'EXAMEN_LABORATOIRE',
+          quantite: 1,
+          prix_unitaire: 10
+        }],
+        emise_par_id: user.id,
+        notes: `Facture examens de laboratoire bon ${numeroDemande}`,
+        ip_address: req.ip || '127.0.0.1'
+      });
+      linkedFacture = factureResult.facture;
+
+      if (linkedFacture?.id) {
+        await execute(
+          `UPDATE demandes_laboratoire SET facture_id = ? WHERE id = ?`,
+          [linkedFacture.id, orderId]
+        );
+      }
+    } catch (fErr) {
+      console.error('Erreur génération facture labo:', fErr);
+    }
+
+    const totalAmountFc = Math.round(totalAmountUsd * officialRate);
+
+    // Notification d'encaissement directe pour la RÉCEPTION (qui joue le rôle de Caisse)
+    try {
+      const receptionUsers = await query<any>(
+        `SELECT u.id FROM users u
+         LEFT JOIN roles r ON u.role_id = r.id
+         WHERE (u.role IN ('RÉCEPTION', 'RECEPTION') OR r.categorie = 'RÉCEPTION') AND u.actif = 1`
+      );
+      const analysesNoms = analysesArray.map((a: any) => a.nom_analyse).join(', ');
+      for (const recUser of receptionUsers) {
+        const notifId = `notif-${crypto.randomUUID().substring(0, 12)}`;
+        await execute(
+          `INSERT INTO notifications (
+            id, user_id, emetteur_id, emetteur_nom, emetteur_role, destinataire_role,
+            titre, message, type, patient_id, consultation_id, visite_id, lab_order_id, lu, created_at
+          ) VALUES (?, ?, ?, ?, ?, 'RÉCEPTION', ?, ?, 'LAB_ORDER_TO_COLLECT', ?, ?, ?, ?, 0, ?)`,
+          [
+            notifId,
+            recUser.id,
+            user.id,
+            user.nom_complet,
+            user.role,
+            `🔬 Labo à encaisser : ${createdOrder?.patient_nom || 'Patient'} ${createdOrder?.patient_prenom || ''}`,
+            `Bon n° ${numeroDemande} prescrit par Dr. ${user.nom_complet}. Analyses : ${analysesNoms}. Montant à percevoir : ${totalAmountUsd.toFixed(2)} USD (${totalAmountFc.toLocaleString('fr-FR')} FC).`,
+            consultation.patient_id,
+            consultation.id,
+            consultation.visite_id,
+            orderId,
+            now
+          ]
+        );
+      }
+    } catch (nErr) {
+      console.error('Erreur envoi notification réception pour labo:', nErr);
+    }
+
+    saveDb();
+
     res.status(201).json({
       message: 'Demande d\'analyses de laboratoire créée avec succès.',
       lab_order: {
         ...createdOrder,
+        facture_id: linkedFacture?.id || null,
         analyses: createdAnalyses
-      }
+      },
+      facture: linkedFacture
     });
   } catch (error: any) {
     console.error('Erreur création demande laboratoire:', error);
@@ -2930,10 +3026,35 @@ export async function getLaboratoryQueue(req: AuthenticatedRequest, res: Respons
            ORDER BY a.created_at ASC`,
           [o.id]
         );
+
+        let finLab: any = null;
+        if (o.facture_id) {
+          finLab = await queryOne<any>('SELECT * FROM factures WHERE id = ?', [o.facture_id]);
+        }
+        const hasDerogation = (finLab?.notes && finLab.notes.includes('DÉROGATION')) ||
+                              (o.amendement_motif && o.amendement_motif.includes('DÉROGATION'));
+        const labStatutFacture = finLab ? finLab.statut : o.statut_paiement;
+
+        const isPaid = ['PAYÉ', 'PAYEE'].includes(labStatutFacture);
+        const isPartial = ['PARTIELLEMENT PAYÉ', 'PARTIELLEMENT_PAYEE'].includes(labStatutFacture);
+        const isAuthorizedByCashier = !o.facture_id || isPaid || isPartial || hasDerogation;
+
+        const bloqueCaisse = !isAuthorizedByCashier;
+        const statutAffichage = isPaid 
+          ? 'PAYÉ' 
+          : (isPartial 
+              ? 'PARTIELLEMENT PAYÉ' 
+              : (hasDerogation 
+                  ? 'NON PAYÉ (Dérogation Caisse)' 
+                  : 'NON PAYÉ (En attente d’encaissement à la réception)'));
+
         return {
           ...o,
           analyses,
-          amendements
+          amendements,
+          bloque_caisse: bloqueCaisse,
+          statut_paiement_labo: statutAffichage,
+          has_derogation: Boolean(hasDerogation)
         };
       })
     );
@@ -2999,6 +3120,20 @@ export async function claimLabOrder(req: AuthenticatedRequest, res: Response): P
     if (existing.statut === 'ANNULEE' || existing.statut === 'RESULTAT_VALIDE') {
       res.status(400).json({ error: `Cette demande ne peut plus être prise en charge (statut: ${existing.statut}).` });
       return;
+    }
+
+    // Contrôle strict : Le patient doit avoir réglé à la caisse d'accueil ou disposer d'une dérogation
+    if (existing.facture_id) {
+      const fLab = await queryOne<any>('SELECT * FROM factures WHERE id = ?', [existing.facture_id]);
+      const hasDerog = (fLab?.notes && fLab.notes.includes('DÉROGATION')) ||
+                       (existing.amendement_motif && existing.amendement_motif.includes('DÉROGATION'));
+      const isPaid = fLab && ['PAYÉ', 'PAYEE', 'PARTIELLEMENT PAYÉ', 'PARTIELLEMENT_PAYEE'].includes(fLab.statut);
+      if (!isPaid && !hasDerog) {
+        res.status(403).json({
+          error: 'Encaissement préalable obligatoire : Le patient doit d\'abord régler les examens à la réception/caisse ou consigner un motif dérogatoire avant la prise en charge au laboratoire.'
+        });
+        return;
+      }
     }
 
     // Si déjà attribuée à un autre laborantin précis

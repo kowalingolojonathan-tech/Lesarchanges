@@ -1000,3 +1000,385 @@ export async function getVisitePaymentStatus(req: Request, res: Response): Promi
     res.status(500).json({ error: 'Erreur lors de la vérification du statut de paiement.' });
   }
 }
+
+/**
+ * Traitement centralisé d'un encaissement direct (espèces USD/FC, mobile money, carte)
+ */
+export async function processPaiementDirectCore(params: {
+  facture_id: string;
+  montant_paye: number;
+  devise: 'USD' | 'FC';
+  mode_paiement?: string;
+  reference_transaction?: string;
+  notes?: string;
+  encaisse_par_id: string;
+  ip_address?: string;
+}): Promise<{
+  success: boolean;
+  recu: string;
+  paiement: any;
+  facture: any;
+}> {
+  const {
+    facture_id,
+    montant_paye,
+    devise,
+    mode_paiement = 'ESPECES',
+    reference_transaction,
+    notes,
+    encaisse_par_id,
+    ip_address = '127.0.0.1'
+  } = params;
+
+  const details = await getFactureFinancialDetails(facture_id);
+  if (!details) {
+    throw new Error('Facture introuvable.');
+  }
+
+  if (details.solde_usd <= 0.005) {
+    throw new Error('Cette facture est déjà intégralement payée.');
+  }
+
+  const verser = parseFloat(String(montant_paye));
+  if (isNaN(verser) || verser <= 0) {
+    throw new Error('Le montant payé doit être un nombre strictement positif.');
+  }
+
+  const devisePaiement = devise === 'CDF' ? 'FC' : devise;
+  if (devisePaiement !== 'USD' && devisePaiement !== 'FC') {
+    throw new Error('Devise non autorisée. Choisissez USD ou FC.');
+  }
+
+  const settingRate = await queryOne("SELECT value FROM clinic_settings WHERE key = 'EXCHANGE_RATE_USD_FC' OR key = 'EXCHANGE_RATE_USD_CDF' LIMIT 1");
+  const tauxActuel = settingRate && settingRate.value ? parseFloat(settingRate.value) : 2850;
+
+  let equivalentUsd = 0;
+  let equivalentFc = 0;
+
+  if (devisePaiement === 'USD') {
+    equivalentUsd = Math.round(verser * 100) / 100;
+    equivalentFc = Math.round(verser * tauxActuel);
+  } else {
+    equivalentFc = Math.round(verser);
+    equivalentUsd = Math.round((verser / tauxActuel) * 100) / 100;
+  }
+
+  if (equivalentUsd > details.solde_usd + 0.05) {
+    const maxFc = Math.round(details.solde_usd * tauxActuel);
+    throw new Error(`Le montant versé (${verser} ${devisePaiement}) excède le solde restant dû (${details.solde_usd} USD ou ~${maxFc} FC).`);
+  }
+
+  const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const countRecuRes = await queryOne("SELECT count(*) as count FROM paiements WHERE numero_recu LIKE ?", [`REC-${dateStr}-%`]);
+  const countRecu = countRecuRes ? Number(countRecuRes.count) + 1 : 1;
+  const numeroRecu = `REC-${dateStr}-${String(countRecu).padStart(4, '0')}`;
+
+  const paiementId = `pmt-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+  const now = new Date().toISOString();
+  const mode = ['ESPECES', 'MOBILE_MONEY', 'CARTE_BANCAIRE'].includes(mode_paiement) ? mode_paiement : 'ESPECES';
+
+  await execute(
+    `INSERT INTO paiements (
+      id, numero_recu, facture_id, montant_paye, devise, taux_usd_fc,
+      equivalent_usd, equivalent_fc, mode_paiement, reference_transaction, notes,
+      date_paiement, encaisse_par_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      paiementId,
+      numeroRecu,
+      facture_id,
+      verser,
+      devisePaiement,
+      tauxActuel,
+      equivalentUsd,
+      equivalentFc,
+      mode,
+      reference_transaction?.trim() || null,
+      notes?.trim() || null,
+      now,
+      encaisse_par_id || 'usr-recep-01'
+    ]
+  );
+
+  const updatedDetails = await getFactureFinancialDetails(facture_id);
+  const newStatus = updatedDetails!.statut;
+  await execute('UPDATE factures SET statut = ?, updated_at = ? WHERE id = ?', [newStatus, now, facture_id]);
+
+  await execute(
+    `INSERT INTO audit_logs (id, user_id, action, ressource_type, ressource_id, details, ip_address, timestamp)
+     VALUES (?, ?, 'ENCAISSEMENT_FACTURE', 'PAIEMENT', ?, ?, ?, ?)`,
+    [
+      `aud-pmt-${Date.now()}`,
+      encaisse_par_id || 'usr-recep-01',
+      paiementId,
+      `Encaissement reçu ${numeroRecu} sur facture ${details.numero_facture} : ${verser} ${devisePaiement}. Statut: ${newStatus}`,
+      ip_address,
+      now
+    ]
+  );
+
+  saveDb();
+
+  return {
+    success: true,
+    recu: numeroRecu,
+    paiement: {
+      id: paiementId,
+      numero_recu: numeroRecu,
+      montant_paye: verser,
+      devise: devisePaiement,
+      taux_usd_fc: tauxActuel,
+      equivalent_usd: equivalentUsd,
+      equivalent_fc: equivalentFc,
+      mode_paiement: mode,
+      date_paiement: now
+    },
+    facture: updatedDetails
+  };
+}
+
+/**
+ * Récupérer les examens de laboratoire en attente d'encaissement à la réception/caisse
+ * GET /api/billing/lab-orders-to-collect
+ */
+export async function getLabOrdersToCollect(req: Request, res: Response): Promise<void> {
+  const authReq = req as AuthenticatedRequest;
+  const user = authReq.user;
+  if (!user) {
+    res.status(401).json({ error: 'Non authentifié.' });
+    return;
+  }
+
+  try {
+    const orders = await queryAll<any>(
+      `SELECT d.id, d.numero_demande, d.date_demande, d.urgence, d.statut, d.facture_id,
+              d.amendement_motif,
+              pat.id as patient_id, pat.nom as patient_nom, pat.prenom as patient_prenom, pat.numero_dossier,
+              pat.telephone as patient_telephone,
+              v.numero_visite, v.id as visite_id,
+              u.nom_complet as medecin_nom,
+              f.statut as statut_facture, f.montant_total as montant_total_facture, f.notes as notes_facture
+       FROM demandes_laboratoire d
+       JOIN patients pat ON d.patient_id = pat.id
+       JOIN visites v ON d.visite_id = v.id
+       JOIN users u ON d.medecin_id = u.id
+       LEFT JOIN factures f ON d.facture_id = f.id
+       WHERE d.statut != 'ANNULEE'
+       ORDER BY d.created_at DESC`
+    );
+
+    const settingRate = await queryOne("SELECT value FROM clinic_settings WHERE key = 'EXCHANGE_RATE_USD_FC' OR key = 'EXCHANGE_RATE_USD_CDF' LIMIT 1");
+    const tauxActuel = settingRate && settingRate.value ? parseFloat(settingRate.value) : 2850;
+
+    const enriched = await Promise.all(
+      orders.map(async (ord) => {
+        const analyses = await queryAll<any>(
+          `SELECT id, nom_analyse, type_echantillon, instructions FROM analyses_laboratoire WHERE demande_laboratoire_id = ? ORDER BY ordre ASC`,
+          [ord.id]
+        );
+
+        let finDetails: any = null;
+        if (ord.facture_id) {
+          finDetails = await getFactureFinancialDetails(ord.facture_id);
+        }
+
+        const isDerogation = (ord.notes_facture && ord.notes_facture.includes('DÉROGATION')) ||
+                             (ord.amendement_motif && ord.amendement_motif.includes('DÉROGATION'));
+        const motifDerogation = isDerogation ? (ord.notes_facture || ord.amendement_motif) : null;
+
+        let statutPaiement = finDetails ? finDetails.statut : (ord.statut_facture || 'NON PAYÉ');
+        if (statutPaiement === 'NON PAYÉ' && isDerogation) {
+          statutPaiement = 'NON PAYÉ (Avec Dérogation)';
+        }
+
+        const montantTotalUsd = finDetails ? finDetails.montant_total_usd : (parseFloat(ord.montant_total_facture) || analyses.length * 10);
+        const montantTotalFc = Math.round(montantTotalUsd * tauxActuel);
+        const soldeUsd = finDetails ? finDetails.solde_usd : (statutPaiement === 'PAYÉ' ? 0 : montantTotalUsd);
+        const soldeFc = Math.round(soldeUsd * tauxActuel);
+        const totalPayeUsd = finDetails ? finDetails.total_paye_usd : 0;
+
+        return {
+          id: ord.id,
+          numero_demande: ord.numero_demande,
+          date_demande: ord.date_demande,
+          urgence: ord.urgence,
+          statut: ord.statut,
+          patient_id: ord.patient_id,
+          patient_nom: ord.patient_nom,
+          patient_prenom: ord.patient_prenom,
+          numero_dossier: ord.numero_dossier,
+          patient_telephone: ord.patient_telephone,
+          visite_id: ord.visite_id,
+          numero_visite: ord.numero_visite,
+          medecin_nom: ord.medecin_nom,
+          analyses: analyses.map(a => a.nom_analyse),
+          nb_analyses: analyses.length,
+          facture_id: ord.facture_id,
+          statut_paiement: statutPaiement,
+          is_derogation: Boolean(isDerogation),
+          motif_derogation: motifDerogation,
+          montant_total_usd: montantTotalUsd,
+          montant_total_fc: montantTotalFc,
+          solde_usd: soldeUsd,
+          solde_fc: soldeFc,
+          total_paye_usd: totalPayeUsd,
+          taux_usd_fc: tauxActuel
+        };
+      })
+    );
+
+    res.json({
+      success: true,
+      lab_orders: enriched,
+      en_attente_encaissement: enriched.filter(o => o.solde_usd > 0.01 && !o.is_derogation)
+    });
+  } catch (err: any) {
+    console.error('Erreur getLabOrdersToCollect:', err);
+    res.status(500).json({ error: 'Erreur interne lors de la récupération des examens à encaisser.' });
+  }
+}
+
+/**
+ * Enregistrer un règlement d'examens de laboratoire par la réception/caisse
+ * POST /api/billing/lab-orders/:id/collect
+ */
+export async function collectLabOrderPayment(req: Request, res: Response): Promise<void> {
+  const authReq = req as AuthenticatedRequest;
+  const user = authReq.user;
+  if (!user) {
+    res.status(401).json({ error: 'Non authentifié.' });
+    return;
+  }
+
+  const { id } = req.params; // lab_order_id
+  const { 
+    type_reglement = 'PAYE', 
+    montant_paye, 
+    devise = 'USD', 
+    mode_paiement = 'ESPECES', 
+    reference_transaction, 
+    motif 
+  } = req.body;
+
+  try {
+    const labOrder = await queryOne<any>(
+      `SELECT d.*, pat.nom as patient_nom, pat.prenom as patient_prenom, pat.numero_dossier
+       FROM demandes_laboratoire d
+       JOIN patients pat ON d.patient_id = pat.id
+       WHERE d.id = ?`,
+      [id]
+    );
+
+    if (!labOrder) {
+      res.status(404).json({ error: 'Demande de laboratoire introuvable.' });
+      return;
+    }
+
+    let factureId = labOrder.facture_id;
+    if (!factureId) {
+      const analyses = await queryAll<any>(
+        `SELECT * FROM analyses_laboratoire WHERE demande_laboratoire_id = ?`,
+        [id]
+      );
+      const billedItems = analyses.map((a: any) => ({
+        description: `Examen Labo: ${a.nom_analyse}`,
+        categorie: 'EXAMEN_LABORATOIRE',
+        quantite: 1,
+        prix_unitaire: 10
+      }));
+
+      const factureResult = await createLinkedFactureCore({
+        patient_id: labOrder.patient_id,
+        visite_id: labOrder.visite_id,
+        type_prestation: 'LABORATOIRE',
+        items: billedItems.length > 0 ? billedItems : [{
+          description: 'Examens de laboratoire',
+          categorie: 'EXAMEN_LABORATOIRE',
+          quantite: 1,
+          prix_unitaire: 10
+        }],
+        emise_par_id: user.id,
+        notes: `Facture émise à l'encaissement réception pour le bon ${labOrder.numero_demande}`,
+        ip_address: req.ip || '127.0.0.1'
+      });
+      factureId = factureResult.facture.id;
+      await execute('UPDATE demandes_laboratoire SET facture_id = ? WHERE id = ?', [factureId, id]);
+    }
+
+    const now = new Date().toISOString();
+
+    if (type_reglement === 'NON_PAYE') {
+      if (!motif || typeof motif !== 'string' || motif.trim().length < 4) {
+        res.status(400).json({ error: 'Un motif explicite est strictement obligatoire pour autoriser un examen non payé à la caisse (ex: Urgence vitale, Entente administrative).' });
+        return;
+      }
+
+      const notesStr = `[DÉROGATION CAISSE ACCUEIL - Par ${user.nom_complet}] Motif : ${motif.trim()}`;
+      await execute(
+        `UPDATE factures SET notes = COALESCE(notes || ' | ', '') || ?, updated_at = ? WHERE id = ?`,
+        [notesStr, now, factureId]
+      );
+      await execute(
+        `UPDATE demandes_laboratoire SET amendement_motif = ?, updated_at = ? WHERE id = ?`,
+        [notesStr, now, id]
+      );
+
+      // Marquer les notifications de réception pour cette demande comme traitées
+      await execute(
+        `UPDATE notifications SET lu = 1, lu_le = ? WHERE lab_order_id = ?`,
+        [now, id]
+      );
+
+      saveDb();
+
+      res.json({
+        success: true,
+        message: 'Dérogation financière enregistrée avec succès. La demande est débloquée et visible au laboratoire.',
+        statut_paiement: 'NON PAYÉ (Avec Dérogation)',
+        motif: motif.trim()
+      });
+      return;
+    }
+
+    const finDetails = await getFactureFinancialDetails(factureId);
+    if (!finDetails) {
+      res.status(404).json({ error: 'Détails financiers introuvables.' });
+      return;
+    }
+
+    const devisePaiement = devise === 'CDF' ? 'FC' : devise;
+    let verser = parseFloat(String(montant_paye));
+    if (isNaN(verser) || verser <= 0) {
+      verser = devisePaiement === 'USD' ? finDetails.solde_usd : Math.round(finDetails.solde_usd * 2850);
+    }
+
+    const paymentResult = await processPaiementDirectCore({
+      facture_id: factureId,
+      montant_paye: verser,
+      devise: devisePaiement as 'USD' | 'FC',
+      mode_paiement,
+      reference_transaction,
+      notes: `Règlement examens de laboratoire bon ${labOrder.numero_demande} perçu à l'accueil/caisse`,
+      encaisse_par_id: user.id,
+      ip_address: req.ip || '127.0.0.1'
+    });
+
+    await execute(
+      `UPDATE notifications SET lu = 1, lu_le = ? WHERE lab_order_id = ?`,
+      [now, id]
+    );
+
+    saveDb();
+
+    res.json({
+      success: true,
+      message: `Paiement enregistré avec succès (${paymentResult.paiement.montant_paye} ${paymentResult.paiement.devise}). Le bon d'examen est débloqué pour le laboratoire.`,
+      recu: paymentResult.recu,
+      paiement: paymentResult.paiement,
+      facture: paymentResult.facture
+    });
+  } catch (err: any) {
+    console.error('Erreur collectLabOrderPayment:', err);
+    res.status(500).json({ error: err.message || 'Erreur lors de l\'encaissement du bon d\'examen.' });
+  }
+}

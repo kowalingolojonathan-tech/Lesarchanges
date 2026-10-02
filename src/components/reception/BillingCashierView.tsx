@@ -139,9 +139,14 @@ export const BillingCashierView: React.FC = () => {
   const loadTarifs = async () => {
     try {
       const res = await apiFetch('/api/tarifs?actif=1');
-      const data = await res.json();
-      if (res.ok && Array.isArray(data.tarifs)) {
-        setAvailableTarifs(data.tarifs);
+      if (res.ok) {
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const data = await res.json();
+          if (Array.isArray(data.tarifs)) {
+            setAvailableTarifs(data.tarifs);
+          }
+        }
       }
     } catch (err) {
       console.error('Erreur chargement tarifs:', err);
@@ -1190,49 +1195,68 @@ export const BillingCashierView: React.FC = () => {
 
       {/* MODAL ENCAISSEMENT / RÈGLEMENT */}
       {selectedFactureForPayment && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl border border-slate-200 max-w-md w-full p-6 space-y-5 animate-in fade-in">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-hidden" id="modal_cashier_payment_overlay">
+          <div className="relative bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full max-h-[calc(100dvh-1rem)] sm:max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in" id="modal_cashier_payment_container">
             {lastReceipt ? (
               // Reçu confirmé
-              <div className="space-y-4 text-center">
-                <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
-                  <CheckCircle2 className="w-8 h-8" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-900">Paiement Enregistré avec Succès !</h3>
-                  <p className="text-xs text-slate-500 mt-1">
-                    Reçu N° <span className="font-mono font-bold text-slate-800">{lastReceipt.numero_recu}</span>
-                  </p>
-                </div>
-
-                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-left text-xs space-y-2 font-mono">
-                  <div className="flex justify-between">
-                    <span className="text-slate-500 font-sans">Montant versé :</span>
-                    <span className="font-bold text-slate-900">
-                      {lastReceipt.devise === 'USD' ? `${lastReceipt.montant_paye} USD` : `${lastReceipt.montant_paye.toLocaleString('fr-FR')} FC`}
-                    </span>
+              <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+                <div className="shrink-0 bg-slate-800 text-white px-5 sm:px-6 py-4 flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                    <h3 className="font-bold text-sm">Paiement Enregistré avec Succès</h3>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500 font-sans">Taux appliqué :</span>
-                    <span>1 USD = {lastReceipt.taux_usd_fc} FC</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500 font-sans">Nouveau statut :</span>
-                    <span className="font-bold text-emerald-700">{lastReceipt.facture.statut}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500 font-sans">Solde restant :</span>
-                    <span className="font-bold text-rose-700">{lastReceipt.facture.solde_usd.toFixed(2)} USD ({lastReceipt.facture.solde_fc.toLocaleString('fr-FR')} FC)</span>
-                  </div>
-                </div>
-
-                <div className="pt-2 flex items-center justify-center space-x-3">
                   <button
                     onClick={() => {
                       setSelectedFactureForPayment(null);
                       setLastReceipt(null);
                     }}
-                    className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold"
+                    className="text-slate-400 hover:text-white p-1 rounded-lg"
+                    aria-label="Fermer"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4 text-center">
+                  <div className="w-12 h-12 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
+                    <CheckCircle2 className="w-8 h-8" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900">Règlement Validé & Reçu Émis</h3>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Reçu N° <span className="font-mono font-bold text-slate-800">{lastReceipt.numero_recu}</span>
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-left text-xs space-y-2 font-mono">
+                    <div className="flex justify-between">
+                      <span className="text-slate-500 font-sans">Montant versé :</span>
+                      <span className="font-bold text-slate-900">
+                        {lastReceipt.devise === 'USD' ? `${lastReceipt.montant_paye} USD` : `${lastReceipt.montant_paye.toLocaleString('fr-FR')} FC`}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500 font-sans">Taux appliqué :</span>
+                      <span>1 USD = {lastReceipt.taux_usd_fc} FC</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500 font-sans">Nouveau statut :</span>
+                      <span className="font-bold text-emerald-700">{lastReceipt.facture.statut}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500 font-sans">Solde restant :</span>
+                      <span className="font-bold text-rose-700">{lastReceipt.facture.solde_usd.toFixed(2)} USD ({lastReceipt.facture.solde_fc.toLocaleString('fr-FR')} FC)</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="shrink-0 bg-slate-50 px-5 sm:px-6 py-3 border-t border-slate-200 flex flex-col-reverse sm:flex-row justify-end gap-2">
+                  <button
+                    onClick={() => {
+                      setSelectedFactureForPayment(null);
+                      setLastReceipt(null);
+                    }}
+                    className="w-full sm:w-auto px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold min-h-[44px] flex items-center justify-center cursor-pointer"
                   >
                     Fermer
                   </button>
@@ -1258,7 +1282,7 @@ export const BillingCashierView: React.FC = () => {
                       };
                       handlePrintPaiement(pmtObj, lastReceipt.facture);
                     }}
-                    className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold inline-flex items-center space-x-1.5 cursor-pointer shadow-xs"
+                    className="w-full sm:w-auto px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-bold inline-flex items-center justify-center space-x-1.5 cursor-pointer shadow-xs min-h-[44px]"
                   >
                     <Printer className="w-4 h-4" />
                     <span>Imprimer Reçu Officiel</span>
@@ -1267,157 +1291,160 @@ export const BillingCashierView: React.FC = () => {
               </div>
             ) : (
               // Formulaire d'encaissement
-              <div className="space-y-4">
-                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-                  <h3 className="font-bold text-slate-900 text-base flex items-center space-x-2">
-                    <Coins className="w-5 h-5 text-emerald-600" />
+              <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+                <div className="shrink-0 bg-slate-800 text-white px-5 sm:px-6 py-4 flex items-center justify-between">
+                  <h3 className="font-bold text-white text-base flex items-center space-x-2">
+                    <Coins className="w-5 h-5 text-emerald-400" />
                     <span>Encaisser un règlement</span>
                   </h3>
                   <button
                     onClick={() => setSelectedFactureForPayment(null)}
-                    className="text-slate-400 hover:text-slate-600 p-1"
+                    className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/10"
+                    aria-label="Fermer"
                   >
                     <X className="w-5 h-5" />
                   </button>
                 </div>
 
-                {/* Synthèse Facture */}
-                <div className="bg-slate-50 p-3.5 rounded-lg border border-slate-200 text-xs space-y-1.5 font-mono">
-                  <div className="flex justify-between">
-                    <span className="text-slate-500 font-sans">Facture :</span>
-                    <span className="font-bold text-slate-900">{selectedFactureForPayment.numero_facture}</span>
+                <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4">
+                  {/* Synthèse Facture */}
+                  <div className="bg-slate-50 p-3.5 rounded-lg border border-slate-200 text-xs space-y-1.5 font-mono">
+                    <div className="flex justify-between">
+                      <span className="text-slate-500 font-sans">Facture :</span>
+                      <span className="font-bold text-slate-900">{selectedFactureForPayment.numero_facture}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500 font-sans">Patient :</span>
+                      <span className="font-bold font-sans text-slate-900">
+                        {selectedFactureForPayment.patient_nom} {selectedFactureForPayment.patient_prenom}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500 font-sans">Solde à payer :</span>
+                      <span className="font-black text-rose-700 text-sm">
+                        {selectedFactureForPayment.solde_usd.toFixed(2)} $ (~{selectedFactureForPayment.solde_fc.toLocaleString('fr-FR')} FC)
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-[11px] text-slate-400 font-sans">
+                      <span>Taux officiel :</span>
+                      <span>1 USD = {currentExchangeRate.toLocaleString('fr-FR')} FC</span>
+                    </div>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500 font-sans">Patient :</span>
-                    <span className="font-bold font-sans text-slate-900">
-                      {selectedFactureForPayment.patient_nom} {selectedFactureForPayment.patient_prenom}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-500 font-sans">Solde à payer :</span>
-                    <span className="font-black text-rose-700 text-sm">
-                      {selectedFactureForPayment.solde_usd.toFixed(2)} $ (~{selectedFactureForPayment.solde_fc.toLocaleString('fr-FR')} FC)
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-[11px] text-slate-400 font-sans">
-                    <span>Taux officiel :</span>
-                    <span>1 USD = {currentExchangeRate.toLocaleString('fr-FR')} FC</span>
-                  </div>
-                </div>
 
-                {paymentError && (
-                  <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg">
-                    {paymentError}
-                  </div>
-                )}
+                  {paymentError && (
+                    <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg">
+                      {paymentError}
+                    </div>
+                  )}
 
-                {/* Choix de la Devise */}
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    Devise de paiement acceptée au guichet *
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleTogglePaymentDevise('USD')}
-                      className={`py-2 px-3 rounded-lg border text-xs font-bold flex items-center justify-center space-x-2 transition-colors ${
-                        paymentDevise === 'USD'
-                          ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                      }`}
-                    >
-                      <DollarSign className="w-4 h-4" />
-                      <span>USD ($)</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleTogglePaymentDevise('FC')}
-                      className={`py-2 px-3 rounded-lg border text-xs font-bold flex items-center justify-center space-x-2 transition-colors ${
-                        paymentDevise === 'FC'
-                          ? 'bg-emerald-700 text-white border-emerald-700 shadow-xs'
-                          : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                      }`}
-                    >
-                      <Coins className="w-4 h-4" />
-                      <span>FC (Franc Congolais)</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Saisie du montant versé */}
-                <div>
-                  <div className="flex justify-between items-center mb-1">
-                    <label className="text-xs font-bold text-slate-700">
-                      Montant réellement versé ({paymentDevise}) *
+                  {/* Choix de la Devise */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                      Devise de paiement acceptée au guichet *
                     </label>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (paymentDevise === 'USD') {
-                          setPaymentMontant(selectedFactureForPayment.solde_usd.toString());
-                        } else {
-                          setPaymentMontant(Math.round(selectedFactureForPayment.solde_usd * currentExchangeRate).toString());
-                        }
-                      }}
-                      className="text-[11px] text-emerald-700 hover:underline font-semibold"
-                    >
-                      Régler la totalité
-                    </button>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleTogglePaymentDevise('USD')}
+                        className={`py-2 px-3 rounded-lg border text-xs font-bold flex items-center justify-center space-x-2 transition-colors cursor-pointer ${
+                          paymentDevise === 'USD'
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                            : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                        }`}
+                      >
+                        <DollarSign className="w-4 h-4" />
+                        <span>USD ($)</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleTogglePaymentDevise('FC')}
+                        className={`py-2 px-3 rounded-lg border text-xs font-bold flex items-center justify-center space-x-2 transition-colors cursor-pointer ${
+                          paymentDevise === 'FC'
+                            ? 'bg-emerald-700 text-white border-emerald-700 shadow-xs'
+                            : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                        }`}
+                      >
+                        <Coins className="w-4 h-4" />
+                        <span>FC (Franc Congolais)</span>
+                      </button>
+                    </div>
                   </div>
-                  <input
-                    type="number"
-                    step={paymentDevise === 'USD' ? '0.5' : '100'}
-                    min="0"
-                    value={paymentMontant}
-                    onChange={(e) => setPaymentMontant(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  />
-                  {paymentDevise === 'FC' && paymentMontant && !isNaN(parseFloat(paymentMontant)) && (
-                    <div className="text-[11px] text-slate-500 mt-1 font-mono">
-                      Équivaut à : ~{(parseFloat(paymentMontant) / currentExchangeRate).toFixed(2)} USD au taux scellé de {currentExchangeRate} FC
+
+                  {/* Saisie du montant versé */}
+                  <div>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="text-xs font-bold text-slate-700">
+                        Montant réellement versé ({paymentDevise}) *
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (paymentDevise === 'USD') {
+                            setPaymentMontant(selectedFactureForPayment.solde_usd.toString());
+                          } else {
+                            setPaymentMontant(Math.round(selectedFactureForPayment.solde_usd * currentExchangeRate).toString());
+                          }
+                        }}
+                        className="text-[11px] text-emerald-700 hover:underline font-semibold cursor-pointer"
+                      >
+                        Régler la totalité
+                      </button>
+                    </div>
+                    <input
+                      type="number"
+                      step={paymentDevise === 'USD' ? '0.5' : '100'}
+                      min="0"
+                      value={paymentMontant}
+                      onChange={(e) => setPaymentMontant(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                    {paymentDevise === 'FC' && paymentMontant && !isNaN(parseFloat(paymentMontant)) && (
+                      <div className="text-[11px] text-slate-500 mt-1 font-mono">
+                        Équivaut à : ~{(parseFloat(paymentMontant) / currentExchangeRate).toFixed(2)} USD au taux scellé de {currentExchangeRate} FC
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Mode de règlement */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Mode d'encaissement *
+                    </label>
+                    <select
+                      value={paymentMode}
+                      onChange={(e) => setPaymentMode(e.target.value as any)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs text-slate-900 bg-white"
+                    >
+                      <option value="ESPECES">Espèces (Cash)</option>
+                      <option value="MOBILE_MONEY">Mobile Money (M-Pesa, Orange, Airtel)</option>
+                      <option value="CARTE_BANCAIRE">Carte Bancaire / POS</option>
+                    </select>
+                  </div>
+
+                  {/* Référence transaction si mobile money */}
+                  {paymentMode !== 'ESPECES' && (
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Référence transaction / N° bordereau
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="ex: MPESA-88492049"
+                        value={paymentRef}
+                        onChange={(e) => setPaymentRef(e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
+                      />
                     </div>
                   )}
                 </div>
 
-                {/* Mode de règlement */}
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    Mode d'encaissement *
-                  </label>
-                  <select
-                    value={paymentMode}
-                    onChange={(e) => setPaymentMode(e.target.value as any)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs text-slate-900 bg-white"
-                  >
-                    <option value="ESPECES">Espèces (Cash)</option>
-                    <option value="MOBILE_MONEY">Mobile Money (M-Pesa, Orange, Airtel)</option>
-                    <option value="CARTE_BANCAIRE">Carte Bancaire / POS</option>
-                  </select>
-                </div>
-
-                {/* Référence transaction si mobile money */}
-                {paymentMode !== 'ESPECES' && (
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Référence transaction / N° bordereau
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="ex: MPESA-88492049"
-                      value={paymentRef}
-                      onChange={(e) => setPaymentRef(e.target.value)}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs"
-                    />
-                  </div>
-                )}
-
-                {/* Actions */}
-                <div className="pt-3 border-t border-slate-100 flex items-center justify-end space-x-3">
+                {/* Actions fixées en bas */}
+                <div className="shrink-0 bg-slate-50 px-5 sm:px-6 py-3 border-t border-slate-200 flex flex-col-reverse sm:flex-row justify-end gap-2">
                   <button
                     type="button"
                     onClick={() => setSelectedFactureForPayment(null)}
-                    className="px-4 py-2 border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold"
+                    className="w-full sm:w-auto px-4 py-2.5 border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold min-h-[44px] flex items-center justify-center cursor-pointer"
                   >
                     Annuler
                   </button>
@@ -1425,7 +1452,7 @@ export const BillingCashierView: React.FC = () => {
                     type="button"
                     onClick={handleProcessPayment}
                     disabled={isProcessingPayment || !paymentMontant}
-                    className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 text-white rounded-lg text-xs font-bold shadow-xs transition-colors flex items-center space-x-1.5"
+                    className="w-full sm:w-auto px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 disabled:bg-slate-300 text-white rounded-lg text-xs font-bold shadow-xs transition-colors flex items-center justify-center space-x-1.5 min-h-[44px] cursor-pointer"
                   >
                     {isProcessingPayment ? (
                       <span>Encaissement en cours...</span>

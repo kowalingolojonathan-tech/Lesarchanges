@@ -763,9 +763,9 @@ export const ReceptionAppointmentsModal: React.FC<ReceptionAppointmentsModalProp
 
       {/* MODALE PRISE DE RENDEZ-VOUS (ACCUEIL & TÉLÉPHONE) */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-60 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-5 shadow-2xl border border-slate-200 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+        <div className="fixed inset-0 z-60 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-hidden" id="modal_create_rdv_overlay">
+          <div className="relative bg-white rounded-2xl max-w-lg w-full max-h-[calc(100dvh-1rem)] sm:max-h-[92vh] flex flex-col overflow-hidden shadow-2xl border border-slate-200" id="modal_create_rdv_container">
+            <div className="shrink-0 flex items-center justify-between border-b border-slate-200 px-5 py-4">
               <div className="flex items-center space-x-2">
                 <div className={`p-2 rounded-lg ${isPhoneRequest ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'}`}>
                   {isPhoneRequest ? <PhoneCall className="w-4 h-4" /> : <Calendar className="w-4 h-4" />}
@@ -782,13 +782,14 @@ export const ReceptionAppointmentsModal: React.FC<ReceptionAppointmentsModalProp
               <button
                 type="button"
                 onClick={() => setShowCreateModal(false)}
-                className="text-slate-400 hover:text-slate-600"
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleCreateAppointment} className="space-y-3.5 text-xs">
+            <form onSubmit={handleCreateAppointment} className="flex-1 flex flex-col min-h-0 overflow-hidden" id="form_create_rdv">
+              <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3.5 text-xs">
               {/* Type de demande */}
               <div className="flex items-center space-x-4 bg-slate-50 p-2 rounded-lg border border-slate-200">
                 <span className="font-semibold text-slate-700">Source :</span>
@@ -962,19 +963,21 @@ export const ReceptionAppointmentsModal: React.FC<ReceptionAppointmentsModalProp
                 />
               </div>
 
-              {/* Actions */}
-              <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-200">
+              </div>
+
+              {/* Actions fixées en bas */}
+              <div className="shrink-0 bg-slate-50 px-4 sm:px-6 py-3 border-t border-slate-200 flex flex-col-reverse sm:flex-row justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setShowCreateModal(false)}
-                  className="px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-700"
+                  className="w-full sm:w-auto px-4 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors min-h-[40px] flex items-center justify-center cursor-pointer"
                 >
                   Annuler
                 </button>
                 <button
                   type="submit"
                   disabled={saving || (!selectedPatient && patientSearchResults.length !== 1)}
-                  className="px-4 py-1.5 bg-blue-700 hover:bg-blue-800 text-white rounded-lg font-bold shadow-xs disabled:opacity-50"
+                  className="w-full sm:w-auto px-5 py-2 text-xs font-bold text-white bg-blue-700 hover:bg-blue-800 rounded-lg transition-colors flex items-center justify-center space-x-1.5 shadow-sm disabled:opacity-50 min-h-[40px] cursor-pointer"
                 >
                   {saving ? 'Enregistrement...' : 'Confirmer le Rendez-vous'}
                 </button>
@@ -1062,9 +1065,9 @@ export const ReceptionAppointmentsModal: React.FC<ReceptionAppointmentsModalProp
 
       {/* MODALE MODIFICATION / REPLANIFICATION */}
       {selectedRdvForEdit && (
-        <div className="fixed inset-0 z-60 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-5 shadow-2xl border border-slate-200 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+        <div className="fixed inset-0 z-60 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-hidden" id="modal_edit_rdv_overlay">
+          <div className="relative bg-white rounded-2xl max-w-lg w-full max-h-[calc(100dvh-1rem)] sm:max-h-[92vh] flex flex-col overflow-hidden shadow-2xl border border-slate-200" id="modal_edit_rdv_container">
+            <div className="shrink-0 flex items-center justify-between border-b border-slate-200 px-5 py-4">
               <div className="flex items-center space-x-2">
                 <div className="p-2 bg-blue-100 text-blue-800 rounded-lg">
                   <Edit3 className="w-4 h-4" />
@@ -1081,114 +1084,116 @@ export const ReceptionAppointmentsModal: React.FC<ReceptionAppointmentsModalProp
               <button
                 type="button"
                 onClick={() => setSelectedRdvForEdit(null)}
-                className="text-slate-400 hover:text-slate-600"
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveEdit} className="space-y-3 text-xs">
-              {/* Médecin assigné */}
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Médecin assigné *
-                </label>
-                <select
-                  value={editDoctorId}
-                  onChange={(e) => setEditDoctorId(e.target.value)}
-                  className="w-full p-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-medium"
-                >
-                  {doctors.map(d => (
-                    <option key={d.id} value={d.id}>Dr. {d.nom_complet}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Date & Heure */}
-              <div className="grid grid-cols-2 gap-3">
+            <form onSubmit={handleSaveEdit} className="flex-1 flex flex-col min-h-0 overflow-hidden" id="form_edit_rdv">
+              <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3 text-xs">
+                {/* Médecin assigné */}
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">
-                    Date du RDV *
+                    Médecin assigné *
+                  </label>
+                  <select
+                    value={editDoctorId}
+                    onChange={(e) => setEditDoctorId(e.target.value)}
+                    className="w-full p-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-medium"
+                  >
+                    {doctors.map(d => (
+                      <option key={d.id} value={d.id}>Dr. {d.nom_complet}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Date & Heure */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">
+                      Date du RDV *
+                    </label>
+                    <input
+                      type="date"
+                      value={editDate}
+                      onChange={(e) => setEditDate(e.target.value)}
+                      className="w-full p-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">
+                      Heure du RDV *
+                    </label>
+                    <input
+                      type="time"
+                      value={editHeure}
+                      onChange={(e) => setEditHeure(e.target.value)}
+                      className="w-full p-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Statut */}
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Statut du rendez-vous :
+                  </label>
+                  <select
+                    value={editStatut}
+                    onChange={(e) => setEditStatut(e.target.value as RendezVousStatut)}
+                    className="w-full p-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-semibold"
+                  >
+                    <option value="PLANIFIÉ">PLANIFIÉ</option>
+                    <option value="CONFIRMÉ">CONFIRMÉ</option>
+                    <option value="PATIENT PRÉSENT">PATIENT PRÉSENT</option>
+                    <option value="HONORÉ">HONORÉ</option>
+                    <option value="ABSENT">ABSENT</option>
+                    <option value="ANNULÉ">ANNULÉ</option>
+                  </select>
+                </div>
+
+                {/* Motif */}
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    Motif de la venue
                   </label>
                   <input
-                    type="date"
-                    value={editDate}
-                    onChange={(e) => setEditDate(e.target.value)}
+                    type="text"
+                    value={editMotif}
+                    onChange={(e) => setEditMotif(e.target.value)}
                     className="w-full p-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
+
+                {/* Notes */}
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">
-                    Heure du RDV *
+                    Remarques / Observations
                   </label>
-                  <input
-                    type="time"
-                    value={editHeure}
-                    onChange={(e) => setEditHeure(e.target.value)}
+                  <textarea
+                    rows={2}
+                    value={editNotes}
+                    onChange={(e) => setEditNotes(e.target.value)}
+                    placeholder="Notes complémentaires..."
                     className="w-full p-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
               </div>
 
-              {/* Statut */}
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Statut du rendez-vous :
-                </label>
-                <select
-                  value={editStatut}
-                  onChange={(e) => setEditStatut(e.target.value as RendezVousStatut)}
-                  className="w-full p-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-semibold"
-                >
-                  <option value="PLANIFIÉ">PLANIFIÉ</option>
-                  <option value="CONFIRMÉ">CONFIRMÉ</option>
-                  <option value="PATIENT PRÉSENT">PATIENT PRÉSENT</option>
-                  <option value="HONORÉ">HONORÉ</option>
-                  <option value="ABSENT">ABSENT</option>
-                  <option value="ANNULÉ">ANNULÉ</option>
-                </select>
-              </div>
-
-              {/* Motif */}
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Motif de la venue
-                </label>
-                <input
-                  type="text"
-                  value={editMotif}
-                  onChange={(e) => setEditMotif(e.target.value)}
-                  className="w-full p-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              {/* Notes */}
-              <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Remarques / Observations
-                </label>
-                <textarea
-                  rows={2}
-                  value={editNotes}
-                  onChange={(e) => setEditNotes(e.target.value)}
-                  placeholder="Notes complémentaires..."
-                  className="w-full p-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              {/* Actions */}
-              <div className="flex items-center justify-end space-x-2 pt-2 border-t border-slate-200">
+              {/* Actions fixées en bas */}
+              <div className="shrink-0 bg-slate-50 px-4 sm:px-6 py-3 border-t border-slate-200 flex flex-col-reverse sm:flex-row justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setSelectedRdvForEdit(null)}
-                  className="px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-700"
+                  className="w-full sm:w-auto px-4 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors min-h-[40px] flex items-center justify-center cursor-pointer"
                 >
                   Annuler
                 </button>
                 <button
                   type="submit"
                   disabled={saving}
-                  className="px-4 py-1.5 bg-blue-700 hover:bg-blue-800 text-white rounded-lg font-bold shadow-xs disabled:opacity-50"
+                  className="w-full sm:w-auto px-5 py-2 text-xs font-bold text-white bg-blue-700 hover:bg-blue-800 rounded-lg transition-colors flex items-center justify-center space-x-1.5 shadow-sm disabled:opacity-50 min-h-[40px] cursor-pointer"
                 >
                   {saving ? 'Enregistrement...' : 'Enregistrer les Modifications'}
                 </button>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Visite } from '../../types/index.js';
 import { Activity, AlertCircle, CheckCircle2, Heart, Thermometer, Wind, Scale, X, Ruler } from 'lucide-react';
 import { apiFetch } from '../../lib/api';
@@ -10,6 +10,13 @@ interface TriageVitalsModalProps {
 }
 
 export const TriageVitalsModal: React.FC<TriageVitalsModalProps> = ({ visite, onClose, onSuccess }) => {
+  const scrollAreaRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (scrollAreaRef.current) {
+      scrollAreaRef.current.scrollTop = 0;
+    }
+  }, []);
   // 8 champs de constantes séparés avec leurs valeurs respectives
   const [temperature, setTemperature] = useState<string>('37.0');
   const [pouls, setPouls] = useState<string>('75');
@@ -210,10 +217,10 @@ export const TriageVitalsModal: React.FC<TriageVitalsModalProps> = ({ visite, on
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto">
-      <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-4xl overflow-hidden my-8">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-2 sm:p-4 overflow-hidden" id="modal_triage_overlay">
+      <div className="relative bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-4xl max-h-[calc(100dvh-1rem)] sm:max-h-[92vh] flex flex-col overflow-hidden" id="modal_triage_container">
         {/* Header modal */}
-        <div className="bg-slate-800 text-white px-6 py-4 flex items-center justify-between">
+        <div className="shrink-0 bg-slate-800 text-white px-5 sm:px-6 py-4 flex items-center justify-between" id="modal_triage_header">
           <div className="flex items-center space-x-3">
             <div className="p-2 bg-emerald-500/20 rounded-lg border border-emerald-400/30">
               <Activity className="w-5 h-5 text-emerald-400" />
@@ -226,16 +233,18 @@ export const TriageVitalsModal: React.FC<TriageVitalsModalProps> = ({ visite, on
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="text-slate-400 hover:text-white transition-colors p-1 rounded-md"
-            title="Fermer"
+            className="text-slate-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/10"
+            aria-label="Fermer"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Formulaire */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-6">
+        {/* Formulaire avec scroll interne fluide */}
+        <form onSubmit={handleSubmit} className="flex-1 flex flex-col min-h-0 overflow-hidden" id="form_triage">
+          <div ref={scrollAreaRef} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
           {errorMessage && (
             <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
               <div className="flex items-start space-x-2 text-red-800 text-sm font-semibold">
@@ -521,33 +530,34 @@ export const TriageVitalsModal: React.FC<TriageVitalsModalProps> = ({ visite, on
           <div className="bg-blue-50/60 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
             <strong>Traçabilité clinique :</strong> Les 8 constantes saisies (Température en °C, Pouls en bpm, Poids en kg, Taille en cm, SpO₂ en %, Fréquence respiratoire en cycles/min, PAS et PAD distinctes en mmHg) sont archivées de manière permanente avec la visite en cours. La glycémie est réservée au workflow d'analyses de laboratoire.
           </div>
+        </div>
 
-          {/* Boutons d'action */}
-          <div className="flex justify-end space-x-3 pt-2 border-t border-slate-200">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
-            >
-              Annuler
-            </button>
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="px-5 py-2 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg transition-colors flex items-center space-x-1.5 shadow-sm disabled:opacity-50 cursor-pointer"
-            >
-              {isSubmitting ? (
-                <span>Validation en cours...</span>
-              ) : (
-                <>
-                  <CheckCircle2 className="w-4 h-4 mr-1" />
-                  <span>Enregistrer les constantes & Affecter un médecin</span>
-                </>
-              )}
-            </button>
-          </div>
-        </form>
-      </div>
+        {/* Boutons d'action tactiles fixés en bas */}
+        <div className="shrink-0 bg-slate-50 px-4 sm:px-6 py-3 border-t border-slate-200 flex flex-col-reverse sm:flex-row justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full sm:w-auto px-4 py-2.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors min-h-[44px] flex items-center justify-center cursor-pointer"
+          >
+            Annuler
+          </button>
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="w-full sm:w-auto px-5 py-2.5 text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg transition-colors flex items-center justify-center space-x-1.5 shadow-sm disabled:opacity-50 min-h-[44px] cursor-pointer"
+          >
+            {isSubmitting ? (
+              <span>Validation en cours...</span>
+            ) : (
+              <>
+                <CheckCircle2 className="w-4 h-4 mr-1" />
+                <span>Enregistrer les constantes & Affecter un médecin</span>
+              </>
+            )}
+          </button>
+        </div>
+      </form>
     </div>
-  );
+  </div>
+);
 };

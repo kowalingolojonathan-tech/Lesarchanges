@@ -100,14 +100,16 @@ async function startServer() {
 
   // --- ROUTES API ÉTAPE 8 : TARIFS, TAUX USD/FC, FACTURATION MULTI-PRESTATIONS & RAPPORTS ---
   // Tarifs & Prestations
-  app.get('/api/tarifs', requireAuth, requireRole(['RÉCEPTION', 'MÉDECIN', 'ADMINISTRATEUR', 'LABORATOIRE']), billingCtrl.getTarifs);
+  app.get('/api/tarifs', requireAuth, requireRole(['RÉCEPTION', 'MÉDECIN', 'ADMINISTRATEUR', 'LABORATOIRE', 'DIRECTEUR']), billingCtrl.getTarifs);
   app.post('/api/tarifs', requireAuth, requireRole(['ADMINISTRATEUR']), billingCtrl.createTarif);
   app.put('/api/tarifs/:id', requireAuth, requireRole(['ADMINISTRATEUR']), billingCtrl.updateTarif);
   app.patch('/api/tarifs/:id/toggle-actif', requireAuth, requireRole(['ADMINISTRATEUR']), billingCtrl.toggleTarifActif);
 
-  // Taux de change 1 USD = X FC
+  // Taux de change 1 USD = X FC (accessible sous /api/billing/exchange-rate et /api/settings/exchange-rate)
   app.get('/api/billing/exchange-rate', requireAuth, billingCtrl.getExchangeRate);
+  app.get('/api/settings/exchange-rate', requireAuth, billingCtrl.getExchangeRate);
   app.put('/api/billing/exchange-rate', requireAuth, requireRole(['ADMINISTRATEUR']), billingCtrl.updateExchangeRate);
+  app.put('/api/settings/exchange-rate', requireAuth, requireRole(['ADMINISTRATEUR']), billingCtrl.updateExchangeRate);
 
   // Factures & Règlements
   app.get('/api/factures', requireAuth, requirePermission('factures:voir'), billingCtrl.getFactures);
@@ -122,6 +124,10 @@ async function startServer() {
 
   // Statut de paiement d'une visite pour Médecin et Laboratoire
   app.get('/api/visites/:visite_id/payment-status', requireAuth, requireRole(['MÉDECIN', 'LABORATOIRE', 'RÉCEPTION', 'ADMINISTRATEUR']), billingCtrl.getVisitePaymentStatus);
+
+  // Encaissement des examens de laboratoire par la Réception (agissant comme Caisse)
+  app.get('/api/billing/lab-orders-to-collect', requireAuth, requireRole(['RÉCEPTION', 'ADMINISTRATEUR', 'MÉDECIN']), billingCtrl.getLabOrdersToCollect);
+  app.post('/api/billing/lab-orders/:id/collect', requireAuth, requireRole(['RÉCEPTION', 'ADMINISTRATEUR']), billingCtrl.collectLabOrderPayment);
 
   // --- ROUTES API PHASE 2B : ESPACE MÉDECIN, CONSULTATIONS CLINIQUES & HISTORIQUE MÉDICAL ---
   // Protection RBAC stricte : Seul le rôle MÉDECIN peut accéder à ces données confidentielles.
@@ -195,6 +201,11 @@ async function startServer() {
       phase: 'V1 - Phase 1 Socle Technique',
       timestamp: new Date().toISOString()
     });
+  });
+
+  // --- PROTECTION ABSOLUE DES ROUTES API : Réponse JSON 404 stricte (évite de renvoyer l'index.html de Vite) ---
+  app.all('/api/*', (req, res) => {
+    res.status(404).json({ error: `Route API introuvable: ${req.method} ${req.originalUrl}` });
   });
 
   // --- CONFIGURATION DU SERVEUR VITE / STATIC ---
