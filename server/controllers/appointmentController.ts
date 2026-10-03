@@ -612,12 +612,15 @@ export async function updateAppointmentReminder(req: AuthenticatedRequest, res: 
     );
 
     const updated = await queryOne(
-      `SELECT r.*, 
-              p.nom as patient_nom, p.prenom as patient_prenom, p.numero_dossier, p.telephone as patient_telephone,
+      `SELECT r.*,
+              COALESCE(p.nom, r.patient_nom_temp) as patient_nom,
+              COALESCE(p.prenom, r.patient_prenom_temp) as patient_prenom,
+              COALESCE(p.numero_dossier, 'SANS DOSSIER') as numero_dossier,
+              COALESCE(p.telephone, r.patient_telephone_temp, '') as patient_telephone,
               u.nom_complet as medecin_nom,
               c.nom_complet as cree_par_nom
        FROM rendez_vous r
-       JOIN patients p ON r.patient_id = p.id
+       LEFT JOIN patients p ON r.patient_id = p.id
        JOIN users u ON r.medecin_id = u.id
        LEFT JOIN users c ON r.cree_par_id = c.id
        WHERE r.id = ?`,

@@ -388,6 +388,9 @@ export const ReceptionAppointmentsModal: React.FC<ReceptionAppointmentsModalProp
     }
   };
 
+  // Mode section
+  const [sectionFilter, setSectionFilter] = useState<'ALL' | 'AUJOURDHUI' | 'RAPPLES' | 'EN_ATTENTE'>('ALL');
+
   // Filtrage local
   const filteredAppointments = appointments.filter(rdv => {
     if (!searchQuery.trim()) return true;
@@ -400,6 +403,33 @@ export const ReceptionAppointmentsModal: React.FC<ReceptionAppointmentsModalProp
     const motifText = (rdv.motif || '').toLowerCase();
     return nom.includes(q) || prenom.includes(q) || dossier.includes(q) || tel.includes(q) || medecin.includes(q) || motifText.includes(q);
   });
+
+  // Sections avec compteurs
+  const today = new Date().toISOString().split('T')[0];
+  const todayCount = filteredAppointments.filter(r => r.date_rdv === today && r.statut !== 'ANNULÉ').length;
+  const reminderCount = filteredAppointments.filter(r =>
+    r.date_rdv === today && r.statut !== 'ANNULÉ' && r.rappel_statut !== 'CONFIRME_PAR_PATIENT'
+  ).length;
+  const pendingCount = filteredAppointments.filter(r =>
+    r.statut !== 'ANNULÉ' && r.statut !== 'HONORÉ' && r.statut !== 'PATIENT PRÉSENT'
+  ).length;
+
+  const sectionFilteredAppointments = (() => {
+    switch (sectionFilter) {
+      case 'AUJOURDHUI':
+        return filteredAppointments.filter(r => r.date_rdv === today && r.statut !== 'ANNULÉ');
+      case 'RAPPLES':
+        return filteredAppointments.filter(r =>
+          r.date_rdv === today && r.statut !== 'ANNULÉ' && r.rappel_statut !== 'CONFIRME_PAR_PATIENT'
+        );
+      case 'EN_ATTENTE':
+        return filteredAppointments.filter(r =>
+          r.statut !== 'ANNULÉ' && r.statut !== 'HONORÉ' && r.statut !== 'PATIENT PRÉSENT'
+        );
+      default:
+        return filteredAppointments;
+    }
+  })();
 
   const getStatusBadge = (statut: RendezVousStatut) => {
     switch (statut) {
@@ -612,6 +642,88 @@ export const ReceptionAppointmentsModal: React.FC<ReceptionAppointmentsModalProp
           </div>
         </div>
 
+        {/* Sections avec compteurs */}
+        <div className="px-4 pt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setSectionFilter('ALL')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer ${
+              sectionFilter === 'ALL'
+                ? 'bg-blue-700 text-white shadow-xs'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            <Calendar className="w-3.5 h-3.5" />
+            <span>Tous</span>
+            {filteredAppointments.length > 0 && (
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                sectionFilter === 'ALL' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+              }`}>
+                {filteredAppointments.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSectionFilter('AUJOURDHUI')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer ${
+              sectionFilter === 'AUJOURDHUI'
+                ? 'bg-emerald-700 text-white shadow-xs'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            <span>Aujourd'hui</span>
+            {todayCount > 0 && (
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                sectionFilter === 'AUJOURDHUI' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-700'
+              }`}>
+                {todayCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSectionFilter('RAPPLES')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer ${
+              sectionFilter === 'RAPPLES'
+                ? 'bg-amber-700 text-white shadow-xs'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            <PhoneCall className="w-3.5 h-3.5" />
+            <span>Rappels J-1/J-2/J-3</span>
+            {reminderCount > 0 && (
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                sectionFilter === 'RAPPLES' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-700'
+              }`}>
+                {reminderCount}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSectionFilter('EN_ATTENTE')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer ${
+              sectionFilter === 'EN_ATTENTE'
+                ? 'bg-rose-700 text-white shadow-xs'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            <Clock className="w-3.5 h-3.5" />
+            <span>En attente / Non honorés</span>
+            {pendingCount > 0 && (
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                sectionFilter === 'EN_ATTENTE' ? 'bg-white/20 text-white' : 'bg-rose-100 text-rose-700'
+              }`}>
+                {pendingCount}
+              </span>
+            )}
+          </button>
+        </div>
+
         {/* Tableau des rendez-vous */}
         <div className="flex-1 overflow-y-auto p-4">
           {loading && appointments.length === 0 ? (
@@ -619,7 +731,7 @@ export const ReceptionAppointmentsModal: React.FC<ReceptionAppointmentsModalProp
               <RefreshCw className="w-8 h-8 mx-auto mb-2 animate-spin text-blue-600" />
               <p className="text-xs font-semibold">Chargement du planning des rendez-vous...</p>
             </div>
-          ) : filteredAppointments.length === 0 ? (
+          ) : sectionFilteredAppointments.length === 0 ? (
             <div className="text-center py-12 bg-slate-50 border border-dashed border-slate-200 rounded-xl">
               <Calendar className="w-8 h-8 text-slate-300 mx-auto mb-2" />
               <p className="text-sm font-semibold text-slate-600">Aucun rendez-vous trouvé</p>
@@ -642,7 +754,7 @@ export const ReceptionAppointmentsModal: React.FC<ReceptionAppointmentsModalProp
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filteredAppointments.map((rdv) => (
+                  {sectionFilteredAppointments.map((rdv) => (
                     <tr key={rdv.id} className="hover:bg-slate-50/70 transition-colors">
                       {/* Date & Heure */}
                       <td className="py-3 px-3.5 whitespace-nowrap">

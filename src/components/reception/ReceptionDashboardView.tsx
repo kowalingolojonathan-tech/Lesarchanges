@@ -14,6 +14,8 @@ import { InterpretationVisiteModal } from './InterpretationVisiteModal';
 import { ReceptionPrescriptionsModal } from './ReceptionPrescriptionsModal';
 import { ReceptionAppointmentsModal } from './ReceptionAppointmentsModal';
 import { CollectLabOrderModal } from './CollectLabOrderModal';
+import { NotificationModal } from './NotificationModal';
+import { PaymentsCaisseModal } from './PaymentsCaisseModal';
 import { apiFetch } from '../../lib/api';
 
 interface ReceptionDashboardViewProps {
@@ -34,21 +36,12 @@ export const ReceptionDashboardView: React.FC<ReceptionDashboardViewProps> = ({ 
   const [visites, setVisites] = useState<Visite[]>([]);
   const [activeFilter, setActiveFilter] = useState<'ALL' | 'ATTENTE_TRIAGE' | 'TRIAGE_TERMINE' | 'ATTENTE_MEDECIN'>('ALL');
   const [isLoading, setIsLoading] = useState(true);
-
-  // Alertes Réception & Caisse Directe
-  const [labOrders, setLabOrders] = useState<any[]>([]);
-  const [prescriptions, setPrescriptions] = useState<any[]>([]);
-  const [appointments, setAppointments] = useState<any[]>([]);
-  const [activeAlertTab, setActiveAlertTab] = useState<'LAB' | 'RDV' | 'PRESCRIPTIONS'>('LAB');
-  const [selectedLabOrderForPayment, setSelectedLabOrderForPayment] = useState<any | null>(null);
-  const [labPaymentType, setLabPaymentType] = useState<'PAYE' | 'PARTIEL' | 'NON_PAYE'>('COMPLET' as any);
-  const [labPaymentMontant, setLabPaymentMontant] = useState<string>('');
-  const [labPaymentDevise, setLabPaymentDevise] = useState<'USD' | 'FC'>('USD');
-  const [labPaymentMode, setLabPaymentMode] = useState<string>('ESPECES');
-  const [labPaymentMotif, setLabPaymentMotif] = useState<string>('');
-  const [labPaymentRecuClient, setLabPaymentRecuClient] = useState<string>('');
-  const [isSubmittingLabPayment, setIsSubmittingLabPayment] = useState<boolean>(false);
-  const [labPaymentSuccessMessage, setLabPaymentSuccessMessage] = useState<string | null>(null);
+  const [unreadNotifications, setUnreadNotifications] = useState<number>(0);
+  const [showNotificationsModal, setShowNotificationsModal] = useState(false);
+  const [showPaymentsModal, setShowPaymentsModal] = useState(false);
+  const [pendingInvoicesCount, setPendingInvoicesCount] = useState<number>(0);
+  const [pendingPrescriptionsCount, setPendingPrescriptionsCount] = useState<number>(0);
+  const [todayAppointmentsCount, setTodayAppointmentsCount] = useState<number>(0);
   const [exchangeRate, setExchangeRate] = useState<number>(2850);
 
   // Modals & Chained Workflow State
@@ -68,7 +61,7 @@ export const ReceptionDashboardView: React.FC<ReceptionDashboardViewProps> = ({ 
   const [showPrescriptionsModal, setShowPrescriptionsModal] = useState(false);
   const [showAppointmentsModal, setShowAppointmentsModal] = useState(false);
 
-  // Charger les statistiques, visites du jour et alertes réception
+  // Charger les statistiques, visites du jour et notifications
   const loadData = async () => {
     setIsLoading(true);
     try {
@@ -88,40 +81,50 @@ export const ReceptionDashboardView: React.FC<ReceptionDashboardViewProps> = ({ 
         setVisites(data.visites);
       }
 
-      // 3. Examens Labo à encaisser (Caisse Réception)
+      // 3. Notifications (compteur non lu)
       try {
-        const labRes = await apiFetch('/api/billing/lab-orders-to-collect');
-        if (labRes.ok) {
-          const lData = await labRes.json();
-          setLabOrders(lData.lab_orders || []);
+        const notifRes = await apiFetch('/api/notifications');
+        if (notifRes.ok) {
+          const nData = await notifRes.json();
+          setUnreadNotifications(nData.unread_count || 0);
         }
       } catch (err) {
-        console.error('Erreur chargement lab orders à encaisser:', err);
+        console.error('Erreur chargement notifications:', err);
       }
 
-      // 4. Ordonnances médicales prêtes à imprimer
+      // 3. Factures en attente de paiement (compteur Caisse)
+      try {
+        const facRes = await apiFetch('/api/factures?statut=NON%20PAY%E9');
+        if (facRes.ok) {
+          const fData = await facRes.json();
+          setPendingInvoicesCount((fData.factures || []).length);
+        }
+      } catch (err) {
+        console.error('Erreur chargement factures:', err);
+      }
+
+      // 4. Ordonnances en attente d'impression (VALIDEE uniquement)
       try {
         const prescRes = await apiFetch('/api/reception/prescriptions?statut=VALIDEE');
         if (prescRes.ok) {
           const pData = await prescRes.json();
-          setPrescriptions(pData.prescriptions || []);
+          setPendingPrescriptionsCount((pData.prescriptions || []).length);
         }
       } catch (err) {
-        console.error('Erreur chargement ordonnances à imprimer:', err);
+        console.error('Erreur chargement ordonnances:', err);
       }
 
-      // 5. Rendez-vous du jour
+      // 5. Rendez-vous du jour (compteur)
       try {
-        const rdvRes = await apiFetch('/api/rendez-vous');
+        const today = new Date().toISOString().split('T')[0];
+        const rdvRes = await apiFetch(`/api/rendez-vous?date=${today}`);
         if (rdvRes.ok) {
           const rData = await rdvRes.json();
-          const todayRdv = (rData.rendez_vous || []).filter((r: any) => 
-            r.date_heure && r.date_heure.startsWith(today) && r.statut !== 'ANNULÉ'
-          );
-          setAppointments(todayRdv);
+          const todayRdv = (rData.appointments || []).filter((r: any) => r.statut !== 'ANNULÉ');
+          setTodayAppointmentsCount(todayRdv.length);
         }
       } catch (err) {
-        console.error('Erreur chargement rdv:', err);
+        console.error('Erreur chargement RDV:', err);
       }
 
       // 6. Taux de change
@@ -144,17 +147,6 @@ export const ReceptionDashboardView: React.FC<ReceptionDashboardViewProps> = ({ 
   useEffect(() => {
     loadData();
 
-    const handleOpenLab = (e: any) => {
-      const id = e.detail?.lab_order_id;
-      if (id && labOrders.length > 0) {
-        const found = labOrders.find((o) => o.id === id);
-        if (found) {
-          setSelectedLabOrderForPayment(found);
-        }
-      }
-      setActiveAlertTab('LAB');
-    };
-
     const handleOpenAppointments = () => {
       setShowAppointmentsModal(true);
     };
@@ -163,16 +155,14 @@ export const ReceptionDashboardView: React.FC<ReceptionDashboardViewProps> = ({ 
       setShowPrescriptionsModal(true);
     };
 
-    window.addEventListener('open-lab-collection', handleOpenLab as EventListener);
     window.addEventListener('open-appointments', handleOpenAppointments as EventListener);
     window.addEventListener('open-prescriptions', handleOpenPrescriptions as EventListener);
 
     return () => {
-      window.removeEventListener('open-lab-collection', handleOpenLab as EventListener);
       window.removeEventListener('open-appointments', handleOpenAppointments as EventListener);
       window.removeEventListener('open-prescriptions', handleOpenPrescriptions as EventListener);
     };
-  }, [labOrders]);
+  }, []);
 
   const handleVitalsSuccess = (updatedVisite: Visite) => {
     setSelectedVisiteForVitals(null);
@@ -280,29 +270,44 @@ export const ReceptionDashboardView: React.FC<ReceptionDashboardViewProps> = ({ 
 
           <button
             onClick={() => setShowPrescriptionsModal(true)}
-            className="px-3.5 py-2 text-xs font-bold text-sky-900 bg-sky-50 border border-sky-300 hover:bg-sky-100 rounded-lg transition-colors flex items-center space-x-1.5 shadow-xs"
+            className="px-3.5 py-2 text-xs font-bold text-sky-900 bg-sky-50 border border-sky-300 hover:bg-sky-100 rounded-lg transition-colors flex items-center space-x-1.5 shadow-xs relative"
             title="Délivrance et impression des ordonnances"
           >
             <Printer className="w-4 h-4 text-sky-700" />
             <span>Ordonnances</span>
+            {pendingPrescriptionsCount > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-rose-600 text-white font-bold text-[10px] rounded-full flex items-center justify-center px-1 shadow-xs">
+                {pendingPrescriptionsCount}
+              </span>
+            )}
           </button>
 
           <button
             onClick={() => setShowAppointmentsModal(true)}
-            className="px-3.5 py-2 text-xs font-bold text-indigo-900 bg-indigo-50 border border-indigo-300 hover:bg-indigo-100 rounded-lg transition-colors flex items-center space-x-1.5 shadow-xs"
+            className="px-3.5 py-2 text-xs font-bold text-indigo-900 bg-indigo-50 border border-indigo-300 hover:bg-indigo-100 rounded-lg transition-colors flex items-center space-x-1.5 shadow-xs relative"
             title="Planning général des rendez-vous"
           >
             <Calendar className="w-4 h-4 text-indigo-700" />
             <span>Rendez-vous</span>
+            {todayAppointmentsCount > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-rose-600 text-white font-bold text-[10px] rounded-full flex items-center justify-center px-1 shadow-xs">
+                {todayAppointmentsCount}
+              </span>
+            )}
           </button>
 
           {onGoToCashier && (
             <button
               onClick={onGoToCashier}
-              className="px-3.5 py-2 text-xs font-bold text-emerald-900 bg-emerald-50 border border-emerald-300 hover:bg-emerald-100 rounded-lg transition-colors flex items-center space-x-1.5 shadow-xs"
+              className="px-3.5 py-2 text-xs font-bold text-emerald-900 bg-emerald-50 border border-emerald-300 hover:bg-emerald-100 rounded-lg transition-colors flex items-center space-x-1.5 shadow-xs relative"
             >
               <CreditCard className="w-4 h-4 text-emerald-700" />
               <span>Caisse & Paiements</span>
+              {pendingInvoicesCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-rose-600 text-white font-bold text-[10px] rounded-full flex items-center justify-center px-1 shadow-xs">
+                  {pendingInvoicesCount}
+                </span>
+              )}
             </button>
           )}
 
@@ -344,10 +349,15 @@ export const ReceptionDashboardView: React.FC<ReceptionDashboardViewProps> = ({ 
           {/* 2. Rendez-vous */}
           <button
             onClick={() => setShowAppointmentsModal(true)}
-            className="p-3 bg-indigo-50 border border-indigo-200 text-indigo-900 rounded-xl font-bold text-xs flex flex-col items-center justify-center text-center space-y-1 hover:bg-indigo-100 min-h-[56px] active:scale-95 transition-transform"
+            className="p-3 bg-indigo-50 border border-indigo-200 text-indigo-900 rounded-xl font-bold text-xs flex flex-col items-center justify-center text-center space-y-1 hover:bg-indigo-100 min-h-[56px] active:scale-95 transition-transform relative"
           >
             <Calendar className="w-5 h-5 text-indigo-700" />
             <span>Rendez-vous</span>
+            {todayAppointmentsCount > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[20px] h-[20px] bg-rose-600 text-white font-bold text-[10px] rounded-full flex items-center justify-center px-1 shadow-xs">
+                {todayAppointmentsCount}
+              </span>
+            )}
           </button>
 
           {/* 3. Arrivées / Recherche */}
@@ -361,29 +371,44 @@ export const ReceptionDashboardView: React.FC<ReceptionDashboardViewProps> = ({ 
 
           {/* 4. Paiements / Caisse */}
           <button
-            onClick={onGoToCashier ? onGoToCashier : () => setShowInterpretationModal(true)}
-            className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl font-bold text-xs flex flex-col items-center justify-center text-center space-y-1 hover:bg-emerald-100 min-h-[56px] active:scale-95 transition-transform"
+            onClick={() => setShowPaymentsModal(true)}
+            className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-xl font-bold text-xs flex flex-col items-center justify-center text-center space-y-1 hover:bg-emerald-100 min-h-[56px] active:scale-95 transition-transform relative"
           >
             <CreditCard className="w-5 h-5 text-emerald-700" />
             <span>Paiements / Caisse</span>
+            {pendingInvoicesCount > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[20px] h-[20px] bg-rose-600 text-white font-bold text-[10px] rounded-full flex items-center justify-center px-1 shadow-xs">
+                {pendingInvoicesCount}
+              </span>
+            )}
           </button>
 
           {/* 5. Ordonnances */}
           <button
             onClick={() => setShowPrescriptionsModal(true)}
-            className="p-3 bg-sky-50 border border-sky-200 text-sky-900 rounded-xl font-bold text-xs flex flex-col items-center justify-center text-center space-y-1 hover:bg-sky-100 min-h-[56px] active:scale-95 transition-transform"
+            className="p-3 bg-sky-50 border border-sky-200 text-sky-900 rounded-xl font-bold text-xs flex flex-col items-center justify-center text-center space-y-1 hover:bg-sky-100 min-h-[56px] active:scale-95 transition-transform relative"
           >
             <Printer className="w-5 h-5 text-sky-700" />
             <span>Ordonnances</span>
+            {pendingPrescriptionsCount > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[20px] h-[20px] bg-rose-600 text-white font-bold text-[10px] rounded-full flex items-center justify-center px-1 shadow-xs">
+                {pendingPrescriptionsCount}
+              </span>
+            )}
           </button>
 
           {/* 6. Notifications */}
           <button
-            onClick={() => window.dispatchEvent(new CustomEvent('open-notifications'))}
-            className="p-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl font-bold text-xs flex flex-col items-center justify-center text-center space-y-1 hover:bg-amber-100 min-h-[56px] active:scale-95 transition-transform"
+            onClick={() => setShowNotificationsModal(true)}
+            className="p-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-xl font-bold text-xs flex flex-col items-center justify-center text-center space-y-1 hover:bg-amber-100 min-h-[56px] active:scale-95 transition-transform relative"
           >
             <Bell className="w-5 h-5 text-amber-700" />
             <span>Notifications</span>
+            {unreadNotifications > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-[20px] h-[20px] bg-rose-600 text-white font-bold text-[10px] rounded-full flex items-center justify-center px-1 shadow-xs">
+                {unreadNotifications}
+              </span>
+            )}
           </button>
         </div>
       </div>
@@ -460,379 +485,6 @@ export const ReceptionDashboardView: React.FC<ReceptionDashboardViewProps> = ({ 
           </div>
           <p className="text-2xl font-black text-slate-800 mt-2 font-mono">{stats.total_patients_clinique}</p>
           <span className="text-[10px] text-slate-400 mt-1 block">Fiches permanentes</span>
-        </div>
-      </div>
-
-      {/* CENTRE D'ALERTES & ENCAISSEMENTS RÉCEPTION (CAISSE DIRECTE) */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
-        <div className="border-b border-slate-200 px-5 py-3.5 bg-gradient-to-r from-emerald-50/60 via-slate-50 to-indigo-50/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center space-x-2.5">
-            <div className="p-1.5 bg-emerald-600 text-white rounded-lg shadow-xs">
-              <Bell className="w-4 h-4" />
-            </div>
-            <div>
-              <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-2">
-                <span>Centre d'Alertes & Encaissements Réception (Caisse Directe)</span>
-                <span className="text-[10px] font-semibold bg-emerald-100 text-emerald-800 px-2 py-0.2 rounded-full">
-                  Guichet Unique
-                </span>
-              </h3>
-              <p className="text-[11px] text-slate-500">
-                Notification des prescriptions labo à percevoir, délivrance des ordonnances et arrivées des rendez-vous.
-              </p>
-            </div>
-          </div>
-
-          {/* Onglets de sélection du centre d'alertes */}
-          {(() => {
-            const unpaidLabOrders = labOrders.filter((o) => o.statut_paiement !== 'PAYÉ' && (o.solde_usd === undefined || o.solde_usd > 0.01) && !o.is_paid);
-            return (
-              <div className="flex items-center space-x-1 bg-white p-1 rounded-xl border border-slate-200 shadow-xs shrink-0">
-                <button
-                  onClick={() => setActiveAlertTab('LAB')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer ${
-                    activeAlertTab === 'LAB'
-                      ? 'bg-emerald-700 text-white shadow-xs'
-                      : 'text-slate-600 hover:bg-slate-100'
-                  }`}
-                >
-                  <FlaskConical className="w-3.5 h-3.5" />
-                  <span>Examens Labo</span>
-                  {unpaidLabOrders.length > 0 && (
-                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
-                      activeAlertTab === 'LAB' ? 'bg-white text-emerald-800' : 'bg-rose-100 text-rose-700'
-                    }`}>
-                      {unpaidLabOrders.length}
-                    </span>
-                  )}
-                </button>
-
-                <button
-                  onClick={() => setActiveAlertTab('PRESCRIPTIONS')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer ${
-                    activeAlertTab === 'PRESCRIPTIONS'
-                      ? 'bg-sky-700 text-white shadow-xs'
-                      : 'text-slate-600 hover:bg-slate-100'
-                  }`}
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>Ordonnances</span>
-                  {prescriptions.length > 0 && (
-                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
-                      activeAlertTab === 'PRESCRIPTIONS' ? 'bg-white text-sky-800' : 'bg-sky-100 text-sky-700'
-                    }`}>
-                      {prescriptions.length}
-                    </span>
-                  )}
-                </button>
-
-                <button
-                  onClick={() => setActiveAlertTab('RDV')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer ${
-                    activeAlertTab === 'RDV'
-                      ? 'bg-indigo-700 text-white shadow-xs'
-                      : 'text-slate-600 hover:bg-slate-100'
-                  }`}
-                >
-                  <Calendar className="w-3.5 h-3.5" />
-                  <span>Rendez-vous</span>
-                  {appointments.length > 0 && (
-                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
-                      activeAlertTab === 'RDV' ? 'bg-white text-indigo-800' : 'bg-indigo-100 text-indigo-700'
-                    }`}>
-                      {appointments.length}
-                    </span>
-                  )}
-                </button>
-              </div>
-            );
-          })()}
-        </div>
-
-        {/* Contenu de l'onglet actif */}
-        <div className="p-4 bg-slate-50/50">
-          {/* 1. ONGLET EXAMENS LABO À ENCAISSER */}
-          {activeAlertTab === 'LAB' && (() => {
-            const unpaidLabOrders = labOrders.filter((o) => o.statut_paiement !== 'PAYÉ' && (o.solde_usd === undefined || o.solde_usd > 0.01) && !o.is_paid);
-            return (
-              <div className="space-y-3">
-                {unpaidLabOrders.length === 0 ? (
-                  <div className="text-center py-6 text-slate-400 bg-white rounded-xl border border-slate-200 p-4">
-                    <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-2 opacity-80" />
-                    <p className="text-xs font-bold text-slate-700">Aucun examen de laboratoire en attente d'encaissement</p>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
-                      Tous les examens demandés sont réglés ou ont une dérogation. Les reçus sont disponibles à la caisse.
-                    </p>
-                    {onGoToCashier && (
-                      <button
-                        type="button"
-                        onClick={onGoToCashier}
-                        className="mt-3 inline-flex items-center space-x-1.5 px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
-                      >
-                        <Printer className="w-3.5 h-3.5" />
-                        <span>Consulter & Imprimer les reçus à la Caisse</span>
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex items-center justify-between pb-1">
-                      <span className="text-xs font-bold text-slate-700">
-                        {unpaidLabOrders.length} bon(s) d'examen en attente de paiement au guichet :
-                      </span>
-                      {onGoToCashier && (
-                        <button
-                          type="button"
-                          onClick={onGoToCashier}
-                          className="text-xs text-emerald-700 hover:text-emerald-900 font-bold flex items-center space-x-1 cursor-pointer"
-                        >
-                          <Printer className="w-3.5 h-3.5" />
-                          <span>Voir les reçus payés à la Caisse</span>
-                          <ArrowRight className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                      {unpaidLabOrders.map((order) => {
-                        const isPartial = order.statut_paiement === 'PARTIELLEMENT PAYÉ';
-                        const hasDerogation = order.has_derogation;
-                        const totalUsd = order.total_amount_usd || 10;
-                        const totalFc = Math.round(totalUsd * exchangeRate);
-
-                        return (
-                          <div
-                            key={order.id}
-                            className={`bg-white rounded-xl border p-3.5 flex flex-col justify-between shadow-xs transition-all hover:border-emerald-400 ${
-                              isPartial 
-                                ? 'border-amber-300 bg-amber-50/20' 
-                                : hasDerogation 
-                                ? 'border-blue-200 bg-blue-50/20' 
-                                : 'border-rose-200 ring-1 ring-rose-500/10'
-                            }`}
-                          >
-                            <div className="space-y-2">
-                              <div className="flex items-center justify-between">
-                                <span className="font-mono font-bold text-xs text-slate-900 bg-slate-100 px-2 py-0.5 rounded">
-                                  {order.numero_demande || 'LAB-BON'}
-                                </span>
-                                
-                                {/* Badge Statut */}
-                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                                  isPartial 
-                                    ? 'bg-amber-100 text-amber-800 border-amber-300' 
-                                    : hasDerogation 
-                                    ? 'bg-blue-100 text-blue-800 border-blue-300' 
-                                    : 'bg-rose-100 text-rose-800 border-rose-300'
-                                }`}>
-                                  {isPartial ? 'PARTIEL' : hasDerogation ? 'DÉROGATION' : 'À ENCAISSER'}
-                                </span>
-                              </div>
-
-                              <div>
-                                <div className="font-bold text-slate-900 text-xs truncate">
-                                  {order.patient_nom} {order.patient_prenom}
-                                </div>
-                                <div className="text-[10px] text-slate-400 font-mono">
-                                  Dossier : {order.numero_dossier}
-                                </div>
-                                <div className="text-[10px] text-slate-500 mt-0.5">
-                                  Prescrit par {order.medecin_nom || 'Médecin'}
-                                </div>
-                              </div>
-
-                              {/* Analyses demandées */}
-                              <div className="border-t border-slate-100 pt-2">
-                                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
-                                  Analyses prescrites :
-                                </span>
-                                <div className="flex flex-wrap gap-1">
-                                  {order.analyses && order.analyses.length > 0 ? (
-                                    order.analyses.map((a: any, idx: number) => (
-                                      <span key={idx} className="bg-slate-100 text-slate-800 text-[10px] px-1.5 py-0.2 rounded font-medium">
-                                        🔬 {a.nom_analyse}
-                                      </span>
-                                    ))
-                                  ) : (
-                                    <span className="text-slate-400 text-[10px]">Analyses diverses</span>
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* Détails financiers */}
-                              <div className="border-t border-slate-100 pt-2 flex items-center justify-between font-mono text-xs">
-                                <span className="text-[11px] text-slate-500 font-sans">Montant à percevoir :</span>
-                                <div className="text-right">
-                                  <span className="font-bold text-slate-900">{totalUsd.toFixed(2)} $</span>
-                                  <span className="text-[10px] text-slate-500 block">~{totalFc.toLocaleString('fr-FR')} FC</span>
-                                </div>
-                              </div>
-
-                              {hasDerogation && order.motif && (
-                                <div className="p-2 bg-blue-50 border border-blue-200 rounded text-[10px] text-blue-900">
-                                  <strong>Motif dérogation :</strong> {order.motif}
-                                </div>
-                              )}
-                            </div>
-
-                            {/* Action directe Caisse */}
-                            <div className="mt-3 pt-2 border-t border-slate-100">
-                              <button
-                                type="button"
-                                onClick={() => setSelectedLabOrderForPayment(order)}
-                                className="w-full py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg shadow-xs transition-colors flex items-center justify-center space-x-1.5 cursor-pointer"
-                              >
-                                <CreditCard className="w-3.5 h-3.5" />
-                                <span>Encaisser (Caisse Directe)</span>
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </>
-                )}
-              </div>
-            );
-          })()}
-
-          {/* 2. ONGLET ORDONNANCES PRÊTES À IMPRIMER */}
-          {activeAlertTab === 'PRESCRIPTIONS' && (
-            <div className="space-y-3">
-              {prescriptions.length === 0 ? (
-                <div className="text-center py-6 text-slate-400 bg-white rounded-xl border border-slate-200">
-                  <Printer className="w-8 h-8 text-sky-500 mx-auto mb-2 opacity-80" />
-                  <p className="text-xs font-bold text-slate-700">Aucune ordonnance prête à imprimer</p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    Les ordonnances validées par les médecins apparaîtront ici pour tirage papier immédiat.
-                  </p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {prescriptions.map((presc) => (
-                    <div
-                      key={presc.id}
-                      className="bg-white rounded-xl border border-sky-200 p-3.5 flex flex-col justify-between shadow-xs hover:border-sky-400 transition-colors"
-                    >
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <span className="font-mono font-bold text-xs text-slate-800 bg-sky-50 text-sky-900 border border-sky-200 px-2 py-0.5 rounded">
-                            {presc.numero_prescription || 'ORD-MED'}
-                          </span>
-                          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                            Prête
-                          </span>
-                        </div>
-                        <div className="font-bold text-slate-900 text-xs">
-                          {presc.patient_nom} {presc.patient_prenom}
-                        </div>
-                        <div className="text-[10px] text-slate-400 font-mono">
-                          Dossier : {presc.numero_dossier}
-                        </div>
-                        <div className="text-[10px] text-slate-500">
-                          Prescrit par {presc.medecin_nom || 'Dr traitant'}
-                        </div>
-                        <div className="text-[10px] text-slate-400">
-                          {new Date(presc.date_prescription || presc.created_at).toLocaleString('fr-FR')}
-                        </div>
-                      </div>
-
-                      <div className="mt-3 pt-2 border-t border-slate-100">
-                        <button
-                          type="button"
-                          onClick={() => setShowPrescriptionsModal(true)}
-                          className="w-full py-2 bg-sky-700 hover:bg-sky-800 text-white text-xs font-bold rounded-lg shadow-xs transition-colors flex items-center justify-center space-x-1.5 cursor-pointer"
-                        >
-                          <Printer className="w-3.5 h-3.5" />
-                          <span>Imprimer l'ordonnance</span>
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* 3. ONGLET RENDEZ-VOUS DU JOUR */}
-          {activeAlertTab === 'RDV' && (
-            <div className="space-y-3">
-              {appointments.length === 0 ? (
-                <div className="text-center py-6 text-slate-400 bg-white rounded-xl border border-slate-200">
-                  <Calendar className="w-8 h-8 text-indigo-500 mx-auto mb-2 opacity-80" />
-                  <p className="text-xs font-bold text-slate-700">Aucun rendez-vous prévu pour aujourd'hui</p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    Consultez le planning global pour les jours suivants.
-                  </p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {appointments.map((rdv) => (
-                    <div
-                      key={rdv.id}
-                      className="bg-white rounded-xl border border-indigo-200 p-3.5 flex flex-col justify-between shadow-xs hover:border-indigo-400 transition-colors"
-                    >
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <span className="font-bold text-xs text-indigo-900 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded font-mono">
-                            {rdv.heure_rdv || (rdv.date_heure ? new Date(rdv.date_heure).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '09:00')}
-                          </span>
-                          <span className="text-[10px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded">
-                            {rdv.statut}
-                          </span>
-                        </div>
-                        <div className="font-bold text-slate-900 text-xs">
-                          {rdv.patient_nom} {rdv.patient_prenom}
-                        </div>
-                        <div className="flex flex-wrap items-center gap-1 text-[10px] mt-0.5">
-                          <span className={`font-mono px-1.5 py-0.2 rounded border ${
-                            rdv.numero_dossier === 'SANS DOSSIER'
-                              ? 'text-amber-800 bg-amber-50 border-amber-300 font-bold'
-                              : 'text-emerald-800 bg-emerald-50 border-emerald-200'
-                          }`}>
-                            {rdv.numero_dossier === 'SANS DOSSIER' ? 'CLIENT SANS DOSSIER' : rdv.numero_dossier}
-                          </span>
-                          {rdv.statut_paiement === 'PAYÉ' && (
-                            <span className="font-bold text-[10px] text-emerald-800 bg-emerald-100 px-1.5 py-0.2 rounded border border-emerald-300">
-                              💰 Payé par anticipation
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-[10px] text-slate-500">
-                          Médecin : Dr. {rdv.medecin_nom || 'Médecin généraliste'}
-                        </div>
-                        {rdv.motif && (
-                          <div className="text-[11px] text-slate-600 bg-slate-50 p-1.5 rounded">
-                            {rdv.motif}
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="mt-3 pt-2 border-t border-slate-100 flex items-center gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => handleStartPatientArrivalFromRdv(rdv)}
-                          className="flex-1 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg shadow-xs transition-colors flex items-center justify-center space-x-1 cursor-pointer"
-                        >
-                          <UserPlus className="w-3.5 h-3.5" />
-                          <span>
-                            {rdv.numero_dossier === 'SANS DOSSIER' ? 'Arrivée : Créer dossier' : 'Démarrer Visite'}
-                          </span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setShowAppointmentsModal(true)}
-                          className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium rounded-lg transition-colors flex items-center justify-center cursor-pointer"
-                          title="Gérer ou modifier le rendez-vous"
-                        >
-                          <Calendar className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
         </div>
       </div>
 
@@ -1246,8 +898,6 @@ export const ReceptionDashboardView: React.FC<ReceptionDashboardViewProps> = ({ 
             setShowNewPatientModal(false);
             setInitialPatientDataForModal(undefined);
             loadData();
-            // Confirmer le RDV après création du dossier uniquement si le patient n'avait pas encore de dossier
-            // (si la visite est créée immédiatement, le flux visite liera le RDV et passera à PATIENT PRÉSENT)
             if (rdvContext?.rendez_vous_id) {
               apiFetch(`/api/rendez-vous/${rdvContext.rendez_vous_id}/status`, {
                 method: 'PATCH',
@@ -1257,14 +907,11 @@ export const ReceptionDashboardView: React.FC<ReceptionDashboardViewProps> = ({ 
                 if (!res.ok) {
                   const data = await res.json().catch(() => ({}));
                   console.error('Erreur confirmation RDV après création dossier:', data.error || res.statusText);
-                  // Le RDV reste en PLANIFIÉ — l'utilisateur pourra le confirmer manuellement
                 }
               }).catch(err => {
                 console.error('Erreur confirmation RDV après création dossier:', err);
-                // Le RDV reste en PLANIFIÉ — l'utilisateur pourra le confirmer manuellement
               });
             }
-            // Chaînage direct ininterrompu : Nouveau Patient -> Visite & Encaissement direct
             if (createVisiteImmediately !== false) {
               setSelectedPatientForVisite(patient);
               setVisiteRdvContext(rdvContext);
@@ -1286,7 +933,6 @@ export const ReceptionDashboardView: React.FC<ReceptionDashboardViewProps> = ({ 
             setSelectedPatientForVisite(null);
             setVisiteRdvContext(undefined);
             loadData();
-            // Chaînage direct lié : Visite & Encaissement -> Triage Signes Vitaux direct !
             setSelectedVisiteForVitals(createdVisite);
           }}
         />
@@ -1321,16 +967,12 @@ export const ReceptionDashboardView: React.FC<ReceptionDashboardViewProps> = ({ 
         />
       )}
 
-      {selectedLabOrderForPayment && (
-        <CollectLabOrderModal
-          order={selectedLabOrderForPayment}
-          exchangeRate={exchangeRate}
-          onClose={() => setSelectedLabOrderForPayment(null)}
-          onSuccess={() => {
-            setSelectedLabOrderForPayment(null);
-            loadData();
-          }}
-        />
+      {showNotificationsModal && (
+        <NotificationModal onClose={() => setShowNotificationsModal(false)} />
+      )}
+
+      {showPaymentsModal && (
+        <PaymentsCaisseModal onClose={() => setShowPaymentsModal(false)} />
       )}
     </div>
   );

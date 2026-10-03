@@ -1098,7 +1098,7 @@ export async function runMigrations(): Promise<void> {
         CREATE TABLE IF NOT EXISTS rendez_vous_new (
           id TEXT PRIMARY KEY,
           numero_rdv TEXT UNIQUE NOT NULL,
-          patient_id TEXT NOT NULL,
+          patient_id TEXT,
           medecin_id TEXT,
           date_rdv TEXT NOT NULL,
           heure_rdv TEXT,
@@ -1117,7 +1117,6 @@ export async function runMigrations(): Promise<void> {
           actif INTEGER DEFAULT 1,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
-          FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE RESTRICT,
           FOREIGN KEY (medecin_id) REFERENCES users(id) ON DELETE SET NULL,
           FOREIGN KEY (visite_id) REFERENCES visites(id) ON DELETE SET NULL
         );
@@ -1449,6 +1448,54 @@ export async function runMigrations(): Promise<void> {
       if (!facCols.includes('patient_telephone_temp')) {
         db.exec("ALTER TABLE factures ADD COLUMN patient_telephone_temp TEXT;");
       }
+    }
+
+    // Aligne la table existante : patient_id devient nullable (support RDV sans dossier médical)
+    const rdvPkRes = db.exec("PRAGMA table_info(rendez_vous);");
+    const rdvPkInfo = rdvPkRes.length > 0 && rdvPkRes[0].values.length > 0
+      ? rdvPkRes[0].values.find((v: any[]) => v[1] === 'patient_id')
+      : null;
+    if (rdvPkInfo && String(rdvPkInfo[3]).toUpperCase() === 'NOT NULL') {
+      db.exec(`
+        PRAGMA foreign_keys = OFF;
+        CREATE TABLE IF NOT EXISTS rendez_vous__tmp (
+          id TEXT PRIMARY KEY,
+          numero_rdv TEXT UNIQUE NOT NULL,
+          patient_id TEXT,
+          medecin_id TEXT,
+          date_rdv TEXT NOT NULL,
+          heure_rdv TEXT,
+          motif TEXT NOT NULL,
+          type_rdv TEXT DEFAULT 'CONSULTATION',
+          statut TEXT NOT NULL DEFAULT 'PLANIFIÉ',
+          cree_par_id TEXT,
+          notes TEXT,
+          visite_id TEXT,
+          rappel_statut TEXT DEFAULT 'NON_ENVOYE',
+          rappel_date TEXT,
+          source_demande TEXT DEFAULT 'ACCUEIL',
+          actif INTEGER DEFAULT 1,
+          patient_nom_temp TEXT,
+          patient_prenom_temp TEXT,
+          patient_telephone_temp TEXT,
+          facture_id TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+      `);
+      const colsRes = db.exec("PRAGMA table_info(rendez_vous);");
+      const cols = colsRes.length > 0 && colsRes[0].values.length > 0
+        ? colsRes[0].values.map((v: any[]) => String(v[1]))
+        : [];
+      const colList = cols.join(', ');
+      db.exec(`INSERT INTO rendez_vous__tmp (${colList}) SELECT ${colList} FROM rendez_vous;`);
+      db.exec("DROP TABLE rendez_vous;");
+      db.exec("ALTER TABLE rendez_vous__tmp RENAME TO rendez_vous;");
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_rdv_patient ON rendez_vous(patient_id);`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_rdv_medecin ON rendez_vous(medecin_id);`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_rdv_date ON rendez_vous(date_rdv);`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_rdv_statut ON rendez_vous(statut);`);
+      db.exec('PRAGMA foreign_keys = ON;');
     }
 
   } catch (err) {
