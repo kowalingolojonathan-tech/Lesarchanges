@@ -92,36 +92,37 @@ export const ReceptionDashboardView: React.FC<ReceptionDashboardViewProps> = ({ 
         console.error('Erreur chargement notifications:', err);
       }
 
-      // 3. Factures en attente de paiement (compteur Caisse)
+      // 3. Factures en attente de paiement (NON PAYÉ + PARTIELLEMENT PAYÉ — tous services)
       try {
-        const facRes = await apiFetch('/api/factures?statut=NON%20PAY%E9');
+        const facRes = await apiFetch('/api/factures');
         if (facRes.ok) {
           const fData = await facRes.json();
-          setPendingInvoicesCount((fData.factures || []).length);
+          const all = fData.factures || [];
+          setPendingInvoicesCount(all.filter((f: any) => f.statut !== 'PAYÉ').length);
         }
       } catch (err) {
         console.error('Erreur chargement factures:', err);
       }
 
-      // 4. Ordonnances en attente d'impression (VALIDEE uniquement)
+      // 4. Ordonnances en attente (VALIDEE + IMPRIMEE — excluant REMISE)
       try {
-        const prescRes = await apiFetch('/api/reception/prescriptions?statut=VALIDEE');
+        const prescRes = await apiFetch('/api/reception/prescriptions');
         if (prescRes.ok) {
           const pData = await prescRes.json();
-          setPendingPrescriptionsCount((pData.prescriptions || []).length);
+          const all = pData.prescriptions || [];
+          setPendingPrescriptionsCount(all.filter((p: any) => p.statut !== 'REMISE').length);
         }
       } catch (err) {
         console.error('Erreur chargement ordonnances:', err);
       }
 
-      // 5. Rendez-vous du jour (compteur)
+      // 5. Rendez-vous en attente (tous, non ANNULÉ et non HONORÉ — sans doublons)
       try {
-        const today = new Date().toISOString().split('T')[0];
-        const rdvRes = await apiFetch(`/api/rendez-vous?date=${today}`);
+        const rdvRes = await apiFetch('/api/rendez-vous?tous=true');
         if (rdvRes.ok) {
           const rData = await rdvRes.json();
-          const todayRdv = (rData.appointments || []).filter((r: any) => r.statut !== 'ANNULÉ');
-          setTodayAppointmentsCount(todayRdv.length);
+          const all = rData.appointments || [];
+          setTodayAppointmentsCount(all.filter((r: any) => r.statut !== 'ANNULÉ' && r.statut !== 'HONORÉ').length);
         }
       } catch (err) {
         console.error('Erreur chargement RDV:', err);
