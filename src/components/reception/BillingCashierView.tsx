@@ -22,6 +22,7 @@ export const BillingCashierView: React.FC = () => {
   const [factures, setFactures] = useState<Facture[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'NON PAYÉ' | 'PARTIELLEMENT PAYÉ' | 'PAYÉ'>('ALL');
+  const [prestationFilter, setPrestationFilter] = useState<'ALL' | 'LABORATOIRE' | 'CONSULTATION'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Taux officiel actuel
@@ -404,8 +405,17 @@ export const BillingCashierView: React.FC = () => {
     }
   };
 
+  const isLabFacture = (f: Facture) => {
+    if (f.type_prestation === 'LABORATOIRE') return true;
+    if (f.numero_facture && f.numero_facture.includes('LAB')) return true;
+    if (f.items && f.items.some(it => it.categorie === 'EXAMEN_LABORATOIRE' || (it.description && it.description.toLowerCase().includes('lab')))) return true;
+    return false;
+  };
+
   const filteredFactures = factures.filter(f => {
     if (statusFilter !== 'ALL' && f.statut !== statusFilter) return false;
+    if (prestationFilter === 'LABORATOIRE' && !isLabFacture(f)) return false;
+    if (prestationFilter === 'CONSULTATION' && isLabFacture(f)) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       const patientMatch = (f.patient_nom && f.patient_nom.toLowerCase().includes(q)) || 
@@ -522,32 +532,73 @@ export const BillingCashierView: React.FC = () => {
       {activeTab === 'FACTURES' && (
         <div className="bg-white rounded-b-xl border border-t-0 border-slate-200 shadow-xs overflow-hidden">
           {/* Barre de filtres */}
-          <div className="p-4 border-b border-slate-200 bg-slate-50/70 flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex flex-wrap gap-2">
-              {(['ALL', 'NON PAYÉ', 'PARTIELLEMENT PAYÉ', 'PAYÉ'] as const).map((st) => (
-                <button
-                  key={st}
-                  onClick={() => setStatusFilter(st)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                    statusFilter === st
-                      ? 'bg-slate-900 text-white shadow-xs'
-                      : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
-                  }`}
-                >
-                  {st === 'ALL' ? 'Toutes les factures' : st}
-                </button>
-              ))}
+          <div className="p-4 border-b border-slate-200 bg-slate-50/70 flex flex-col gap-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              {/* Filtres par statut */}
+              <div className="flex flex-wrap gap-1.5">
+                {(['ALL', 'NON PAYÉ', 'PARTIELLEMENT PAYÉ', 'PAYÉ'] as const).map((st) => (
+                  <button
+                    key={st}
+                    onClick={() => setStatusFilter(st)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                      statusFilter === st
+                        ? 'bg-slate-900 text-white shadow-xs'
+                        : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    {st === 'ALL' ? 'Tous les statuts' : st}
+                  </button>
+                ))}
+              </div>
+
+              {/* Barre de recherche */}
+              <div className="relative min-w-[260px]">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Rechercher par patient, N° dossier ou facture..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
             </div>
 
-            <div className="relative min-w-[260px]">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="Rechercher par patient, N° dossier ou facture..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
+            {/* Filtre par type de prestation (Laboratoire vs Consultation) */}
+            <div className="flex items-center gap-1.5 bg-slate-200/60 p-1 rounded-lg w-fit">
+              <button
+                type="button"
+                onClick={() => setPrestationFilter('ALL')}
+                className={`px-2.5 py-1 text-xs font-bold rounded-md transition-colors cursor-pointer ${
+                  prestationFilter === 'ALL'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Toutes prestations
+              </button>
+              <button
+                type="button"
+                onClick={() => setPrestationFilter('LABORATOIRE')}
+                className={`px-2.5 py-1 text-xs font-bold rounded-md transition-colors flex items-center space-x-1 cursor-pointer ${
+                  prestationFilter === 'LABORATOIRE'
+                    ? 'bg-emerald-700 text-white shadow-xs'
+                    : 'text-emerald-800 hover:bg-emerald-100/60'
+                }`}
+              >
+                <span>🔬 Examens Labo (Reçus & Factures)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPrestationFilter('CONSULTATION')}
+                className={`px-2.5 py-1 text-xs font-bold rounded-md transition-colors cursor-pointer ${
+                  prestationFilter === 'CONSULTATION'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                🩺 Consultations
+              </button>
             </div>
           </div>
 

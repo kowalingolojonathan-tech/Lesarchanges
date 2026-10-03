@@ -6,11 +6,20 @@ import { InterpretationVisiteModal } from './InterpretationVisiteModal';
 
 interface NewVisiteModalProps {
   patient: Patient;
+  rendezVousId?: string;
+  advanceFacture?: any;
   onClose: () => void;
   onSuccess: (visite: Visite) => void;
 }
 
-export const NewVisiteModal: React.FC<NewVisiteModalProps> = ({ patient, onClose, onSuccess }) => {
+export const NewVisiteModal: React.FC<NewVisiteModalProps> = ({ 
+  patient, 
+  rendezVousId, 
+  advanceFacture, 
+  onClose, 
+  onSuccess 
+}) => {
+  const isAdvancePaid = Boolean(advanceFacture && (advanceFacture.statut === 'PAYÉ' || advanceFacture.statut === 'PAYEE'));
   const [motifVenue, setMotifVenue] = useState('Consultation générale');
   const [typeVisite, setTypeVisite] = useState<VisiteType>('STANDARD');
   const [selectedTarifId, setSelectedTarifId] = useState<string>('tar-csl-01');
@@ -140,13 +149,14 @@ export const NewVisiteModal: React.FC<NewVisiteModalProps> = ({ patient, onClose
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           patient_id: patient.id,
+          rendez_vous_id: rendezVousId || undefined,
           motif_venue: motifVenue,
           type_visite: typeVisite,
           tarif_id: selectedTarifId,
           create_facture: true,
           reglement_immediat: true,
-          type_encaissement: typeEncaissement,
-          montant_paye: typeEncaissement === 'NON_PAYE' ? 0 : montantPayeNum,
+          type_encaissement: isAdvancePaid ? 'COMPLET' : typeEncaissement,
+          montant_paye: isAdvancePaid ? 0 : (typeEncaissement === 'NON_PAYE' ? 0 : montantPayeNum),
           devise: devisePaiement,
           mode_paiement: modePaiement,
           motif_non_paiement: typeEncaissement === 'NON_PAYE' ? motifNonPaiement.trim() : undefined
@@ -335,6 +345,15 @@ export const NewVisiteModal: React.FC<NewVisiteModalProps> = ({ patient, onClose
                   Paiement préalable obligatoire
                 </span>
               </div>
+
+              {isAdvancePaid && (
+                <div className="p-3 bg-emerald-100/90 border border-emerald-300 rounded-lg flex items-center space-x-2 text-xs text-emerald-900 font-medium">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+                  <span>
+                    <strong>Paiement anticipé validé :</strong> Cette consultation a déjà été intégralement réglée lors de la réservation ({advanceFacture?.numero_facture || 'Pré-payé'}). Aucun nouvel encaissement requis.
+                  </span>
+                </div>
+              )}
 
               {/* Sélection Type d'encaissement */}
               <div className="grid grid-cols-3 gap-1.5 text-xs">

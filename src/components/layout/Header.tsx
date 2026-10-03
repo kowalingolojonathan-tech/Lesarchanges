@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext.js';
 import { 
   Shield, User, LogOut, RefreshCw, KeyRound, Sparkles, PanelLeftClose, PanelLeftOpen,
-  Bell, Check, FileText, CheckCheck, FlaskConical, Clock, X, Menu
+  Bell, Check, FileText, CheckCheck, FlaskConical, Clock, X, Menu, CreditCard, Printer, Calendar
 } from 'lucide-react';
 import { Role } from '../../types/index.js';
 import { apiFetch } from '../../lib/api';
@@ -314,8 +314,57 @@ export const Header: React.FC<HeaderProps> = ({
                                 <span>{new Date(n.created_at).toLocaleString('fr-FR')}</span>
                               </div>
 
-                              {/* Action directe si lié à un bon de laboratoire */}
-                              {n.lab_order_id && (
+                              {/* Action directe adaptée au rôle de l'utilisateur connecté */}
+                              {user?.role === 'RÉCEPTION' && n.lab_order_id && (
+                                n.is_lab_paid || (n as any).lab_facture_statut === 'PAYÉ' ? (
+                                  <div className="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-800 font-bold text-[11px] rounded-lg border border-emerald-200">
+                                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                    <span>✓ Réglé à la caisse</span>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      window.dispatchEvent(new CustomEvent('open-lab-collection', { detail: { lab_order_id: n.lab_order_id } }));
+                                      setShowNotifications(false);
+                                    }}
+                                    className="mt-1.5 inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 font-bold text-[11px] rounded-lg border border-emerald-300 transition-colors min-h-[36px] shadow-xs cursor-pointer"
+                                  >
+                                    <CreditCard className="w-3.5 h-3.5 text-emerald-600" />
+                                    <span>Encaisser au guichet (Caisse)</span>
+                                  </button>
+                                )
+                              )}
+
+                              {(n.type === 'PRESCRIPTION_READY' || n.titre?.toLowerCase().includes('ordonnance')) && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    window.dispatchEvent(new CustomEvent('open-prescriptions'));
+                                    setShowNotifications(false);
+                                  }}
+                                  className="mt-1.5 inline-flex items-center gap-1.5 px-3 py-1.5 bg-sky-50 text-sky-800 hover:bg-sky-100 font-bold text-[11px] rounded-lg border border-sky-300 transition-colors min-h-[36px] shadow-xs cursor-pointer"
+                                >
+                                  <Printer className="w-3.5 h-3.5 text-sky-600" />
+                                  <span>Imprimer ordonnance</span>
+                                </button>
+                              )}
+
+                              {(n.type === 'APPOINTMENT' || n.titre?.toLowerCase().includes('rendez-vous')) && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    window.dispatchEvent(new CustomEvent('open-appointments'));
+                                    setShowNotifications(false);
+                                  }}
+                                  className="mt-1.5 inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 font-bold text-[11px] rounded-lg border border-indigo-300 transition-colors min-h-[36px] shadow-xs cursor-pointer"
+                                >
+                                  <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+                                  <span>Gérer le rendez-vous</span>
+                                </button>
+                              )}
+
+                              {user?.role !== 'RÉCEPTION' && n.lab_order_id && (
                                 <button
                                   type="button"
                                   onClick={() => {

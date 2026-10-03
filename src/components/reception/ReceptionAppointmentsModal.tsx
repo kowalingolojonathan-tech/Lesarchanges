@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { 
   Calendar, Clock, CheckCircle2, AlertCircle, Plus, Trash2, 
   RefreshCw, Search, Phone, User, Stethoscope, UserCheck, ShieldCheck, 
-  X, AlertTriangle, Edit3, Send, MessageSquare, PhoneCall, Check, Filter
+  X, AlertTriangle, Edit3, Send, MessageSquare, PhoneCall, Check, Filter,
+  ArrowRight, CreditCard, UserPlus
 } from 'lucide-react';
 import { RendezVous, RendezVousStatut, RappelStatut, Patient } from '../../types';
 import { apiFetch } from '../../lib/api';
@@ -14,9 +15,10 @@ interface DoctorOption {
 
 interface ReceptionAppointmentsModalProps {
   onClose: () => void;
+  onStartPatientArrival?: (appointment: any) => void;
 }
 
-export const ReceptionAppointmentsModal: React.FC<ReceptionAppointmentsModalProps> = ({ onClose }) => {
+export const ReceptionAppointmentsModal: React.FC<ReceptionAppointmentsModalProps> = ({ onClose, onStartPatientArrival }) => {
   const [appointments, setAppointments] = useState<RendezVous[]>([]);
   const [doctors, setDoctors] = useState<DoctorOption[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -33,6 +35,10 @@ export const ReceptionAppointmentsModal: React.FC<ReceptionAppointmentsModalProp
   // Mode création
   const [showCreateModal, setShowCreateModal] = useState<boolean>(false);
   const [isPhoneRequest, setIsPhoneRequest] = useState<boolean>(false);
+  const [patientMode, setPatientMode] = useState<'EXISTANT' | 'TEMPORAIRE'>('EXISTANT');
+  const [tempNom, setTempNom] = useState<string>('');
+  const [tempPrenom, setTempPrenom] = useState<string>('');
+  const [tempTelephone, setTempTelephone] = useState<string>('+243');
   const [patientSearch, setPatientSearch] = useState<string>('');
   const [patientSearchResults, setPatientSearchResults] = useState<Patient[]>([]);
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
@@ -41,6 +47,14 @@ export const ReceptionAppointmentsModal: React.FC<ReceptionAppointmentsModalProp
   const [formHeure, setFormHeure] = useState<string>('09:00');
   const [formMotif, setFormMotif] = useState<string>('Consultation générale');
   const [formNotes, setFormNotes] = useState<string>('');
+
+  // Paiement anticipé
+  const [payerAvance, setPayerAvance] = useState<boolean>(false);
+  const [avanceMontant, setAvanceMontant] = useState<string>('20');
+  const [avanceDevise, setAvanceDevise] = useState<'USD' | 'FC'>('USD');
+  const [avanceMode, setAvanceMode] = useState<string>('ESPECES');
+  const [avanceRef, setAvanceRef] = useState<string>('');
+  const [exchangeRate, setExchangeRate] = useState<number>(2850);
 
   // Mode gestion du rappel
   const [selectedRdvForReminder, setSelectedRdvForReminder] = useState<RendezVous | null>(null);
@@ -82,6 +96,15 @@ export const ReceptionAppointmentsModal: React.FC<ReceptionAppointmentsModalProp
   // Ouverture modale création sécurisée
   const handleOpenCreateModal = (isPhone: boolean = false) => {
     setIsPhoneRequest(isPhone);
+    setPatientMode('EXISTANT');
+    setTempNom('');
+    setTempPrenom('');
+    setTempTelephone('+243');
+    setPayerAvance(false);
+    setAvanceMontant('20');
+    setAvanceDevise('USD');
+    setAvanceMode('ESPECES');
+    setAvanceRef('');
     setSelectedPatient(null);
     setPatientSearch('');
     setPatientSearchResults([]);
@@ -160,10 +183,27 @@ export const ReceptionAppointmentsModal: React.FC<ReceptionAppointmentsModalProp
 
   const handleCreateAppointment = async (e: React.FormEvent) => {
     e.preventDefault();
-    const patientToUse = selectedPatient || (patientSearchResults.length === 1 ? patientSearchResults[0] : null);
-    if (!patientToUse) {
-      setError('Veuillez rechercher et sélectionner un patient dans la liste.');
-      return;
+
+    let patientIdToSend: string | undefined = undefined;
+    let tempNomToSend: string | undefined = undefined;
+    let tempPrenomToSend: string | undefined = undefined;
+    let tempTelToSend: string | undefined = undefined;
+
+    if (patientMode === 'EXISTANT') {
+      const patientToUse = selectedPatient || (patientSearchResults.length === 1 ? patientSearchResults[0] : null);
+      if (!patientToUse) {
+        setError('Veuillez rechercher et sélectionner un patient avec dossier.');
+        return;
+      }
+      patientIdToSend = patientToUse.id;
+    } else {
+      if (!tempNom.trim()) {
+        setError('Le nom de famille du client sans dossier est obligatoire.');
+        return;
+      }
+      tempNomToSend = tempNom.trim().toUpperCase();
+      tempPrenomToSend = tempPrenom.trim() || undefined;
+      tempTelToSend = tempTelephone.trim() || undefined;
     }
 
     const doctorToUse = formDoctorId || (doctors.length > 0 ? doctors[0].id : '');
@@ -180,20 +220,35 @@ export const ReceptionAppointmentsModal: React.FC<ReceptionAppointmentsModalProp
       setSaving(true);
       setError(null);
 
+      const payload: any = {
+        patient_id: patientIdToSend,
+        patient_nom: tempNomToSend,
+        patient_prenom: tempPrenomToSend,
+        patient_telephone: tempTelToSend,
+        medecin_id: doctorToUse,
+        date_rdv: formDate.trim().split('T')[0],
+        heure_rdv: formHeure || '09:00',
+        motif: formMotif.trim() || (isPhoneRequest ? 'Consultation (Demande téléphonique)' : 'Consultation générale'),
+        type_rdv: 'CONSULTATION',
+        source_demande: isPhoneRequest ? 'TELEPHONE' : 'ACCUEIL',
+        statut: 'PLANIFIÉ',
+        notes: formNotes.trim() ? (isPhoneRequest ? `[Demande téléphonique] ${formNotes.trim()}` : formNotes.trim()) : (isPhoneRequest ? '[Demande téléphonique]' : null)
+      };
+
+      if (payerAvance && parseFloat(avanceMontant) > 0) {
+        payload.facturer_avance = true;
+        payload.paiement_immediat = {
+          montant_paye: parseFloat(avanceMontant),
+          devise: avanceDevise,
+          mode_paiement: avanceMode,
+          reference_transaction: avanceRef.trim() || undefined
+        };
+      }
+
       const res = await apiFetch('/api/rendez-vous', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          patient_id: patientToUse.id,
-          medecin_id: doctorToUse,
-          date_rdv: formDate.trim().split('T')[0],
-          heure_rdv: formHeure || '09:00',
-          motif: formMotif.trim() || (isPhoneRequest ? 'Consultation (Demande téléphonique)' : 'Consultation générale'),
-          type_rdv: 'CONSULTATION',
-          source_demande: isPhoneRequest ? 'TELEPHONE' : 'ACCUEIL',
-          statut: 'PLANIFIÉ',
-          notes: formNotes.trim() ? (isPhoneRequest ? `[Demande téléphonique] ${formNotes.trim()}` : formNotes.trim()) : (isPhoneRequest ? '[Demande téléphonique]' : null)
-        })
+        body: JSON.stringify(payload)
       });
 
       if (!res.ok) {
@@ -201,11 +256,19 @@ export const ReceptionAppointmentsModal: React.FC<ReceptionAppointmentsModalProp
         throw new Error(data.error || 'Erreur lors de la création du rendez-vous');
       }
 
-      setSuccessMessage(`Rendez-vous planifié avec succès pour ${patientToUse.nom} ${patientToUse.prenom}.`);
+      const clientLabel = patientIdToSend 
+        ? `${selectedPatient?.nom} ${selectedPatient?.prenom}`
+        : `${tempNomToSend} ${tempPrenomToSend || ''} (Client sans dossier)`;
+
+      setSuccessMessage(`Rendez-vous planifié avec succès pour ${clientLabel}${payerAvance ? ' avec pré-règlement validé' : ''}.`);
       setShowCreateModal(false);
       setSelectedPatient(null);
       setPatientSearch('');
       setPatientSearchResults([]);
+      setTempNom('');
+      setTempPrenom('');
+      setTempTelephone('+243');
+      setPayerAvance(false);
       setFormNotes('');
       await loadAppointments();
     } catch (err: any) {
@@ -587,10 +650,19 @@ export const ReceptionAppointmentsModal: React.FC<ReceptionAppointmentsModalProp
                         <div className="font-bold text-slate-900">
                           {rdv.patient_nom} {rdv.patient_prenom}
                         </div>
-                        <div className="flex items-center space-x-2 text-[11px] text-slate-500 mt-0.5">
-                          <span className="font-mono text-emerald-800 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
-                            {rdv.numero_dossier}
+                        <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 mt-0.5">
+                          <span className={`font-mono px-1.5 py-0.2 rounded border ${
+                            rdv.numero_dossier === 'SANS DOSSIER'
+                              ? 'text-amber-800 bg-amber-50 border-amber-300 font-bold'
+                              : 'text-emerald-800 bg-emerald-50 border-emerald-200'
+                          }`}>
+                            {rdv.numero_dossier === 'SANS DOSSIER' ? 'CLIENT SANS DOSSIER' : rdv.numero_dossier}
                           </span>
+                          {rdv.statut_paiement === 'PAYÉ' && (
+                            <span className="font-bold text-[10px] text-emerald-800 bg-emerald-100 px-1.5 py-0.2 rounded border border-emerald-300">
+                              💰 Payé par anticipation
+                            </span>
+                          )}
                           {rdv.patient_telephone && (
                             <span className="flex items-center text-slate-600">
                               <Phone className="w-3 h-3 mr-1 text-slate-400" />
@@ -670,6 +742,21 @@ export const ReceptionAppointmentsModal: React.FC<ReceptionAppointmentsModalProp
                       {/* Actions rapides de statut */}
                       <td className="py-3 px-3.5 text-right whitespace-nowrap">
                         <div className="flex items-center justify-end space-x-1">
+                          {/* Arrivée au guichet : Créer dossier permanent ou démarrer visite directe */}
+                          {onStartPatientArrival && rdv.statut !== 'ANNULÉ' && rdv.statut !== 'HONORÉ' && (
+                            <button
+                              type="button"
+                              onClick={() => onStartPatientArrival(rdv)}
+                              className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[11px] font-bold flex items-center space-x-1 shadow-xs"
+                              title={rdv.numero_dossier === 'SANS DOSSIER' 
+                                ? "Arrivée du client au guichet : Créer son dossier permanent et enchaîner visite & encaissement" 
+                                : "Arrivée du patient : Enregistrer l'arrivée et enchaîner visite & encaissement"}
+                            >
+                              <UserPlus className="w-3 h-3" />
+                              <span>{rdv.numero_dossier === 'SANS DOSSIER' ? 'Créer dossier' : 'Démarrer Visite'}</span>
+                            </button>
+                          )}
+
                           {rdv.statut === 'PLANIFIÉ' && (
                             <>
                               <button
@@ -813,77 +900,154 @@ export const ReceptionAppointmentsModal: React.FC<ReceptionAppointmentsModalProp
                 </label>
               </div>
 
-              {/* Sélection du patient */}
+              {/* Type de patient : Existant avec dossier VS Nouveau client sans dossier */}
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">
-                  Rechercher le patient * (Nom, prénom, N° dossier ou tél)
+                <label className="block font-bold text-slate-700 mb-1.5 text-xs">
+                  Type de patient pour ce rendez-vous :
                 </label>
-                {selectedPatient ? (
-                  <div className="flex items-center justify-between p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg">
-                    <div>
-                      <strong className="text-emerald-900 block">{selectedPatient.nom} {selectedPatient.prenom}</strong>
-                      <span className="text-[11px] text-emerald-700 font-mono">Dossier : {selectedPatient.numero_dossier} • Tél : {selectedPatient.telephone || 'Non renseigné'}</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedPatient(null)}
-                      className="text-xs text-rose-600 hover:underline font-semibold"
-                    >
-                      Changer
-                    </button>
-                  </div>
-                ) : (
-                  <div className="relative">
-                    <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
-                    <input
-                      type="text"
-                      value={patientSearch}
-                      onChange={(e) => setPatientSearch(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          if (patientSearchResults.length > 0) {
-                            setSelectedPatient(patientSearchResults[0]);
-                            setPatientSearchResults([]);
-                          }
-                        }
-                      }}
-                      placeholder="Tapez au moins 2 lettres pour chercher (ex: Mukendi)..."
-                      className="w-full pl-8 pr-3 py-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-900"
-                    />
-                    {patientSearchResults.length > 0 && (
-                      <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-300 rounded-lg shadow-xl z-50 max-h-48 overflow-y-auto divide-y divide-slate-100">
-                        {patientSearchResults.map(p => (
-                          <div
-                            key={p.id}
-                            onClick={() => {
-                              setSelectedPatient(p);
-                              setPatientSearchResults([]);
-                            }}
-                            className="p-2.5 hover:bg-blue-50 cursor-pointer flex items-center justify-between group transition-colors"
-                          >
-                            <div>
-                              <span className="font-bold text-slate-900 group-hover:text-blue-700">{p.nom} {p.prenom}</span>
-                              <span className="text-[11px] text-slate-500 ml-2 font-mono">[{p.numero_dossier}]</span>
-                            </div>
-                            <div className="flex items-center space-x-2">
-                              <span className="text-[11px] text-slate-500">{p.telephone || ''}</span>
-                              <button
-                                type="button"
-                                onClick={(ev) => {
-                                  ev.stopPropagation();
+                <div className="grid grid-cols-2 gap-2 mb-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setPatientMode('EXISTANT')}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
+                      patientMode === 'EXISTANT'
+                        ? 'bg-blue-50 text-blue-900 border-blue-600 ring-2 ring-blue-500/20 shadow-xs'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <UserCheck className="w-3.5 h-3.5" />
+                    <span>Patient avec dossier</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPatientMode('TEMPORAIRE')}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center space-x-1.5 cursor-pointer ${
+                      patientMode === 'TEMPORAIRE'
+                        ? 'bg-amber-50 text-amber-900 border-amber-600 ring-2 ring-amber-500/20 shadow-xs'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <UserPlus className="w-3.5 h-3.5" />
+                    <span>Nouveau client sans dossier</span>
+                  </button>
+                </div>
+
+                {patientMode === 'EXISTANT' ? (
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">
+                      Rechercher le patient * (Nom, prénom, N° dossier ou tél)
+                    </label>
+                    {selectedPatient ? (
+                      <div className="flex items-center justify-between p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg">
+                        <div>
+                          <strong className="text-emerald-900 block">{selectedPatient.nom} {selectedPatient.prenom}</strong>
+                          <span className="text-[11px] text-emerald-700 font-mono">Dossier : {selectedPatient.numero_dossier} • Tél : {selectedPatient.telephone || 'Non renseigné'}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedPatient(null)}
+                          className="text-xs text-rose-600 hover:underline font-semibold cursor-pointer"
+                        >
+                          Changer
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
+                        <input
+                          type="text"
+                          value={patientSearch}
+                          onChange={(e) => setPatientSearch(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              if (patientSearchResults.length > 0) {
+                                setSelectedPatient(patientSearchResults[0]);
+                                setPatientSearchResults([]);
+                              }
+                            }
+                          }}
+                          placeholder="Tapez au moins 2 lettres pour chercher (ex: Mukendi)..."
+                          className="w-full pl-8 pr-3 py-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-900"
+                        />
+                        {patientSearchResults.length > 0 && (
+                          <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-300 rounded-lg shadow-xl z-50 max-h-48 overflow-y-auto divide-y divide-slate-100">
+                            {patientSearchResults.map(p => (
+                              <div
+                                key={p.id}
+                                onClick={() => {
                                   setSelectedPatient(p);
                                   setPatientSearchResults([]);
                                 }}
-                                className="text-[10px] bg-blue-600 hover:bg-blue-700 text-white px-2 py-0.5 rounded font-semibold transition-colors"
+                                className="p-2.5 hover:bg-blue-50 cursor-pointer flex items-center justify-between group transition-colors"
                               >
-                                Choisir
-                              </button>
-                            </div>
+                                <div>
+                                  <span className="font-bold text-slate-900 group-hover:text-blue-700">{p.nom} {p.prenom}</span>
+                                  <span className="text-[11px] text-slate-500 ml-2 font-mono">[{p.numero_dossier}]</span>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                  <span className="text-[11px] text-slate-500">{p.telephone || ''}</span>
+                                  <button
+                                    type="button"
+                                    onClick={(ev) => {
+                                      ev.stopPropagation();
+                                      setSelectedPatient(p);
+                                      setPatientSearchResults([]);
+                                    }}
+                                    className="text-[10px] bg-blue-600 hover:bg-blue-700 text-white px-2 py-0.5 rounded font-semibold transition-colors cursor-pointer"
+                                  >
+                                    Choisir
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
                           </div>
-                        ))}
+                        )}
                       </div>
                     )}
+                  </div>
+                ) : (
+                  <div className="p-3 bg-amber-50/80 border border-amber-200 rounded-xl space-y-2.5">
+                    <div className="flex items-center space-x-1.5 text-amber-900 font-bold text-xs">
+                      <User className="w-3.5 h-3.5 text-amber-700" />
+                      <span>Coordonnées du client sans dossier (Temporaire)</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">Nom de famille *</label>
+                        <input
+                          type="text"
+                          required
+                          value={tempNom}
+                          onChange={(e) => setTempNom(e.target.value)}
+                          placeholder="Ex: MUKENDI"
+                          className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs font-bold uppercase text-slate-900"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">Prénom</label>
+                        <input
+                          type="text"
+                          value={tempPrenom}
+                          onChange={(e) => setTempPrenom(e.target.value)}
+                          placeholder="Ex: Jean-Paul"
+                          className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">Téléphone mobile (pour confirmation/rappel)</label>
+                      <input
+                        type="text"
+                        value={tempTelephone}
+                        onChange={(e) => setTempTelephone(e.target.value)}
+                        placeholder="+243..."
+                        className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs font-mono text-slate-900"
+                      />
+                    </div>
+                    <div className="text-[11px] text-amber-800 bg-amber-100/60 p-2 rounded-lg leading-relaxed">
+                      💡 <strong>Nouveau client :</strong> Son dossier permanent sera automatiquement créé dès son arrivée au guichet, et rattaché au rendez-vous sans rupture.
+                    </div>
                   </div>
                 )}
               </div>
@@ -947,6 +1111,100 @@ export const ReceptionAppointmentsModal: React.FC<ReceptionAppointmentsModalProp
                   placeholder="Ex: Consultation générale, Suivi de tension, etc."
                   className="w-full p-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-900"
                 />
+              </div>
+
+              {/* SECTION PAIEMENT ANTICIPÉ DE LA CONSULTATION */}
+              <div className="border border-emerald-300 bg-emerald-50/50 rounded-xl p-3.5 space-y-2.5">
+                <label className="flex items-center space-x-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={payerAvance}
+                    onChange={(e) => setPayerAvance(e.target.checked)}
+                    className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500"
+                  />
+                  <span className="font-bold text-emerald-950 text-xs flex items-center gap-1.5">
+                    <CreditCard className="w-3.5 h-3.5 text-emerald-700" />
+                    <span>Enregistrer un paiement anticipé (Pré-règlement consultation)</span>
+                  </span>
+                </label>
+
+                {payerAvance && (
+                  <div className="pt-2 border-t border-emerald-200 space-y-2.5">
+                    <p className="text-[11px] text-emerald-800 leading-relaxed">
+                      Le patient règle sa consultation à l'avance et n'aura plus rien à payer le jour de son rendez-vous.
+                    </p>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1 text-[11px]">Devise perçue :</label>
+                        <div className="grid grid-cols-2 gap-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAvanceDevise('USD');
+                              setAvanceMontant('20');
+                            }}
+                            className={`py-1 text-xs font-bold rounded-lg border transition-colors cursor-pointer ${
+                              avanceDevise === 'USD'
+                                ? 'bg-emerald-700 text-white border-emerald-700'
+                                : 'bg-white text-slate-700 border-slate-300'
+                            }`}
+                          >
+                            USD ($)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAvanceDevise('FC');
+                              setAvanceMontant(String(Math.round(20 * exchangeRate)));
+                            }}
+                            className={`py-1 text-xs font-bold rounded-lg border transition-colors cursor-pointer ${
+                              avanceDevise === 'FC'
+                                ? 'bg-emerald-700 text-white border-emerald-700'
+                                : 'bg-white text-slate-700 border-slate-300'
+                            }`}
+                          >
+                            FC (Franc)
+                          </button>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1 text-[11px]">Mode de paiement :</label>
+                        <select
+                          value={avanceMode}
+                          onChange={(e) => setAvanceMode(e.target.value)}
+                          className="w-full p-1.5 bg-white border border-slate-300 rounded-lg text-xs"
+                        >
+                          <option value="ESPECES">Espèces (Cash)</option>
+                          <option value="MOBILE_MONEY">Mobile Money (M-Pesa/Airtel/Orange)</option>
+                          <option value="CARTE_BANCAIRE">Carte Bancaire / TPE</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Montant perçu ({avanceDevise}) :</label>
+                        <input
+                          type="number"
+                          value={avanceMontant}
+                          onChange={(e) => setAvanceMontant(e.target.value)}
+                          className="w-full p-1.5 bg-white border border-emerald-400 rounded-lg font-mono font-bold text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Référence reçu / transaction :</label>
+                        <input
+                          type="text"
+                          value={avanceRef}
+                          placeholder="Ex: MPESA-91823"
+                          onChange={(e) => setAvanceRef(e.target.value)}
+                          className="w-full p-1.5 bg-white border border-slate-300 rounded-lg text-xs"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Notes */}

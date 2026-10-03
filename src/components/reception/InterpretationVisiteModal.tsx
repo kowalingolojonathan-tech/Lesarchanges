@@ -592,7 +592,7 @@ export const InterpretationVisiteModal: React.FC<InterpretationVisiteModalProps>
             </div>
           )}
 
-            {/* Facturation liée automatique */}
+            {/* Prestation & Tarif */}
             <div className="bg-purple-50/70 border border-purple-200 rounded-xl p-3.5 space-y-2">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-bold text-purple-950 flex items-center space-x-1.5">
@@ -604,15 +604,188 @@ export const InterpretationVisiteModal: React.FC<InterpretationVisiteModalProps>
                 </span>
               </div>
               <div className="p-2.5 bg-white rounded-lg border border-purple-200 flex items-center justify-between text-xs">
-                <span className="text-slate-600 font-medium">Prix automatique configuré :</span>
+                <span className="text-slate-600 font-medium">Tarif officiel :</span>
                 <div className="text-right">
                   <span className="font-bold font-mono text-purple-900 text-sm">10.00 USD</span>
                   <span className="text-slate-500 text-xs ml-1.5">(28 500 FC)</span>
                 </div>
               </div>
-              <p className="text-[11px] text-purple-800 italic">
-                * Une facture liée à cette prestation est automatiquement émise au statut <strong>NON PAYÉ</strong> pour enregistrement immédiat ou ultérieur à la caisse.
-              </p>
+            </div>
+
+            {/* SECTION ENCAISSEMENT DIRECT (RÉCEPTION FAISANT OFFICE DE CAISSE) */}
+            <div className="bg-purple-950/5 border-2 border-purple-500/40 rounded-xl p-3.5 space-y-3">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-purple-950 flex items-center space-x-1.5">
+                  <CreditCard className="w-4 h-4 text-purple-700" />
+                  <span>Encaissement Réception (Caisse Directe)</span>
+                </span>
+                <span className="text-[10px] font-bold text-purple-800 bg-purple-100 px-2 py-0.5 rounded-full">
+                  Paiement préalable obligatoire
+                </span>
+              </div>
+
+              {/* Sélection Type d'encaissement */}
+              <div className="grid grid-cols-3 gap-1.5 text-xs">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTypeEncaissement('COMPLET');
+                    setMontantPayeCustom('');
+                  }}
+                  className={`py-2 px-1.5 rounded-lg font-bold border text-center transition-all ${
+                    typeEncaissement === 'COMPLET'
+                      ? 'bg-purple-700 text-white border-purple-800 shadow-xs'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  Payé Total ({devisePaiement === 'USD' ? '10 $' : '28 500 FC'})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTypeEncaissement('PARTIEL');
+                    if (!montantPayeCustom) {
+                      setMontantPayeCustom(devisePaiement === 'USD' ? '5' : '14250');
+                    }
+                  }}
+                  className={`py-2 px-1.5 rounded-lg font-bold border text-center transition-all ${
+                    typeEncaissement === 'PARTIEL'
+                      ? 'bg-amber-600 text-white border-amber-700 shadow-xs'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  Paiement Partiel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTypeEncaissement('NON_PAYE')}
+                  className={`py-2 px-1.5 rounded-lg font-bold border text-center transition-all ${
+                    typeEncaissement === 'NON_PAYE'
+                      ? 'bg-rose-700 text-white border-rose-800 shadow-xs'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  Dérogation / Non Payé
+                </button>
+              </div>
+
+              {/* Détails du règlement si Payé ou Partiel */}
+              {typeEncaissement !== 'NON_PAYE' ? (
+                <div className="space-y-2.5 pt-1 border-t border-purple-200/60">
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                        Devise de paiement
+                      </label>
+                      <div className="grid grid-cols-2 gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDevisePaiement('USD');
+                            setMontantPayeCustom('');
+                          }}
+                          className={`py-1.5 text-xs font-bold rounded-md border text-center transition-colors ${
+                            devisePaiement === 'USD' ? 'bg-purple-700 text-white border-purple-800' : 'bg-white text-slate-700 border-slate-300'
+                          }`}
+                        >
+                          USD ($)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDevisePaiement('FC');
+                            setMontantPayeCustom('');
+                          }}
+                          className={`py-1.5 text-xs font-bold rounded-md border text-center transition-colors ${
+                            devisePaiement === 'FC' ? 'bg-purple-700 text-white border-purple-800' : 'bg-white text-slate-700 border-slate-300'
+                          }`}
+                        >
+                          FC (CDF)
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                        Mode de paiement
+                      </label>
+                      <select
+                        value={modePaiement}
+                        onChange={(e: any) => setModePaiement(e.target.value)}
+                        className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-300 rounded-md font-medium text-slate-800"
+                      >
+                        <option value="ESPECES">Espèces (Cash)</option>
+                        <option value="MOBILE_MONEY">Mobile Money (M-Pesa, Orange, Airtel)</option>
+                        <option value="CARTE_BANCAIRE">Carte Bancaire</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                        Montant à encaisser ({devisePaiement}) *
+                      </label>
+                      <input
+                        type="number"
+                        step={devisePaiement === 'USD' ? '1' : '500'}
+                        value={typeEncaissement === 'COMPLET' ? totalDueInDevise : (montantPayeCustom || '')}
+                        disabled={typeEncaissement === 'COMPLET'}
+                        onChange={(e) => setMontantPayeCustom(e.target.value)}
+                        className="w-full px-3 py-1.5 text-sm font-bold text-slate-900 bg-white border border-purple-400 rounded-md focus:ring-2 focus:ring-purple-500 font-mono disabled:bg-slate-100"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-1">
+                        Montant remis par le patient
+                      </label>
+                      <input
+                        type="number"
+                        placeholder="Calcul monnaie"
+                        value={montantRecuClient}
+                        onChange={(e) => setMontantRecuClient(e.target.value)}
+                        className="w-full px-3 py-1.5 text-sm font-medium text-slate-800 bg-white border border-slate-300 rounded-md font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  {monnaieRendue !== null && monnaieRendue > 0 && (
+                    <div className="p-2 bg-purple-100/70 border border-purple-300 rounded-lg text-xs flex items-center justify-between">
+                      <span className="font-semibold text-purple-900">Monnaie à rendre :</span>
+                      <span className="font-mono font-bold text-purple-900 text-sm">
+                        {monnaieRendue.toLocaleString('fr-FR')} {devisePaiement}
+                      </span>
+                    </div>
+                  )}
+
+                  {typeEncaissement === 'PARTIEL' && soldeRestantUsd > 0 && (
+                    <div className="p-2 bg-amber-100/70 border border-amber-300 rounded-lg text-xs flex items-center justify-between">
+                      <span className="font-semibold text-amber-900">Solde restant dû :</span>
+                      <span className="font-mono font-bold text-amber-900 text-xs">
+                        {soldeRestantUsd.toFixed(2)} USD ({Math.round(soldeRestantUsd * exchangeRate).toLocaleString('fr-FR')} FC)
+                      </span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-1.5 pt-1 border-t border-rose-200">
+                  <label className="block text-[11px] font-semibold text-rose-800">
+                    Motif obligatoire de dérogation financière *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={motifNonPaiement}
+                    onChange={(e) => setMotifNonPaiement(e.target.value)}
+                    placeholder="Ex: Urgence vitale, Entente administrative, Accord direction..."
+                    className="w-full px-3 py-2 text-xs bg-white border border-rose-300 rounded-md focus:ring-2 focus:ring-rose-500 font-medium text-rose-900"
+                  />
+                  <p className="text-[10px] text-rose-700 italic">
+                    * L'admission sera autorisée avec le motif dérogatoire consigné dans le journal financier d'audit.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 
@@ -631,11 +804,17 @@ export const InterpretationVisiteModal: React.FC<InterpretationVisiteModalProps>
               className="w-full sm:w-auto px-5 py-2.5 text-xs font-bold text-white bg-purple-700 hover:bg-purple-800 rounded-lg transition-colors flex items-center justify-center space-x-2 shadow-sm disabled:opacity-50 min-h-[44px] cursor-pointer"
             >
               {isSubmitting ? (
-                <span>Validation & facturation...</span>
+                <span>Validation caisse & orientation...</span>
               ) : (
                 <>
                   <CheckCircle2 className="w-4 h-4 mr-1" />
-                  <span>Valider l'Orientation vers le Médecin</span>
+                  <span>
+                    {typeEncaissement === 'COMPLET' 
+                      ? `Encaisser ${devisePaiement === 'USD' ? '10 $' : '28 500 FC'} & Orienter vers le Médecin`
+                      : (typeEncaissement === 'PARTIEL' 
+                          ? `Valider Acompte (${montantPayeNum} ${devisePaiement}) & Médecin` 
+                          : 'Valider Dérogation & Orienter Médecin')}
+                  </span>
                 </>
               )}
             </button>

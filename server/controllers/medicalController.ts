@@ -4162,14 +4162,34 @@ export async function getUserNotifications(req: AuthenticatedRequest, res: Respo
       return;
     }
 
+    const nowIso = new Date().toISOString();
+
+    // Règle métier stricte : si un bon de laboratoire est déjà payé à la caisse,
+    // on l'enlève des notifications non lues / alertes en le marquant lu = 1.
+    await execute(
+      `UPDATE notifications 
+       SET lu = 1, lu_le = COALESCE(lu_le, ?)
+       WHERE lu = 0 AND lab_order_id IN (
+         SELECT d.id FROM demandes_laboratoire d
+         JOIN factures f ON d.facture_id = f.id
+         WHERE f.statut = 'PAYÉ'
+       )`,
+      [nowIso]
+    );
+
     const notifications = await query<any>(
       `SELECT n.*,
               COALESCE(n.emetteur_nom, u_em.nom_complet) as emetteur_nom,
               COALESCE(n.emetteur_role, u_em.role) as emetteur_role,
-              p.nom as patient_nom, p.prenom as patient_prenom, p.numero_dossier
+              p.nom as patient_nom, p.prenom as patient_prenom, p.numero_dossier,
+              d.facture_id as lab_facture_id,
+              f.statut as lab_facture_statut,
+              f.numero_facture as lab_numero_facture
        FROM notifications n
        LEFT JOIN users u_em ON n.emetteur_id = u_em.id
        LEFT JOIN patients p ON n.patient_id = p.id
+       LEFT JOIN demandes_laboratoire d ON n.lab_order_id = d.id
+       LEFT JOIN factures f ON d.facture_id = f.id
        WHERE n.user_id = ? 
        ORDER BY n.created_at DESC LIMIT 50`,
       [user.id]
@@ -4184,7 +4204,8 @@ export async function getUserNotifications(req: AuthenticatedRequest, res: Respo
       notifications: notifications.map(n => ({
         ...n,
         est_lu: Boolean(n.lu),
-        lu: Number(n.lu)
+        lu: Number(n.lu),
+        is_lab_paid: n.lab_facture_statut === 'PAYÉ'
       })),
       unread_count: unreadCountRow ? Number(unreadCountRow.unread_count) : 0
     });

@@ -4,22 +4,29 @@ import { UserPlus, X, AlertCircle, CheckCircle2, User, Phone, MapPin, Calendar, 
 import { apiFetch } from '../../lib/api';
 
 interface NewPatientModalProps {
+  initialData?: {
+    nom?: string;
+    prenom?: string;
+    telephone?: string;
+    rendez_vous_id?: string;
+    advanceFacture?: any;
+  };
   onClose: () => void;
-  onSuccess: (patient: Patient, createVisiteImmediately: boolean) => void;
+  onSuccess: (patient: Patient, createVisiteImmediately: boolean, rdvContext?: { rendez_vous_id?: string; advanceFacture?: any }) => void;
 }
 
-export const NewPatientModal: React.FC<NewPatientModalProps> = ({ onClose, onSuccess }) => {
+export const NewPatientModal: React.FC<NewPatientModalProps> = ({ initialData, onClose, onSuccess }) => {
   // 5 champs d'identité obligatoires
-  const [nom, setNom] = useState('');
+  const [nom, setNom] = useState(initialData?.nom || '');
   const [postNom, setPostNom] = useState('');
-  const [prenom, setPrenom] = useState('');
+  const [prenom, setPrenom] = useState(initialData?.prenom || '');
   const [lieuNaissance, setLieuNaissance] = useState('');
   const [paysNaissance, setPaysNaissance] = useState('RD Congo');
 
   // Autres informations obligatoires et complémentaires
   const [dateNaissance, setDateNaissance] = useState('');
   const [sexe, setSexe] = useState<'M' | 'F'>('M');
-  const [telephone, setTelephone] = useState('+243');
+  const [telephone, setTelephone] = useState(initialData?.telephone || '+243');
   const [adresse, setAdresse] = useState('');
   const [profession, setProfession] = useState('');
   const [etatCivil, setEtatCivil] = useState('');
@@ -144,7 +151,11 @@ export const NewPatientModal: React.FC<NewPatientModalProps> = ({ onClose, onSuc
         return;
       }
 
-      onSuccess(data.patient, createVisiteImmediately);
+      onSuccess(
+        data.patient, 
+        createVisiteImmediately, 
+        initialData ? { rendez_vous_id: initialData.rendez_vous_id, advanceFacture: initialData.advanceFacture } : undefined
+      );
     } catch (err: any) {
       setErrorMessage(err.message || 'Erreur de connexion.');
       setIsSubmitting(false);
@@ -179,6 +190,23 @@ export const NewPatientModal: React.FC<NewPatientModalProps> = ({ onClose, onSuc
 
         <form onSubmit={handleSubmit} className="flex-1 flex flex-col min-h-0 overflow-hidden" id="form_new_patient" noValidate>
           <div ref={scrollAreaRef} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
+            {initialData?.rendez_vous_id && (
+              <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl flex items-center justify-between text-xs text-indigo-900 shadow-xs">
+                <div className="flex items-center space-x-2.5">
+                  <Calendar className="w-4 h-4 text-indigo-700 shrink-0" />
+                  <div>
+                    <span className="font-bold block">Arrivée d'un Client avec Rendez-vous :</span>
+                    <span className="text-[11px] text-indigo-700">
+                      Remplissez l'état civil pour générer son dossier permanent. La visite et le rendez-vous seront automatiquement liés.
+                    </span>
+                  </div>
+                </div>
+                <span className="font-mono font-bold text-[10px] bg-indigo-200 text-indigo-800 px-2 py-0.5 rounded-full shrink-0">
+                  Rdv Lié
+                </span>
+              </div>
+            )}
+
             {errorMessage && (
               <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-center space-x-2 text-xs text-red-700" id="alert_error_message">
                 <AlertCircle className="w-4 h-4 shrink-0" />

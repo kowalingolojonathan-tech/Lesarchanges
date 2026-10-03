@@ -544,6 +544,9 @@ export interface DemandeLaboratoire {
   patient_date_naissance?: string;
   patient_sexe?: 'M' | 'F';
   statut_paiement?: 'NON PAYÉ' | 'PARTIELLEMENT PAYÉ' | 'PAYÉ';
+  bloque_caisse?: boolean;
+  statut_paiement_labo?: string;
+  has_derogation?: boolean;
 }
 
 export type LabOrder = DemandeLaboratoire;
@@ -618,6 +621,13 @@ export interface RendezVous {
   patient_telephone?: string;
   medecin_nom?: string;
   cree_par_nom?: string;
+  patient_nom_temp?: string | null;
+  patient_prenom_temp?: string | null;
+  patient_telephone_temp?: string | null;
+  facture_id?: string | null;
+  numero_facture?: string | null;
+  facture_montant_usd?: number | null;
+  statut_paiement?: string | null;
 }
 
 // ========================================================

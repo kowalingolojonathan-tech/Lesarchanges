@@ -335,7 +335,13 @@ export async function createVisite(req: AuthenticatedRequest, res: Response): Pr
     if (reglement_immediat && linkedFacture) {
       const devisePaiement = (devise === 'CDF' || devise === 'FC') ? 'FC' : 'USD';
 
-      if (type_encaissement === 'COMPLET' || type_encaissement === 'PARTIEL') {
+      if (linkedFacture.solde_usd !== undefined && linkedFacture.solde_usd <= 0.005) {
+        paiementInfo = {
+          deja_paye: true,
+          statut: 'PAYÉ',
+          message: 'Facture déjà intégralement réglée par anticipation lors de la réservation'
+        };
+      } else if (type_encaissement === 'COMPLET' || type_encaissement === 'PARTIEL') {
         const totalUsd = linkedFacture.solde_usd !== undefined ? linkedFacture.solde_usd : (linkedFacture.montant_total_usd || 20);
         let verser = parseFloat(String(montant_paye));
         if (isNaN(verser) || verser <= 0) {

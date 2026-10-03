@@ -3,7 +3,7 @@ import {
   FlaskConical, UserCheck, Clock, AlertTriangle, CheckCircle2, 
   RefreshCw, Search, ArrowRight, Eye, Shield, Users, Layers,
   ChevronRight, Printer, AlertCircle, X, Check, FileText, CheckCheck,
-  Edit3
+  Edit3, Lock, ShieldAlert
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { apiFetch } from '../../lib/api';
@@ -516,6 +516,13 @@ export const LaboratoryQueueView: React.FC = () => {
                       <span>•</span>
                       <span>{new Date(order.date_demande || order.created_at).toLocaleString('fr-FR')}</span>
                     </div>
+
+                    {order.bloque_caisse && (
+                      <div className="mt-2 p-2 bg-rose-50 border border-rose-200 rounded-lg flex items-center space-x-2 text-rose-800 text-[11px] font-medium">
+                        <Lock className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                        <span>En attente de paiement à la réception (Caisse) : Le patient doit régler ou obtenir dérogation au guichet d'accueil avant le démarrage.</span>
+                      </div>
+                    )}
                   </div>
 
                   {/* État d'attribution, Statut & Actions */}
@@ -527,9 +534,17 @@ export const LaboratoryQueueView: React.FC = () => {
                         ? 'bg-emerald-100 text-emerald-800 border-emerald-300' 
                         : order.statut_paiement === 'PARTIELLEMENT PAYÉ'
                         ? 'bg-amber-100 text-amber-800 border-amber-300'
+                        : order.has_derogation
+                        ? 'bg-blue-100 text-blue-800 border-blue-300'
                         : 'bg-rose-100 text-rose-800 border-rose-300'
                     }`}>
-                      {order.statut_paiement === 'PAYÉ' ? 'PAYÉ' : order.statut_paiement === 'PARTIELLEMENT PAYÉ' ? 'PARTIELLEMENT PAYÉ' : 'NON PAYÉ'}
+                      {order.statut_paiement === 'PAYÉ' 
+                        ? 'PAYÉ' 
+                        : order.statut_paiement === 'PARTIELLEMENT PAYÉ' 
+                        ? 'PARTIELLEMENT PAYÉ' 
+                        : order.has_derogation 
+                        ? 'NON PAYÉ (Dérogation Caisse)' 
+                        : 'NON PAYÉ (En attente Caisse)'}
                     </span>
 
                     {/* Badge Statut Biologique */}
@@ -571,32 +586,54 @@ export const LaboratoryQueueView: React.FC = () => {
                     {isUnassigned && (
                       <button
                         onClick={() => handleClaimOrder(order)}
-                        disabled={isClaiming}
-                        className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
+                        disabled={isClaiming || order.bloque_caisse}
+                        title={order.bloque_caisse ? 'Encaissement obligatoire à la réception avant prise en charge' : undefined}
+                        className={`px-3.5 py-1.5 text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer ${
+                          order.bloque_caisse
+                            ? 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed'
+                            : 'bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50'
+                        }`}
                       >
                         {isClaiming ? (
                           <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        ) : order.bloque_caisse ? (
+                          <Lock className="w-3.5 h-3.5 text-slate-400" />
                         ) : (
                           <Check className="w-3.5 h-3.5" />
                         )}
-                        Prendre en charge (Claim)
+                        <span>{order.bloque_caisse ? 'En attente Caisse' : 'Prendre en charge (Claim)'}</span>
                       </button>
                     )}
 
                     {/* Bouton Saisir / Gérer les résultats */}
                     {(isAssignedToMe || ['RESULTATS_SAISIS', 'PRELEVEMENT_EFFECTUE', 'EN_ANALYSE', 'PRISE_EN_CHARGE', 'RESULTATS_VALIDES', 'RESULTAT_VALIDE'].includes(order.statut)) && (
                       <button
-                        onClick={() => setSelectedOrderForResults(order)}
-                        className={`px-3.5 py-1.5 text-white text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer ${
-                          ['RESULTATS_VALIDES', 'RESULTAT_VALIDE'].includes(order.statut)
-                            ? 'bg-slate-700 hover:bg-slate-800'
+                        onClick={() => {
+                          if (order.bloque_caisse) {
+                            setError("Règlement en attente : Le patient doit d'abord régler ses examens à la réception/caisse ou consigner une dérogation.");
+                            return;
+                          }
+                          setSelectedOrderForResults(order);
+                        }}
+                        disabled={order.bloque_caisse}
+                        className={`px-3.5 py-1.5 text-xs font-bold rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer ${
+                          order.bloque_caisse
+                            ? 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed'
+                            : ['RESULTATS_VALIDES', 'RESULTAT_VALIDE'].includes(order.statut)
+                            ? 'bg-slate-700 hover:bg-slate-800 text-white'
                             : order.statut === 'RESULTATS_SAISIS'
-                            ? 'bg-blue-600 hover:bg-blue-700'
-                            : 'bg-emerald-600 hover:bg-emerald-700'
+                            ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                            : 'bg-emerald-600 hover:bg-emerald-700 text-white'
                         }`}
                       >
-                        <Edit3 className="w-3.5 h-3.5" />
-                        {['RESULTATS_VALIDES', 'RESULTAT_VALIDE'].includes(order.statut)
+                        {order.bloque_caisse ? (
+                          <Lock className="w-3.5 h-3.5 text-slate-400" />
+                        ) : (
+                          <Edit3 className="w-3.5 h-3.5" />
+                        )}
+                        {order.bloque_caisse
+                          ? 'Bloqué Caisse'
+                          : ['RESULTATS_VALIDES', 'RESULTAT_VALIDE'].includes(order.statut)
                           ? 'Détails & Amendement'
                           : order.statut === 'RESULTATS_SAISIS'
                           ? 'Vérifier & Valider'

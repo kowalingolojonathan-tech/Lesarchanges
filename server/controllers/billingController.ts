@@ -1044,8 +1044,9 @@ export async function processPaiementDirectCore(params: {
     throw new Error('Le montant payé doit être un nombre strictement positif.');
   }
 
-  const devisePaiement = devise === 'CDF' ? 'FC' : devise;
-  if (devisePaiement !== 'USD' && devisePaiement !== 'FC') {
+  const rawDevise = (devise as any) === 'CDF' ? 'FC' : devise;
+  const devisePaiement: 'USD' | 'FC' = rawDevise === 'FC' ? 'FC' : 'USD';
+  if (devise !== 'USD' && (devise as any) !== 'FC' && (devise as any) !== 'CDF') {
     throw new Error('Devise non autorisée. Choisissez USD ou FC.');
   }
 
@@ -1346,10 +1347,51 @@ export async function collectLabOrderPayment(req: Request, res: Response): Promi
       return;
     }
 
+    // Si la facture liée à ce bon d'examen est DÉJÀ réglée (solde <= 0 ou statut PAYÉ) :
+    // On ne lève pas d'exception mais on confirme le déblocage et renvoie la quittance existante
+    if (finDetails.solde_usd <= 0.005 || finDetails.statut === 'PAYÉ') {
+      await execute(
+        `UPDATE notifications SET lu = 1, lu_le = ? WHERE lab_order_id = ?`,
+        [now, id]
+      );
+      saveDb();
+
+      const lastPayment = await queryOne<any>(
+        `SELECT * FROM paiements WHERE facture_id = ? ORDER BY date_paiement DESC, created_at DESC LIMIT 1`,
+        [factureId]
+      );
+
+      res.json({
+        success: true,
+        already_paid: true,
+        message: 'Cette facture est déjà intégralement payée. Le bon d\'examen est débloqué pour le laboratoire.',
+        recu: lastPayment?.numero_recu || `REC-LAB-${labOrder.numero_demande || labOrder.id}`,
+        paiement: lastPayment || {
+          montant_paye: finDetails.total_paye_usd || finDetails.montant_total_usd,
+          devise: 'USD',
+          mode_paiement: 'DÉJÀ ENCAISSÉ',
+          statut_paiement: 'PAYÉ',
+          date_paiement: now,
+          numero_recu: `REC-LAB-${labOrder.numero_demande || labOrder.id}`
+        },
+        facture: finDetails
+      });
+      return;
+    }
+
     const devisePaiement = devise === 'CDF' ? 'FC' : devise;
     let verser = parseFloat(String(montant_paye));
     if (isNaN(verser) || verser <= 0) {
       verser = devisePaiement === 'USD' ? finDetails.solde_usd : Math.round(finDetails.solde_usd * 2850);
+    }
+    // Si le versement excède le solde restant dû, ajuster au solde exact
+    if (devisePaiement === 'USD' && verser > finDetails.solde_usd) {
+      verser = finDetails.solde_usd;
+    } else if (devisePaiement === 'FC') {
+      const maxFc = Math.round(finDetails.solde_usd * 2850);
+      if (verser > maxFc) {
+        verser = maxFc;
+      }
     }
 
     const paymentResult = await processPaiementDirectCore({

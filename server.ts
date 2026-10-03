@@ -128,6 +128,7 @@ async function startServer() {
   // Encaissement des examens de laboratoire par la Réception (agissant comme Caisse)
   app.get('/api/billing/lab-orders-to-collect', requireAuth, requireRole(['RÉCEPTION', 'ADMINISTRATEUR', 'MÉDECIN']), billingCtrl.getLabOrdersToCollect);
   app.post('/api/billing/lab-orders/:id/collect', requireAuth, requireRole(['RÉCEPTION', 'ADMINISTRATEUR']), billingCtrl.collectLabOrderPayment);
+  app.post('/api/billing/lab-orders-to-collect/:id/pay', requireAuth, requireRole(['RÉCEPTION', 'ADMINISTRATEUR']), billingCtrl.collectLabOrderPayment);
 
   // --- ROUTES API PHASE 2B : ESPACE MÉDECIN, CONSULTATIONS CLINIQUES & HISTORIQUE MÉDICAL ---
   // Protection RBAC stricte : Seul le rôle MÉDECIN peut accéder à ces données confidentielles.
