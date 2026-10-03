@@ -181,6 +181,15 @@ export const ReceptionAppointmentsModal: React.FC<ReceptionAppointmentsModalProp
     return () => clearTimeout(timer);
   }, [patientSearch]);
 
+  const isFormValid = () => {
+    if (!formDoctorId || !formDate || !formHeure) return false;
+    if (patientMode === 'EXISTANT') {
+      return !!selectedPatient;
+    } else {
+      return tempNom.trim().length > 0;
+    }
+  };
+
   const handleCreateAppointment = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -445,51 +454,53 @@ export const ReceptionAppointmentsModal: React.FC<ReceptionAppointmentsModalProp
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl max-w-5xl w-full max-h-[92vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">
+      <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[95vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
         {/* Header */}
-        <div className="p-4 bg-gradient-to-r from-blue-900 to-indigo-900 text-white flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <div className="p-2 bg-blue-800/80 rounded-lg">
+        <div className="p-3 sm:p-4 bg-gradient-to-r from-blue-900 to-indigo-900 text-white flex items-center justify-between gap-2">
+          <div className="flex items-center space-x-2 min-w-0 flex-1">
+            <div className="p-2 bg-blue-800/80 rounded-lg shrink-0">
               <Calendar className="w-5 h-5 text-blue-200" />
             </div>
-            <div>
-              <h3 className="font-bold text-base flex items-center">
+            <div className="min-w-0">
+              <h3 className="font-bold text-sm sm:text-base flex items-center flex-wrap gap-1">
                 Planning Général & Gestion des Rendez-vous
-                <span className="ml-2.5 text-[10px] uppercase font-bold tracking-wider bg-blue-600/70 text-blue-100 px-2 py-0.5 rounded-full">
+                <span className="ml-1 text-[10px] uppercase font-bold tracking-wider bg-blue-600/70 text-blue-100 px-2 py-0.5 rounded-full">
                   Calendrier Partagé
                 </span>
               </h3>
-              <p className="text-xs text-blue-200">
-                Guichet d'accueil, demandes téléphoniques & rendez-vous de contrôle fixés en consultation
+              <p className="text-[11px] text-blue-200 hidden sm:block">
+                Guichet d'accueil, demandes téléphoniques & rendez-vous de contrôle
               </p>
             </div>
           </div>
 
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
               onClick={() => handleOpenCreateModal(true)}
-              className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold rounded-lg transition-colors flex items-center shadow-xs"
+              className="px-2.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-bold rounded-lg transition-colors flex items-center shadow-xs"
               title="Créer un rendez-vous suite à un appel téléphonique du patient"
             >
-              <PhoneCall className="w-3.5 h-3.5 mr-1.5" />
-              RDV par Téléphone
+              <PhoneCall className="w-3.5 h-3.5 mr-1" />
+              <span className="hidden sm:inline">RDV par Téléphone</span>
+              <span className="sm:hidden">📞</span>
             </button>
 
             <button
               type="button"
               onClick={() => handleOpenCreateModal(false)}
-              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-lg transition-colors flex items-center shadow-xs"
+              className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold rounded-lg transition-colors flex items-center shadow-xs"
             >
-              <Plus className="w-3.5 h-3.5 mr-1.5" />
-              Nouveau RDV
+              <Plus className="w-3.5 h-3.5 mr-1" />
+              <span className="hidden sm:inline">Nouveau RDV</span>
+              <span className="sm:hidden">+ RDV</span>
             </button>
 
             <button
               type="button"
               onClick={onClose}
-              className="p-1.5 text-blue-200 hover:text-white hover:bg-blue-800/50 rounded-lg transition-colors"
+              className="p-1.5 text-blue-200 hover:text-white hover:bg-blue-800/50 rounded-lg transition-colors shrink-0"
             >
               <X className="w-5 h-5" />
             </button>
@@ -617,17 +628,17 @@ export const ReceptionAppointmentsModal: React.FC<ReceptionAppointmentsModalProp
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto border border-slate-200 rounded-xl bg-white">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 text-slate-600 uppercase font-semibold text-[10px] tracking-wider border-b border-slate-200">
+            <div className="border border-slate-200 rounded-xl bg-white overflow-x-auto max-w-full w-full">
+              <table className="w-full text-left text-[9px]">
+                <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
-                    <th className="py-3 px-3.5">Date & Heure</th>
-                    <th className="py-3 px-3.5">Patient & Contact</th>
-                    <th className="py-3 px-3.5">Praticien</th>
-                    <th className="py-3 px-3.5">Motif & Source</th>
-                    <th className="py-3 px-3.5">Statut Actuel</th>
-                    <th className="py-3 px-3.5">Rappels</th>
-                    <th className="py-3 px-3.5 text-right">Changer Statut / Action</th>
+                    <th className="py-2 px-2 text-[9px] font-bold uppercase tracking-wider text-slate-600 border-b border-slate-200">Date & Heure</th>
+                    <th className="py-2 px-2 text-[9px] font-bold uppercase tracking-wider text-slate-600 border-b border-slate-200">Patient & Contact</th>
+                    <th className="py-2 px-2 text-[9px] font-bold uppercase tracking-wider text-slate-600 border-b border-slate-200">Praticien</th>
+                    <th className="py-2 px-2 text-[9px] font-bold uppercase tracking-wider text-slate-600 border-b border-slate-200">Motif & Source</th>
+                    <th className="py-2 px-2 text-[9px] font-bold uppercase tracking-wider text-slate-600 border-b border-slate-200">Statut</th>
+                    <th className="py-2 px-2 text-[9px] font-bold uppercase tracking-wider text-slate-600 border-b border-slate-200">Rappels</th>
+                    <th className="py-2 px-2 text-[9px] font-bold uppercase tracking-wider text-slate-600 border-b border-slate-200 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -1234,7 +1245,7 @@ export const ReceptionAppointmentsModal: React.FC<ReceptionAppointmentsModalProp
                 </button>
                 <button
                   type="submit"
-                  disabled={saving || (!selectedPatient && patientSearchResults.length !== 1)}
+                  disabled={saving || !isFormValid()}
                   className="w-full sm:w-auto px-5 py-2 text-xs font-bold text-white bg-blue-700 hover:bg-blue-800 rounded-lg transition-colors flex items-center justify-center space-x-1.5 shadow-sm disabled:opacity-50 min-h-[40px] cursor-pointer"
                 >
                   {saving ? 'Enregistrement...' : 'Confirmer le Rendez-vous'}

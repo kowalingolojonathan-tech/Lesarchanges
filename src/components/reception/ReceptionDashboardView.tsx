@@ -1246,6 +1246,24 @@ export const ReceptionDashboardView: React.FC<ReceptionDashboardViewProps> = ({ 
             setShowNewPatientModal(false);
             setInitialPatientDataForModal(undefined);
             loadData();
+            // Confirmer le RDV après création du dossier uniquement si le patient n'avait pas encore de dossier
+            // (si la visite est créée immédiatement, le flux visite liera le RDV et passera à PATIENT PRÉSENT)
+            if (rdvContext?.rendez_vous_id) {
+              apiFetch(`/api/rendez-vous/${rdvContext.rendez_vous_id}/status`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ statut: 'CONFIRMÉ' })
+              }).then(async (res) => {
+                if (!res.ok) {
+                  const data = await res.json().catch(() => ({}));
+                  console.error('Erreur confirmation RDV après création dossier:', data.error || res.statusText);
+                  // Le RDV reste en PLANIFIÉ — l'utilisateur pourra le confirmer manuellement
+                }
+              }).catch(err => {
+                console.error('Erreur confirmation RDV après création dossier:', err);
+                // Le RDV reste en PLANIFIÉ — l'utilisateur pourra le confirmer manuellement
+              });
+            }
             // Chaînage direct ininterrompu : Nouveau Patient -> Visite & Encaissement direct
             if (createVisiteImmediately !== false) {
               setSelectedPatientForVisite(patient);
