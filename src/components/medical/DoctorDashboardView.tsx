@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Stethoscope, Users, Clock, CheckCircle2, AlertTriangle, 
+  Stethoscope, Users, Clock, CheckCircle2, AlertTriangle, X,
   HeartPulse, Activity, ChevronRight, Play, RefreshCw, FileText,
   UserCheck, ShieldCheck, Calendar, ArrowRight, Eye, FileSearch, Microscope,
-  Thermometer, Wind, Scale, Ruler, Heart, FlaskConical
+  Thermometer, Wind, Scale, Ruler, Heart, FlaskConical, Plus, UserPlus, Search, CreditCard
 } from 'lucide-react';
-import { DoctorQueueData, Visite, Consultation } from '../../types';
+import { DoctorQueueData, Visite, Consultation, Patient } from '../../types';
 import { ConsultationWorkspaceView } from './ConsultationWorkspaceView';
 import { apiFetch } from '../../lib/api';
 
@@ -24,6 +24,48 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
   const [startingVisiteId, setStartingVisiteId] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState<number>(Date.now());
   const [activeModal, setActiveModal] = useState<string | null>(null);
+  const [viewedNotificationIds, setViewedNotificationIds] = useState<Set<string>>(new Set());
+
+  // Rendez-vous planifiés state
+  const [showRdvCreateModal, setShowRdvCreateModal] = useState<boolean>(false);
+  const [rdvFormDate, setRdvFormDate] = useState<string>(new Date().toLocaleDateString('en-CA'));
+  const [rdvFormHeure, setRdvFormHeure] = useState<string>('09:00');
+  const [rdvFormMotif, setRdvFormMotif] = useState<string>('Consultation de suivi');
+  const [rdvFormMode, setRdvFormMode] = useState<'EXISTANT' | 'TEMPORAIRE'>('TEMPORAIRE');
+  const [rdvFormPatientNom, setRdvFormPatientNom] = useState<string>('');
+  const [rdvFormPatientPrenom, setRdvFormPatientPrenom] = useState<string>('');
+  const [rdvFormPatientTel, setRdvFormPatientTel] = useState<string>('');
+  const [rdvFormPatientId, setRdvFormPatientId] = useState<string>('');
+  const [rdvFormSelectedPatient, setRdvFormSelectedPatient] = useState<Patient | null>(null);
+  const [rdvFormPatientSearch, setRdvFormPatientSearch] = useState<string>('');
+  const [rdvFormPatientSearchResults, setRdvFormPatientSearchResults] = useState<Patient[]>([]);
+  const [rdvFormLoading, setRdvFormLoading] = useState<boolean>(false);
+  const [rdvFormError, setRdvFormError] = useState<string | null>(null);
+  const [rdvFormPayerAvance, setRdvFormPayerAvance] = useState<boolean>(false);
+  const [rdvFormAvanceMontant, setRdvFormAvanceMontant] = useState<string>('20');
+  const [rdvFormAvanceDevise, setRdvFormAvanceDevise] = useState<'USD' | 'FC'>('USD');
+  const [rdvFormAvanceMode, setRdvFormAvanceMode] = useState<string>('ESPECES');
+  const [rdvFormAvanceRef, setRdvFormAvanceRef] = useState<string>('');
+
+  // Recherche patient pour le formulaire de RDV
+  useEffect(() => {
+    const searchPatients = async () => {
+      if (rdvFormMode !== 'EXISTANT') { setRdvFormPatientSearchResults([]); return; }
+      if (rdvFormPatientSearch.trim().length < 2) {
+        setRdvFormPatientSearchResults([]);
+        return;
+      }
+      try {
+        const res = await apiFetch(`/api/patients/search?q=${encodeURIComponent(rdvFormPatientSearch.trim())}`);
+        if (res.ok) {
+          const data = await res.json();
+          setRdvFormPatientSearchResults(data.patients || []);
+        }
+      } catch {}
+    };
+    const timer = setTimeout(searchPatients, 300);
+    return () => clearTimeout(timer);
+  }, [rdvFormPatientSearch, rdvFormMode]);
 
   // Horloge temps réel pour mise à jour continue du compteur d'attente patient
   useEffect(() => {
@@ -249,9 +291,9 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
   };
 
   // Compteurs dérivés pour les accès rapides — toujours à jour depuis data
-  const q = data?.quickAccess ?? { patients: 0, rdv: 0, ordonnances: 0, labResults: 0, bulletins: 0, arriveesJour: 0, demandesLabo: 0 };
+  const q = data?.quickAccess ?? { patients: 0, rdv: 0, rdvPlanifies: 0, ordonnances: 0, labResults: 0, bulletins: 0, arriveesJour: 0, demandesLabo: 0 };
   const s = data?.stats ?? { attente: 0, en_cours: 0, a_finaliser: 0, terminees_jour: 0 };
-  const qa = data?.quickAccessLists ?? { patientsReçusAujourdhui: [], rdvAujourdhui: [], ordonnancesList: [], labResultsNonLus: [], bulletinsDispo: [], demandesLaboNonTraitees: [] };
+  const qa = data?.quickAccessLists ?? { patientsReçusAujourdhui: [], rdvAujourdhui: [], rdvPlanifiesFuturs: [], ordonnancesList: [], labResultsNonLus: [], bulletinsDispo: [], demandesLaboNonTraitees: [] };
 
   // Données utilisées par chaque modale — toujours cohérentes avec les compteurs
   // Si quickAccessLists est manquant (ancien serveur), les listes seront vides
@@ -259,9 +301,16 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
   const modalData = {
     patients: { count: q.patients, items: qa.patientsReçusAujourdhui || [] },
     rdv: { count: q.rdv, items: qa.rdvAujourdhui || [] },
+    'rdv-planifies': { count: q.rdvPlanifies, items: qa.rdvPlanifiesFuturs || [] },
     consultations: { count: s.attente, items: (data?.queue?.attente) || [] },
     ordonnances: { count: q.ordonnances, items: qa.ordonnancesList || [] },
-    'lab-results': { count: q.labResults, items: qa.labResultsNonLus || [] },
+    'lab-results': {
+      count: (q.labResults || 0) + (q.bulletins || 0),
+      items: [
+        ...(qa.labResultsNonLus || []).map((n: any) => ({ ...n, _type: 'notification' })),
+        ...(qa.bulletinsDispo || []).map((b: any) => ({ ...b, _type: 'bulletin' })),
+      ],
+    },
     'demandes-labo': { count: q.demandesLabo, items: qa.demandesLaboNonTraitees || [] },
     finalisation: { count: s.a_finaliser, items: (data?.queue?.a_finaliser) || [] },
   };
@@ -396,9 +445,9 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
           >
             <div className="relative">
               <FlaskConical className="w-5 h-5 text-purple-700 mb-1" />
-              {(q?.labResults ?? 0) > 0 && (
+              {modalData['lab-results'].count > 0 && (
                 <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
-                  {q.labResults}
+                  {modalData['lab-results'].count}
                 </span>
               )}
             </div>
@@ -440,6 +489,24 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
             </div>
             <span className="text-xs font-bold text-amber-900">Finalisation</span>
             <span className="text-[9px] text-amber-700 font-semibold">{s.a_finaliser} en attente</span>
+          </button>
+
+          {/* Rendez-vous planifiés */}
+          <button
+            type="button"
+            onClick={() => setActiveModal('rdv-planifies')}
+            className="p-2.5 bg-blue-50/60 hover:bg-blue-100/80 border border-blue-200 rounded-xl flex flex-col items-center justify-center text-center transition-all min-h-[56px] group relative"
+          >
+            <div className="relative">
+              <Calendar className="w-5 h-5 text-blue-700 mb-1" />
+              {(q?.rdvPlanifies ?? 0) > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                  {q.rdvPlanifies}
+                </span>
+              )}
+            </div>
+            <span className="text-xs font-bold text-blue-900">Rdv planifiés</span>
+            <span className="text-[9px] text-blue-600 font-semibold">futurs</span>
           </button>
         </div>
       </div>
@@ -1074,7 +1141,15 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
           <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[80vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="p-4 border-b border-slate-200 flex items-center justify-between">
               <h2 className="text-sm font-bold text-slate-900">Rendez-vous du jour ({modalData.rdv.count})</h2>
-              <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+              <button
+                type="button"
+                onClick={() => { setActiveModal(null); setShowRdvCreateModal(true); }}
+                className="inline-flex items-center px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold rounded-lg transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5 mr-1" />
+                Nouveau rendez-vous
+              </button>
+              <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none ml-2">&times;</button>
             </div>
             <div className="overflow-y-auto flex-1 p-4">
               {items.length > 0 ? (
@@ -1099,7 +1174,48 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
         );
       })()}
 
-      {/* Modal: Consultations en attente de prise en charge */}
+      {/* Modal: Rendez-vous planifiés (futurs) */}
+      {activeModal === 'rdv-planifies' && (() => {
+        const items = modalData['rdv-planifies'].items;
+        return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setActiveModal(null)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[80vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+              <h2 className="text-sm font-bold text-slate-900">Rendez-vous planifiés futurs ({modalData['rdv-planifies'].count})</h2>
+              <button
+                type="button"
+                onClick={() => { setActiveModal(null); setShowRdvCreateModal(true); }}
+                className="inline-flex items-center px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold rounded-lg transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5 mr-1" />
+                Nouveau rendez-vous
+              </button>
+              <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none ml-2">&times;</button>
+            </div>
+            <div className="overflow-y-auto flex-1 p-4">
+              {items.length > 0 ? (
+                <div className="space-y-2">
+                  {items.map((r: any) => (
+                    <div key={r.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-200">
+                      <div>
+                        <span className="text-xs font-bold text-slate-800">{r.patient_nom} {r.patient_prenom}</span>
+                        <span className="text-[10px] text-slate-500 ml-2 font-mono">{r.numero_dossier}</span>
+                        <div className="text-[10px] text-slate-400 mt-0.5">
+                          {new Date(r.date_rdv).toLocaleDateString('fr-FR')} • {r.heure_rdv || '--:--'} • {r.motif || 'Consultation'}
+                        </div>
+                      </div>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-blue-100 text-blue-800">{r.statut}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-8 text-center text-slate-400 text-sm">Aucun rendez-vous planifié pour les jours à venir</div>
+              )}
+            </div>
+          </div>
+        </div>
+        );
+      })()}
       {activeModal === 'consultations' && (() => {
         const items = modalData.consultations.items;
         return (
@@ -1228,47 +1344,97 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
         );
       })()}
 
-      {/* Modal: Résultats Labo non lus */}
+{/* Modal: Résultats Labo non lus */}
       {activeModal === 'lab-results' && (() => {
         const items = modalData['lab-results'].items;
         return (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setActiveModal(null)}>
-          <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[80vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="p-4 border-b border-slate-200 flex items-center justify-between">
               <h2 className="text-sm font-bold text-slate-900">Résultats Labo non lus ({modalData['lab-results'].count})</h2>
-              <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    setActiveModal(null);
+                    fetchDoctorQueue();
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold transition-colors flex items-center gap-1"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  Fermer
+                </button>
+                <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+              </div>
             </div>
             <div className="overflow-y-auto flex-1 p-4">
               {items.length > 0 ? (
                 <div className="space-y-2">
-                  {items.map((n: any) => (
-                    <div key={n.id} className="p-3 bg-purple-50 rounded-lg border border-purple-200">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <span className="text-xs font-bold text-slate-800">{n.patient_nom} {n.patient_prenom}</span>
-                          <span className="text-[10px] text-slate-500 ml-2 font-mono">{n.numero_dossier}</span>
-                          <div className="text-[10px] text-purple-700 mt-0.5">{n.titre || n.message}</div>
-                          <div className="text-[10px] text-slate-400 mt-0.5">Demande N°{n.numero_demande}</div>
+                  {items.map((item: any) => (
+                    item._type === 'bulletin' ? (
+                      <div key={item.id} className="p-3 bg-teal-50 rounded-lg border border-teal-200">
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <span className="text-xs font-bold text-slate-800">{item.patient_nom} {item.patient_prenom}</span>
+                            <span className="text-[10px] text-slate-500 ml-2 font-mono">Dossier N°{item.numero_dossier}</span>
+                            <div className="text-[10px] text-teal-700 mt-0.5">Bulletin N°{item.numero_demande}</div>
+                          </div>
+                          <button
+                            onClick={() => {
+                              setActiveModal(null);
+                              if (item.consultation_id) {
+                                setActiveConsultationId(item.consultation_id);
+                              } else if (item.patient_id) {
+                                onNavigate?.('reception-patients');
+                              } else {
+                                onNavigate?.('lab-worklist');
+                              }
+                            }}
+                            className="px-2 py-1 bg-teal-600 hover:bg-teal-700 text-white text-[10px] font-bold rounded-lg transition-colors"
+                          >
+                            Ouvrir le dossier
+                          </button>
                         </div>
-                        <button
-                          onClick={async () => {
-                            try {
-                              await apiFetch(`/api/notifications/${n.id}/read`, { method: 'PATCH' });
-                              fetchDoctorQueue();
-                            } catch {}
-                          }}
-                          className="px-2 py-1 bg-purple-600 hover:bg-purple-700 text-white text-[10px] font-bold rounded-lg transition-colors"
-                        >
-                          Marquer Lu
-                        </button>
                       </div>
-                    </div>
+                    ) : (
+                      <div key={item.id} className="p-3 bg-purple-50 rounded-lg border border-purple-200">
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <span className="text-xs font-bold text-slate-800">{item.patient_nom} {item.patient_prenom}</span>
+                            <span className="text-[10px] text-slate-500 ml-2 font-mono">Dossier N°{item.numero_dossier}</span>
+                            <div className="text-[10px] text-purple-700 mt-0.5">{item.titre || item.message}</div>
+                            <div className="text-[10px] text-slate-400 mt-0.5">Demande N°{item.numero_demande}</div>
+                          </div>
+                          <button
+                            disabled={viewedNotificationIds.has(item.id)}
+                            onClick={async () => {
+                              try {
+                                await apiFetch(`/api/notifications/${item.id}/read`, { method: 'PATCH' });
+                                setViewedNotificationIds(prev => new Set(prev).add(item.id));
+                                fetchDoctorQueue();
+                              } catch (err) {
+                                console.error('Error marking as read:', err);
+                              }
+                            }}
+                            className={`px-2 py-1 rounded-lg transition-colors font-bold text-[10px] ${
+                              viewedNotificationIds.has(item.id)
+                                ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
+                                : 'bg-purple-600 hover:bg-purple-700 text-white'
+                            }`}
+                          >
+                            {viewedNotificationIds.has(item.id) ? 'Vu ✓' : 'Résultat Vu'}
+                          </button>
+                        </div>
+                      </div>
+                    )
                   ))}
                 </div>
               ) : (
                 <div className="py-8 text-center text-slate-400 text-sm">Aucun résultat labo non lu</div>
               )}
             </div>
+            <div className="p-3 border-t border-slate-200 flex justify-end">
+                <span className="text-[10px] text-slate-400 italic">Cliquez sur un élément pour ouvrir le dossier patient concerné</span>
+              </div>
           </div>
         </div>
         );
@@ -1371,6 +1537,389 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
         </div>
         );
       })()}
+
+      {/* Modal: Nouveau rendez-vous (création médecin) */}
+      {showRdvCreateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/50" onClick={() => setShowRdvCreateModal(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[92vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="shrink-0 flex items-center justify-between border-b border-slate-200 px-5 py-4">
+              <div className="flex items-center space-x-2">
+                <div className="p-2 rounded-lg bg-blue-100 text-blue-800">
+                  <Calendar className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-slate-900 text-sm">Planification d'un Rendez-vous</h4>
+                  <p className="text-[11px] text-slate-500">Médecin → Planning partagé Réception</p>
+                </div>
+              </div>
+              <button onClick={() => setShowRdvCreateModal(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-3.5 text-xs">
+              {rdvFormError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg">{rdvFormError}</div>
+              )}
+
+              {/* Type de patient */}
+              <div>
+                <label className="block font-bold text-slate-700 mb-1.5 text-xs">
+                  Type de patient pour ce rendez-vous :
+                </label>
+                <div className="grid grid-cols-2 gap-2 mb-2.5">
+                  <button
+                    type="button"
+                    onClick={() => { setRdvFormMode('EXISTANT'); setRdvFormSelectedPatient(null); setRdvFormPatientSearch(''); setRdvFormPatientId(''); }}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center space-x-1.5 ${
+                      rdvFormMode === 'EXISTANT'
+                        ? 'bg-blue-50 text-blue-900 border-blue-600 ring-2 ring-blue-500/20 shadow-xs'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <UserCheck className="w-3.5 h-3.5" />
+                    <span>Patient avec dossier</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setRdvFormMode('TEMPORAIRE'); setRdvFormSelectedPatient(null); setRdvFormPatientId(''); setRdvFormPatientSearchResults([]); }}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center space-x-1.5 ${
+                      rdvFormMode === 'TEMPORAIRE'
+                        ? 'bg-amber-50 text-amber-900 border-amber-600 ring-2 ring-amber-500/20 shadow-xs'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <UserPlus className="w-3.5 h-3.5" />
+                    <span>Nouveau client sans dossier</span>
+                  </button>
+                </div>
+
+                {rdvFormMode === 'EXISTANT' ? (
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">
+                      Rechercher le patient * (nom, prénom, N° dossier)
+                    </label>
+                    {rdvFormSelectedPatient ? (
+                      <div className="flex items-center justify-between p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg">
+                        <div>
+                          <strong className="text-emerald-900 block">{rdvFormSelectedPatient.nom} {rdvFormSelectedPatient.prenom}</strong>
+                          <span className="text-[11px] text-emerald-700 font-mono">Dossier : {rdvFormSelectedPatient.numero_dossier} • Tél : {rdvFormSelectedPatient.telephone || 'Non renseigné'}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => { setRdvFormSelectedPatient(null); setRdvFormPatientSearch(''); }}
+                          className="text-xs text-rose-600 hover:underline font-semibold"
+                        >
+                          Changer
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="relative">
+                        <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
+                        <input
+                          type="text"
+                          value={rdvFormPatientSearch}
+                          onChange={e => setRdvFormPatientSearch(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter' && rdvFormPatientSearchResults.length > 0) {
+                              e.preventDefault();
+                              setRdvFormSelectedPatient(rdvFormPatientSearchResults[0]);
+                              setRdvFormPatientSearchResults([]);
+                              setRdvFormPatientSearch('');
+                            }
+                          }}
+                          placeholder="Tapez au moins 2 lettres pour chercher..."
+                          className="w-full pl-8 pr-3 py-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-900"
+                        />
+                        {rdvFormPatientSearchResults.length > 0 && (
+                          <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-300 rounded-lg shadow-xl z-50 max-h-48 overflow-y-auto divide-y divide-slate-100">
+                            {rdvFormPatientSearchResults.map(p => (
+                              <div
+                                key={p.id}
+                                onClick={() => {
+                                  setRdvFormSelectedPatient(p);
+                                  setRdvFormPatientSearchResults([]);
+                                  setRdvFormPatientSearch('');
+                                }}
+                                className="p-2.5 hover:bg-blue-50 cursor-pointer flex items-center justify-between group transition-colors"
+                              >
+                                <div>
+                                  <span className="font-bold text-slate-900 group-hover:text-blue-700">{p.nom} {p.prenom}</span>
+                                  <span className="text-[11px] text-slate-500 ml-2 font-mono">[{p.numero_dossier}]</span>
+                                </div>
+                                <div className="flex items-center space-x-2">
+                                  <span className="text-[11px] text-slate-500">{p.telephone || ''}</span>
+                                  <button
+                                    type="button"
+                                    onClick={ev => { ev.stopPropagation(); setRdvFormSelectedPatient(p); setRdvFormPatientSearchResults([]); setRdvFormPatientSearch(''); }}
+                                    className="text-[10px] bg-blue-600 hover:bg-blue-700 text-white px-2 py-0.5 rounded font-semibold transition-colors"
+                                  >
+                                    Choisir
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="p-3 bg-amber-50/80 border border-amber-200 rounded-xl space-y-2.5">
+                    <div className="flex items-center space-x-1.5 text-amber-900 font-bold text-xs">
+                      <UserPlus className="w-3.5 h-3.5 text-amber-700" />
+                      <span>Coordonnées du client sans dossier (Temporaire)</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">Nom de famille *</label>
+                        <input
+                          type="text"
+                          required
+                          value={rdvFormPatientNom}
+                          onChange={e => setRdvFormPatientNom(e.target.value.toUpperCase())}
+                          placeholder="Ex: MUKENDI"
+                          className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs font-bold uppercase text-slate-900"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">Prénom</label>
+                        <input
+                          type="text"
+                          value={rdvFormPatientPrenom}
+                          onChange={e => setRdvFormPatientPrenom(e.target.value)}
+                          placeholder="Ex: Jean-Paul"
+                          className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-700 mb-0.5">Téléphone mobile</label>
+                      <input
+                        type="text"
+                        value={rdvFormPatientTel}
+                        onChange={e => setRdvFormPatientTel(e.target.value)}
+                        placeholder="+243..."
+                        className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs font-mono text-slate-900"
+                      />
+                    </div>
+                    <div className="text-[11px] text-amber-800 bg-amber-100/60 p-2 rounded-lg leading-relaxed">
+                      💡 <strong>Nouveau client :</strong> Son dossier permanent sera créé automatiquement dès son arrivée au guichet.
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Date & Heure */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1 text-xs">Date du rendez-vous *</label>
+                  <input
+                    type="date"
+                    value={rdvFormDate}
+                    onChange={e => setRdvFormDate(e.target.value)}
+                    min={new Date().toLocaleDateString('en-CA')}
+                    className="w-full p-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-900"
+                  />
+                </div>
+                <div>
+                  <label className="block font-semibold text-slate-700 mb-1 text-xs">Heure estimée *</label>
+                  <input
+                    type="time"
+                    value={rdvFormHeure}
+                    onChange={e => setRdvFormHeure(e.target.value)}
+                    className="w-full p-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-900"
+                  />
+                </div>
+              </div>
+
+              {/* Motif */}
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1 text-xs">Motif de venue</label>
+                <input
+                  type="text"
+                  value={rdvFormMotif}
+                  onChange={e => setRdvFormMotif(e.target.value)}
+                  placeholder="Ex: Consultation générale, Suivi de tension..."
+                  className="w-full p-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 text-slate-900"
+                />
+              </div>
+
+              {/* Paiement anticipé */}
+              <div className="border border-emerald-300 bg-emerald-50/50 rounded-xl p-3.5 space-y-2.5">
+                <label className="flex items-center space-x-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={rdvFormPayerAvance}
+                    onChange={e => setRdvFormPayerAvance(e.target.checked)}
+                    className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500"
+                  />
+                  <span className="font-bold text-emerald-950 text-xs flex items-center gap-1.5">
+                    <CreditCard className="w-3.5 h-3.5 text-emerald-700" />
+                    <span>Enregistrer un paiement anticipé (Pré-règlement consultation)</span>
+                  </span>
+                </label>
+
+                {rdvFormPayerAvance && (
+                  <div className="pt-2 border-t border-emerald-200 space-y-2.5">
+                    <p className="text-[11px] text-emerald-800 leading-relaxed">
+                      Le patient règle sa consultation à l'avance et n'aura plus rien à payer le jour de son rendez-vous.
+                    </p>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1 text-[11px]">Devise perçue :</label>
+                        <div className="grid grid-cols-2 gap-1">
+                          <button
+                            type="button"
+                            onClick={() => { setRdvFormAvanceDevise('USD'); setRdvFormAvanceMontant('20'); }}
+                            className={`py-1 text-xs font-bold rounded-lg border transition-colors cursor-pointer ${rdvFormAvanceDevise === 'USD' ? 'bg-emerald-700 text-white border-emerald-700' : 'bg-white text-slate-700 border-slate-300'}`}
+                          >
+                            USD ($)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { setRdvFormAvanceDevise('FC'); setRdvFormAvanceMontant(String(Math.round(20 * 2850))); }}
+                            className={`py-1 text-xs font-bold rounded-lg border transition-colors cursor-pointer ${rdvFormAvanceDevise === 'FC' ? 'bg-emerald-700 text-white border-emerald-700' : 'bg-white text-slate-700 border-slate-300'}`}
+                          >
+                            FC (Franc)
+                          </button>
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-1 text-[11px]">Mode de paiement :</label>
+                        <select
+                          value={rdvFormAvanceMode}
+                          onChange={e => setRdvFormAvanceMode(e.target.value)}
+                          className="w-full p-1.5 bg-white border border-slate-300 rounded-lg text-xs"
+                        >
+                          <option value="ESPECES">Espèces (Cash)</option>
+                          <option value="MOBILE_MONEY">Mobile Money</option>
+                          <option value="CARTE_BANCAIRE">Carte Bancaire / TPE</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Montant perçu ({rdvFormAvanceDevise}) :</label>
+                        <input
+                          type="number"
+                          value={rdvFormAvanceMontant}
+                          onChange={e => setRdvFormAvanceMontant(e.target.value)}
+                          className="w-full p-1.5 bg-white border border-emerald-400 rounded-lg font-mono font-bold text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="block font-semibold text-slate-700 mb-0.5 text-[11px]">Référence reçu / transaction :</label>
+                        <input
+                          type="text"
+                          value={rdvFormAvanceRef}
+                          onChange={e => setRdvFormAvanceRef(e.target.value)}
+                          placeholder="Ex: MPESA-91823"
+                          className="w-full p-1.5 bg-white border border-slate-300 rounded-lg text-xs"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Actions fixées en bas */}
+            <div className="shrink-0 bg-slate-50 px-4 sm:px-6 py-3 border-t border-slate-200 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => { setShowRdvCreateModal(false); setRdvFormMode('TEMPORAIRE'); setRdvFormPatientNom(''); setRdvFormPatientPrenom(''); setRdvFormPatientTel(''); setRdvFormSelectedPatient(null); setRdvFormPatientSearch(''); setRdvFormPatientSearchResults([]); setRdvFormPayerAvance(false); setRdvFormAvanceMontant('20'); setRdvFormAvanceDevise('USD'); setRdvFormAvanceMode('ESPECES'); setRdvFormAvanceRef(''); setRdvFormError(null); }}
+                className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors min-h-[40px]"
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!rdvFormDate || !rdvFormHeure || !rdvFormMotif.trim()) {
+                    setRdvFormError('La date, l\'heure et le motif sont obligatoires.');
+                    return;
+                  }
+                  if (rdvFormMode === 'TEMPORAIRE' && !rdvFormPatientNom.trim()) {
+                    setRdvFormError('Le nom du patient est obligatoire.');
+                    return;
+                  }
+                  if (rdvFormMode === 'EXISTANT' && !rdvFormSelectedPatient) {
+                    setRdvFormError('Veuillez sélectionner un patient avec dossier.');
+                    return;
+                  }
+                  setRdvFormLoading(true);
+                  setRdvFormError(null);
+                  try {
+                    const payload: any = {
+                      date_rdv: rdvFormDate,
+                      heure_rdv: rdvFormHeure,
+                      motif: rdvFormMotif.trim(),
+                      type_rdv: 'CONTROLE',
+                      source_demande: 'CONSULTATION_SUIVI',
+                      statut: 'PLANIFIÉ',
+                    };
+                    if (rdvFormMode === 'EXISTANT' && rdvFormSelectedPatient) {
+                      payload.patient_id = rdvFormSelectedPatient.id;
+                    } else {
+                      payload.patient_nom = rdvFormPatientNom.trim().toUpperCase();
+                      if (rdvFormPatientPrenom.trim()) payload.patient_prenom = rdvFormPatientPrenom.trim();
+                      if (rdvFormPatientTel.trim()) payload.patient_telephone = rdvFormPatientTel.trim();
+                    }
+                    if (rdvFormPayerAvance && parseFloat(rdvFormAvanceMontant) > 0) {
+                      payload.facturer_avance = true;
+                      payload.paiement_immediat = {
+                        montant_paye: parseFloat(rdvFormAvanceMontant),
+                        devise: rdvFormAvanceDevise,
+                        mode_paiement: rdvFormAvanceMode,
+                        reference_transaction: rdvFormAvanceRef.trim() || undefined,
+                      };
+                    }
+                    const res = await apiFetch('/api/rendez-vous', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(payload),
+                    });
+                    if (!res.ok) {
+                      const data = await res.json();
+                      throw new Error(data.error || 'Erreur lors de la création du rendez-vous');
+                    }
+                    setShowRdvCreateModal(false);
+                    setRdvFormMode('TEMPORAIRE');
+                    setRdvFormPatientNom('');
+                    setRdvFormPatientPrenom('');
+                    setRdvFormPatientTel('');
+                    setRdvFormSelectedPatient(null);
+                    setRdvFormPatientSearch('');
+                    setRdvFormPatientSearchResults([]);
+                    setRdvFormPayerAvance(false);
+                    setRdvFormAvanceMontant('20');
+                    setRdvFormAvanceDevise('USD');
+                    setRdvFormAvanceMode('ESPECES');
+                    setRdvFormAvanceRef('');
+                    setRdvFormMotif('Consultation de suivi');
+                    setRdvFormDate(new Date().toLocaleDateString('en-CA'));
+                    setRdvFormHeure('09:00');
+                    await fetchDoctorQueue();
+                  } catch (err: any) {
+                    setRdvFormError(err.message || 'Erreur lors de la création');
+                  } finally {
+                    setRdvFormLoading(false);
+                  }
+                }}
+                disabled={rdvFormLoading}
+                className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50 min-h-[40px] flex items-center gap-1.5"
+              >
+                {rdvFormLoading
+                  ? <><Activity className="w-3.5 h-3.5 animate-spin" />Création...</>
+                  : 'Planifier le rendez-vous'
+                }
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

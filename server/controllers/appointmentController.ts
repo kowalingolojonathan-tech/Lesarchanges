@@ -392,6 +392,51 @@ export async function createAppointment(req: AuthenticatedRequest, res: Response
       ipAddress: req.ip || '127.0.0.1',
     });
 
+    // 5. Créer une notification pour le médecin concerné
+    const notifId = `notif-${crypto.randomUUID().substring(0, 12)}`;
+    const patientFullName = patient ? `${patient.nom} ${patient.prenom}` : `${tempNom} ${tempPrenom || ''}`;
+    await execute(
+      `INSERT INTO notifications (
+        id, user_id, titre, message, type, patient_id, visite_id, lab_order_id, lu, created_at
+      ) VALUES (?, ?, ?, ?, 'APPOINTMENT', ?, ?, ?, 0, ?)`,
+      [
+        notifId,
+        finalMedecinId,
+        'Nouveau rendez-vous',
+        `Nouveau rendez-vous pour ${patientFullName} (Dossier ${patient?.numero_dossier || 'SANS DOSSIER'}) le ${cleanDateRdv} à ${finalHeure}.`,
+        patient?.id || null,
+        visite_id || null,
+        rdvId,
+        nowIso
+      ]
+    );
+
+    // 5b. Créer aussi une notification pour chaque réceptionniste actif
+    const receptionUsers = await query<any>(
+      `SELECT u.id FROM users u
+       WHERE (u.role IN ('RÉCEPTION', 'RECEPTION') OR EXISTS (
+         SELECT 1 FROM roles r WHERE (r.id = u.role_id OR r.code = u.role) AND r.categorie = 'RÉCEPTION'
+       )) AND u.actif = 1`
+    );
+    for (const recep of receptionUsers) {
+      const notifIdRecep = `notif-${crypto.randomUUID().substring(0, 12)}`;
+      await execute(
+        `INSERT INTO notifications (
+          id, user_id, titre, message, type, patient_id, visite_id, lab_order_id, lu, created_at
+        ) VALUES (?, ?, ?, ?, 'APPOINTMENT', ?, ?, ?, 0, ?)`,
+        [
+          notifIdRecep,
+          recep.id,
+          'Nouveau rendez-vous',
+          `Nouveau rendez-vous pour ${patientFullName} (Dossier ${patient?.numero_dossier || 'SANS DOSSIER'}) le ${cleanDateRdv} à ${finalHeure} — créé par Dr. ${user?.nom_complet || 'le médecin'}.`,
+          patient?.id || null,
+          visite_id || null,
+          rdvId,
+          nowIso
+        ]
+      );
+    }
+
     const created = await queryOne(
       `SELECT r.*, 
               COALESCE(p.nom, r.patient_nom_temp, 'Patient sans dossier') as patient_nom, 

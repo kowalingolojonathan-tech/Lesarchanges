@@ -328,6 +328,7 @@ export interface DoctorQueueData {
   quickAccess?: {
     patients: number;
     rdv: number;
+    rdvPlanifies: number;
     ordonnances: number;
     labResults: number;
     bulletins: number;
@@ -337,6 +338,7 @@ export interface DoctorQueueData {
   quickAccessLists?: {
     patientsReçusAujourdhui: any[];
     rdvAujourdhui: any[];
+    rdvPlanifiesFuturs: any[];
     ordonnancesList: any[];
     labResultsNonLus: any[];
     bulletinsDispo: any[];

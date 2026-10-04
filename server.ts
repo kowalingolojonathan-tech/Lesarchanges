@@ -170,6 +170,7 @@ async function startServer() {
   app.post('/api/laboratory/orders/:id/validate', requireAuth, requireRole(['LABORATOIRE']), medicalCtrl.validateLabResults);
   app.post('/api/laboratory/orders/:id/amend', requireAuth, requireRole(['LABORATOIRE']), medicalCtrl.amendLabResults);
   app.get('/api/medical/lab-orders/:id/bulletin', requireAuth, requireRole(['MÉDECIN', 'LABORATOIRE', 'ADMINISTRATEUR']), medicalCtrl.getLabBulletin);
+app.post('/api/medical/lab-orders/:id/mark-viewed', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.markLabOrderViewed);
 
   // --- NOTIFICATIONS SYSTÈME ---
   app.get('/api/notifications', requireAuth, medicalCtrl.getUserNotifications);

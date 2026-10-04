@@ -665,7 +665,8 @@ export async function runMigrations(): Promise<void> {
         { name: 'conclusion_globale', type: 'TEXT' },
         { name: 'remarques_techniques', type: 'TEXT' },
         { name: 'document_url', type: 'TEXT' },
-        { name: 'document_nom', type: 'TEXT' }
+        { name: 'document_nom', type: 'TEXT' },
+        { name: 'vu_par_medecin_le', type: 'TEXT' }
       ];
 
       for (const col of newDemCols) {

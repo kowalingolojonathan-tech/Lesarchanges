@@ -560,6 +560,27 @@ export async function assignDoctor(req: AuthenticatedRequest, res: Response): Pr
       [medecin_id, nowIso, id]
     );
 
+    // Notification de nouvelle consultation en attente pour le médecin affecté
+    const patientRow = await queryOne<any>(
+      `SELECT p.nom, p.prenom, p.numero_dossier FROM patients p WHERE p.id = (SELECT patient_id FROM visites WHERE id = ?)`,
+      [id]
+    );
+    const patientName = patientRow ? `${patientRow.nom} ${patientRow.prenom}` : 'Patient';
+    const notifIdAssign = `notif-${crypto.randomUUID().substring(0, 12)}`;
+    await execute(
+      `INSERT INTO notifications (id, user_id, titre, message, type, visite_id, patient_id, lab_order_id, lu, created_at)
+       VALUES (?, ?, ?, ?, 'CONSULTATION_WAITING', ?, ?, NULL, 0, ?)`,
+      [
+        notifIdAssign,
+        medecin_id,
+        'Nouvelle consultation en attente',
+        `Nouvelle consultation en attente : ${patientName} (Visite N°${visite.numero_visite}) a été orienté vers vous par la réception.`,
+        id,
+        patientRow?.id || null,
+        nowIso
+      ]
+    );
+
     await auditLogger.log({
       userId: req.user?.id || 'system',
       action: 'ASSIGN_DOCTOR',

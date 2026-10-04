@@ -591,17 +591,34 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
                 <CheckCircle2 className="w-4 h-4 mr-1.5" />
                 Finaliser
               </button>
+
+              <button
+                onClick={onBack}
+                className="inline-flex items-center px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-xs font-semibold rounded-lg transition-colors min-h-[38px]"
+              >
+                <X className="w-3.5 h-3.5 mr-1" />
+                Fermer
+              </button>
             </div>
           )}
 
           {isFinalized && !isAmendmentMode && (
-            <button
-              onClick={() => setIsAmendmentMode(true)}
-              className="inline-flex items-center px-3.5 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 text-xs font-semibold rounded-lg transition-colors min-h-[38px]"
-            >
-              <Unlock className="w-3.5 h-3.5 mr-1" />
-              Modifier
-            </button>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={onBack}
+                className="inline-flex items-center px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-xs font-semibold rounded-lg transition-colors min-h-[38px]"
+              >
+                <X className="w-3.5 h-3.5 mr-1" />
+                Fermer
+              </button>
+              <button
+                onClick={() => setIsAmendmentMode(true)}
+                className="inline-flex items-center px-3.5 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 text-xs font-semibold rounded-lg transition-colors min-h-[38px]"
+              >
+                <Unlock className="w-3.5 h-3.5 mr-1" />
+                Modifier
+              </button>
+            </div>
           )}
 
           {isFinalized && isAmendmentMode && (
@@ -2237,14 +2254,30 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
             <CheckCircle2 className="w-4 h-4" />
             <span>Finaliser</span>
           </button>
+
+          <button
+            onClick={onBack}
+            className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-xs font-semibold rounded-lg transition-colors min-h-[44px] flex items-center justify-center space-x-1"
+          >
+            <X className="w-3.5 h-3.5" />
+            <span>Fermer</span>
+          </button>
         </div>
       )}
 
       {isFinalized && !isAmendmentMode && (
-        <div className="sm:hidden fixed bottom-14 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 px-4 py-2.5 shadow-lg flex items-center justify-end">
+        <div className="sm:hidden fixed bottom-14 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-slate-200 px-4 py-2.5 shadow-lg flex items-center justify-end gap-2">
+          <button
+            onClick={onBack}
+            className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-xs font-semibold rounded-lg transition-colors min-h-[44px] flex items-center justify-center space-x-1.5"
+          >
+            <X className="w-4 h-4" />
+            <span>Fermer</span>
+          </button>
+
           <button
             onClick={() => setIsAmendmentMode(true)}
-            className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg transition-colors min-h-[44px] flex items-center justify-center space-x-1.5"
+            className="flex-1 py-2.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold rounded-lg transition-colors min-h-[44px] flex items-center justify-center space-x-1.5"
           >
             <Unlock className="w-4 h-4" />
             <span>Modifier la consultation (Amendement)</span>

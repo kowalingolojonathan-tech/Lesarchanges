@@ -140,6 +140,21 @@ export async function getDoctorQueue(req: AuthenticatedRequest, res: Response): 
     );
     const rdvEnAttenteCount = rdvAujourdhui.length;
 
+    // 6b2. Rendez-vous planifiés futurs (date > aujourd'hui, non annulés)
+    const rdvPlanifiesFuturs = await query<any>(
+      `SELECT r.id, r.numero_rdv, r.date_rdv, r.heure_rdv, r.statut, r.motif, r.type_rdv, r.visite_id, r.medecin_id,
+              COALESCE(p.nom, r.patient_nom_temp) as patient_nom,
+              COALESCE(p.prenom, r.patient_prenom_temp) as patient_prenom,
+              COALESCE(p.numero_dossier, 'SANS DOSSIER') as numero_dossier
+       FROM rendez_vous r
+       LEFT JOIN patients p ON r.patient_id = p.id
+       WHERE r.medecin_id = ? AND r.date_rdv > date('now')
+         AND r.statut NOT IN ('HONORÉ', 'ABSENT', 'ANNULÉ') AND r.actif = 1
+       ORDER BY r.date_rdv ASC, r.heure_rdv ASC`,
+      [doctorId]
+    );
+    const rdvPlanifiesCount = rdvPlanifiesFuturs.length;
+
     // 6c. Consultations en attente de prise en charge (même logique que la file attente)
     const consultationsEnAttente = attente;
 
@@ -193,15 +208,18 @@ export async function getDoctorQueue(req: AuthenticatedRequest, res: Response): 
     );
     const labResultsCount = labResultsNonLus.length;
 
-    // 6f. Bulletins labo disponibles (statut validé)
+// 6f. Bulletins labo disponibles (statut validé ET non encore vus par le médecin)
     const bulletinsDispo = await query<any>(
       `SELECT d.id, d.numero_demande, d.statut, d.date_demande, d.conclusion_globale,
+              d.vu_par_medecin_le,
+              d.consultation_id, d.patient_id, d.visite_id,
               pat.nom as patient_nom, pat.prenom as patient_prenom,
               pat.numero_dossier
        FROM demandes_laboratoire d
        INNER JOIN patients pat ON d.patient_id = pat.id
-        WHERE d.medecin_id = ? AND d.statut IN ('RESULTATS_VALIDES', 'RESULTAT_VALIDE')
-        ORDER BY d.updated_at DESC`,
+       WHERE d.medecin_id = ? AND d.statut IN ('RESULTATS_VALIDES', 'RESULTAT_VALIDE')
+         AND d.vu_par_medecin_le IS NULL
+       ORDER BY d.updated_at DESC`,
       [doctorId]
     );
 
@@ -256,6 +274,7 @@ export async function getDoctorQueue(req: AuthenticatedRequest, res: Response): 
       quickAccess: {
         patients: patientsReçusJourCount,
         rdv: rdvEnAttenteCount,
+        rdvPlanifies: rdvPlanifiesCount,
         ordonnances: ordonnancesCount,
         labResults: labResultsCount,
         bulletins: bulletinsDispo.length,
@@ -265,6 +284,7 @@ export async function getDoctorQueue(req: AuthenticatedRequest, res: Response): 
       quickAccessLists: {
         patientsReçusAujourdhui: patientsReçusAujourdhui,
         rdvAujourdhui,
+        rdvPlanifiesFuturs,
         ordonnancesList,
         labResultsNonLus,
         bulletinsDispo,
@@ -4280,11 +4300,84 @@ export async function getLabBulletin(req: AuthenticatedRequest, res: Response): 
       analyses,
       amendements
     };
-
-    res.json({ bulletin });
   } catch (error: any) {
     console.error('Erreur bulletin analyses:', error);
     res.status(500).json({ error: 'Erreur interne lors de la génération du bulletin d\'analyses.' });
+  }
+}
+
+/**
+ * Marquer un résultat de laboratoire comme vu par le médecin
+ * POST /api/medical/lab-orders/:id/mark-viewed
+ * Rôle : MÉDECIN
+ * Trouve la notification associée à ce bon de laboratoire et la marque comme lue
+ */
+export async function markLabOrderViewed(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const { id } = req.params;
+    const doctorId = user.id;
+
+    // Vérifier que le bon de laboratoire appartient à ce médecin
+    const order = await queryOne<any>(
+      `SELECT id, medecin_id FROM demandes_laboratoire WHERE id = ?`,
+      [id]
+    );
+
+    if (!order) {
+      res.status(404).json({ error: 'Demande de laboratoire introuvable.' });
+      return;
+    }
+
+    if (order.medecin_id !== doctorId) {
+      res.status(403).json({ error: 'Cette demande de laboratoire ne vous appartient pas.' });
+      return;
+    }
+
+    const now = new Date().toISOString();
+
+    // Mettre à jour le champ vu_par_medecin_le sur le bon de laboratoire
+    await execute(
+      `UPDATE demandes_laboratoire SET vu_par_medecin_le = ? WHERE id = ?`,
+      [now, id]
+    );
+
+    // Trouver la notification associée à ce bon de laboratoire pour ce médecin
+    const notification = await queryOne<any>(
+      `SELECT id FROM notifications 
+       WHERE lab_order_id = ? AND user_id = ? AND type = 'LAB_RESULTS_READY' AND lu = 0`,
+      [id, doctorId]
+    );
+
+    if (notification) {
+      await execute(
+        `UPDATE notifications SET lu = 1, lu_le = ? WHERE id = ?`,
+        [now, notification.id]
+      );
+    }
+
+    await auditLogger.log({
+      userId: doctorId,
+      action: 'LAB_RESULT_MARKED_VIEWED',
+      ressourceType: 'LAB_ORDER',
+      ressourceId: id,
+      details: `Résultat de laboratoire marqué comme vu par Dr. ${user.nom_complet}`,
+      ipAddress: req.ip || '127.0.0.1'
+    });
+
+    res.json({ 
+      success: true, 
+      message: 'Résultat marqué comme vu.',
+      notification_marked: !!notification
+    });
+  } catch (error: any) {
+    console.error('Erreur marquage résultat comme vu:', error);
+    res.status(500).json({ error: 'Erreur interne lors du marquage du résultat comme vu.' });
   }
 }
 
@@ -4306,13 +4399,13 @@ export async function getUserNotifications(req: AuthenticatedRequest, res: Respo
     // on l'enève des notifications non lues / alertes en le marquant lu = 1.
     // Filtre user_id pour ne toucher que les notifications de l'utilisateur connecté.
     await execute(
-      `UPDATE notifications 
-       SET lu = 1, lu_le = COALESCE(lu_le, ?)
-       WHERE user_id = ? AND lu = 0 AND lab_order_id IN (
-         SELECT d.id FROM demandes_laboratoire d
-         JOIN factures f ON d.facture_id = f.id
-         WHERE f.statut = 'PAYÉ'
-       )`,
+      `UPDATE notifications
+        SET lu = 1, lu_le = COALESCE(lu_le, ?)
+        WHERE user_id = ? AND lu = 0 AND type = 'LAB_RESULTS_READY' AND lab_order_id IN (
+          SELECT d.id FROM demandes_laboratoire d
+          JOIN factures f ON d.facture_id = f.id
+          WHERE f.statut = 'PAYÉ'
+        )`,
       [nowIso, user.id]
     );
 
@@ -4329,13 +4422,20 @@ export async function getUserNotifications(req: AuthenticatedRequest, res: Respo
        LEFT JOIN patients p ON n.patient_id = p.id
        LEFT JOIN demandes_laboratoire d ON n.lab_order_id = d.id
        LEFT JOIN factures f ON d.facture_id = f.id
-       WHERE n.user_id = ? 
+       WHERE n.user_id = ? AND n.type IN ('APPOINTMENT', 'LAB_RESULTS_READY', 'CONSULTATION_WAITING')
        ORDER BY n.created_at DESC LIMIT 50`,
       [user.id]
     );
 
     const unreadCountRow = await queryOne<any>(
-      `SELECT COUNT(*) as unread_count FROM notifications WHERE user_id = ? AND lu = 0`,
+      `SELECT COUNT(*) as unread_count FROM notifications WHERE user_id = ? AND lu = 0 AND type IN ('APPOINTMENT', 'LAB_RESULTS_READY', 'CONSULTATION_WAITING')`,
+      [user.id]
+    );
+
+    // Compter les bulletins labo disponibles pour ce médecin (statut validé)
+    const bulletinsRow = await queryOne<any>(
+      `SELECT COUNT(*) as bulletins_count FROM demandes_laboratoire d
+       WHERE d.medecin_id = ? AND d.statut IN ('RESULTATS_VALIDES', 'RESULTAT_VALIDE')`,
       [user.id]
     );
 
@@ -4346,7 +4446,9 @@ export async function getUserNotifications(req: AuthenticatedRequest, res: Respo
         lu: Number(n.lu),
         is_lab_paid: n.lab_facture_statut === 'PAYÉ'
       })),
-      unread_count: unreadCountRow ? Number(unreadCountRow.unread_count) : 0
+      unread_count: unreadCountRow ? Number(unreadCountRow.unread_count) : 0,
+      bulletins_count: bulletinsRow ? Number(bulletinsRow.bulletins_count) : 0,
+      total_count: (unreadCountRow ? Number(unreadCountRow.unread_count) : 0) + (bulletinsRow ? Number(bulletinsRow.bulletins_count) : 0)
     });
   } catch (error: any) {
     console.error('Erreur notifications utilisateur:', error);
@@ -4516,7 +4618,7 @@ export async function markNotificationRead(req: AuthenticatedRequest, res: Respo
     const { id } = req.params;
     const now = new Date().toISOString();
     await execute(
-      `UPDATE notifications SET lu = 1, lu_le = ? WHERE id = ? AND user_id = ?`,
+      `UPDATE notifications SET lu = 1, lu_le = ? WHERE id = ? AND user_id = ? AND type IN ('APPOINTMENT', 'LAB_RESULTS_READY', 'CONSULTATION_WAITING')`,
       [now, id, user.id]
     );
 
@@ -4541,7 +4643,7 @@ export async function markAllNotificationsRead(req: AuthenticatedRequest, res: R
 
     const now = new Date().toISOString();
     await execute(
-      `UPDATE notifications SET lu = 1, lu_le = ? WHERE user_id = ? AND lu = 0`,
+      `UPDATE notifications SET lu = 1, lu_le = ? WHERE user_id = ? AND lu = 0 AND type IN ('APPOINTMENT', 'LAB_RESULTS_READY', 'CONSULTATION_WAITING')`,
       [now, user.id]
     );
 

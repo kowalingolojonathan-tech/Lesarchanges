@@ -81,16 +81,6 @@ export const Header: React.FC<HeaderProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleMarkAsRead = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    try {
-      await apiFetch(`/api/notifications/${id}/read`, { method: 'PATCH' });
-      await fetchNotifications();
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
   const handleMarkAllAsRead = async () => {
     try {
       await apiFetch('/api/notifications/read-all', { method: 'POST' });
@@ -264,36 +254,26 @@ export const Header: React.FC<HeaderProps> = ({
                 {/* Dropdown des notifications - mobile responsive */}
                 {showNotifications && (
                   <div className="fixed inset-x-3 top-16 sm:absolute sm:inset-x-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-96 bg-white rounded-2xl shadow-2xl border border-slate-200 z-50 overflow-hidden text-left max-w-sm sm:max-w-none mx-auto">
-                    <div className="p-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-                      <div className="flex items-center space-x-2">
-                        <Bell className="w-4 h-4 text-emerald-700" />
-                        <span className="text-xs font-bold text-slate-900">Notifications Médicales</span>
-                        {unreadCount > 0 && (
-                          <span className="bg-rose-100 text-rose-800 text-[10px] px-1.5 py-0.2 rounded-full font-bold">
-                            {unreadCount} non lue{unreadCount > 1 ? 's' : ''}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        {unreadCount > 0 && (
-                          <button
-                            type="button"
-                            onClick={handleMarkAllAsRead}
-                            className="text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold flex items-center gap-1"
-                          >
-                            <CheckCheck className="w-3.5 h-3.5" />
-                            Tout marquer
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => setShowNotifications(false)}
-                          className="sm:hidden p-1 text-slate-400 hover:text-slate-700"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
+<div className="p-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <Bell className="w-4 h-4 text-emerald-700" />
+                    <span className="text-xs font-bold text-slate-900">Notifications Médicales</span>
+                    {unreadCount > 0 && (
+                      <span className="bg-rose-100 text-rose-800 text-[10px] px-1.5 py-0.2 rounded-full font-bold">
+                        {unreadCount} non lue{unreadCount > 1 ? 's' : ''}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowNotifications(false)}
+                      className="sm:hidden p-1 text-slate-400 hover:text-slate-700"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
 
                     <div className="max-h-[60vh] sm:max-h-80 overflow-y-auto divide-y divide-slate-100">
                       {notifications.length === 0 ? (
@@ -301,104 +281,45 @@ export const Header: React.FC<HeaderProps> = ({
                           Aucune notification pour le moment.
                         </div>
                       ) : (
-                        notifications.map((n) => (
-                          <div
-                            key={n.id}
-                            className={`p-3 text-xs transition-colors hover:bg-slate-50 flex items-start justify-between gap-2 ${
-                              !n.est_lu ? 'bg-amber-50/50' : 'bg-white'
-                            }`}
-                          >
-                            <div className="space-y-1 flex-1 min-w-0">
+                        <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100 bg-slate-50/50">
+                          <span className="text-[10px] text-slate-500">
+                            {unreadCount > 0 ? `${unreadCount} notification${unreadCount > 1 ? 's' : ''} non lue` : 'Aucune notification non lue'}
+                          </span>
+                          {unreadCount > 0 && (
+                            <button
+                              type="button"
+                              onClick={handleMarkAllAsRead}
+                              className="text-[10px] font-bold text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1 rounded-lg transition-colors"
+                            >
+                              Marquer tout comme lu
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      {notifications.length > 0 && notifications.map((n) => (
+                        <div
+                          key={n.id}
+                          className={`p-3 text-xs transition-colors hover:bg-slate-50 ${
+                            !n.est_lu ? 'bg-amber-50/50' : 'bg-white'
+                          }`}
+                        >
+                          <div className="flex items-start space-x-2">
+                            <span className={`w-2 h-2 rounded-full shrink-0 mt-1 ${!n.est_lu ? 'bg-amber-500 ring-2 ring-amber-300' : 'bg-slate-300'}`} />
+                            <div className="flex-1 min-w-0">
                               <div className="flex items-center space-x-1.5">
-                                <span className={`w-2 h-2 rounded-full shrink-0 ${!n.est_lu ? 'bg-amber-500 ring-2 ring-amber-300' : 'bg-slate-300'}`} />
                                 <span className="font-bold text-slate-900 truncate">{n.titre}</span>
                               </div>
-                              <p className="text-slate-600 text-[11px] leading-relaxed break-words">
+                              <p className="text-slate-600 text-[11px] leading-relaxed break-words mt-0.5">
                                 {n.message}
                               </p>
-                              <div className="flex items-center space-x-2 text-[10px] text-slate-400">
+                              <div className="flex items-center space-x-2 text-[10px] text-slate-400 mt-1">
                                 <Clock className="w-3 h-3 shrink-0" />
                                 <span>{new Date(n.created_at).toLocaleString('fr-FR')}</span>
                               </div>
-
-                              {/* Action directe adaptée au rôle de l'utilisateur connecté */}
-                              {user?.role === 'RÉCEPTION' && n.lab_order_id && (
-                                n.is_lab_paid || (n as any).lab_facture_statut === 'PAYÉ' ? (
-                                  <div className="mt-1.5 inline-flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-800 font-bold text-[11px] rounded-lg border border-emerald-200">
-                                    <Check className="w-3.5 h-3.5 text-emerald-600" />
-                                    <span>✓ Réglé à la caisse</span>
-                                  </div>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      window.dispatchEvent(new CustomEvent('open-lab-collection', { detail: { lab_order_id: n.lab_order_id } }));
-                                      setShowNotifications(false);
-                                    }}
-                                    className="mt-1.5 inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 font-bold text-[11px] rounded-lg border border-emerald-300 transition-colors min-h-[36px] shadow-xs cursor-pointer"
-                                  >
-                                    <CreditCard className="w-3.5 h-3.5 text-emerald-600" />
-                                    <span>Encaisser au guichet (Caisse)</span>
-                                  </button>
-                                )
-                              )}
-
-                              {(n.type === 'PRESCRIPTION_READY' || n.titre?.toLowerCase().includes('ordonnance')) && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    window.dispatchEvent(new CustomEvent('open-prescriptions'));
-                                    setShowNotifications(false);
-                                  }}
-                                  className="mt-1.5 inline-flex items-center gap-1.5 px-3 py-1.5 bg-sky-50 text-sky-800 hover:bg-sky-100 font-bold text-[11px] rounded-lg border border-sky-300 transition-colors min-h-[36px] shadow-xs cursor-pointer"
-                                >
-                                  <Printer className="w-3.5 h-3.5 text-sky-600" />
-                                  <span>Imprimer ordonnance</span>
-                                </button>
-                              )}
-
-                              {(n.type === 'APPOINTMENT' || n.titre?.toLowerCase().includes('rendez-vous')) && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    window.dispatchEvent(new CustomEvent('open-appointments'));
-                                    setShowNotifications(false);
-                                  }}
-                                  className="mt-1.5 inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-800 hover:bg-indigo-100 font-bold text-[11px] rounded-lg border border-indigo-300 transition-colors min-h-[36px] shadow-xs cursor-pointer"
-                                >
-                                  <Calendar className="w-3.5 h-3.5 text-indigo-600" />
-                                  <span>Gérer le rendez-vous</span>
-                                </button>
-                              )}
-
-                              {user?.role !== 'RÉCEPTION' && n.lab_order_id && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setSelectedBulletinOrderId(n.lab_order_id);
-                                    setShowNotifications(false);
-                                  }}
-                                  className="mt-1.5 inline-flex items-center gap-1 px-2.5 py-1 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 font-bold text-[11px] rounded-md border border-indigo-200 transition-colors min-h-[36px]"
-                                >
-                                  <FileText className="w-3.5 h-3.5 text-indigo-500" />
-                                  <span>Ouvrir bulletin officiel</span>
-                                </button>
-                              )}
                             </div>
-
-                            {!n.est_lu && (
-                              <button
-                                type="button"
-                                onClick={(e) => handleMarkAsRead(n.id, e)}
-                                title="Marquer comme lu"
-                                className="p-2 text-slate-400 hover:text-emerald-700 rounded-md transition-colors min-w-[36px] min-h-[36px] flex items-center justify-center"
-                              >
-                                <Check className="w-4 h-4" />
-                              </button>
-                            )}
                           </div>
-                        ))
-                      )}
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}

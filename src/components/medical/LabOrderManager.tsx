@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   FlaskConical, Plus, Trash2, CheckCircle2, AlertCircle, Lock, Edit3, 
   Printer, Clock, FileText, ChevronDown, ChevronUp, Save, 
-  X, AlertTriangle, ShieldAlert, Sparkles, RefreshCw, Eye, Ban, UserCheck
+  X, AlertTriangle, ShieldAlert, Sparkles, RefreshCw, Eye, Ban, UserCheck, Check
 } from 'lucide-react';
 import { DemandeLaboratoire, AnalyseLaboratoire, LabOrderUrgence, EchantillonType, LaborantinUser } from '../../types';
 import { apiFetch } from '../../lib/api';
@@ -68,6 +68,7 @@ export const LabOrderManager: React.FC<LabOrderManagerProps> = ({
   const [previewOrder, setPreviewOrder] = useState<DemandeLaboratoire | null>(null);
   const [selectedBulletinOrderId, setSelectedBulletinOrderId] = useState<string | null>(null);
   const [expandedOrderIds, setExpandedOrderIds] = useState<Record<string, boolean>>({});
+  const [viewedOrderIds, setViewedOrderIds] = useState<Set<string>>(new Set());
 
   // Charger les laborantins actifs autorisés (Phase 2C-3)
   const fetchLaborantins = async () => {
@@ -781,7 +782,39 @@ export const LabOrderManager: React.FC<LabOrderManagerProps> = ({
                     Bulletin Officiel
                   </button>
 
-                  {!isCancelled && (
+                  {/* Bouton Résultat Vu pour les résultats validés */}
+                  {['RESULTATS_VALIDES', 'RESULTAT_VALIDE'].includes(order.statut) && !isCancelled && (
+                    <button
+                      type="button"
+                      disabled={viewedOrderIds.has(order.id)}
+                      onClick={async () => {
+                        try {
+                          // Marquer la notification liée à ce bon de laboratoire comme lue
+                          const res = await apiFetch(`/api/medical/lab-orders/${order.id}/mark-viewed`, { 
+                            method: 'POST' 
+                          });
+                          if (res.ok) {
+                            setViewedOrderIds(prev => new Set(prev).add(order.id));
+                            await fetchLabOrders();
+                            if (onLabOrdersUpdated) onLabOrdersUpdated();
+                          }
+                        } catch (err) {
+                          console.error('Erreur marquage comme vu:', err);
+                        }
+                      }}
+                      className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-colors flex items-center gap-1 shadow-xs ${
+                        viewedOrderIds.has(order.id)
+                          ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
+                          : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs'
+                      }`}
+                      title={viewedOrderIds.has(order.id) ? 'Déjà consulté' : 'Marquer ce résultat comme consulté'}
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      {viewedOrderIds.has(order.id) ? 'Vu ✓' : 'Résultat Vu'}
+                    </button>
+                  )}
+
+                  {!isCancelled && !['RESULTATS_VALIDES', 'RESULTAT_VALIDE'].includes(order.statut) && (
                     <button
                       type="button"
                       onClick={() => handleCancelLabOrder(order.id)}
