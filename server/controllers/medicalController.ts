@@ -110,6 +110,127 @@ export async function getDoctorQueue(req: AuthenticatedRequest, res: Response): 
       [doctorId]
     );
 
+    // 6. Compteurs et listes détaillés pour les accès rapides Médecin
+    // 6a. Patients reçus aujourd'hui (visites du jour avec statut EN_CONSULTATION ou CLOTUREE)
+    const patientsReçusAujourdhui = await query<any>(
+      `SELECT v.id, v.numero_visite, v.patient_id, v.date_arrivee, v.statut,
+              p.numero_dossier, p.nom as patient_nom, p.prenom as patient_prenom,
+              p.sexe as patient_sexe
+       FROM visites v
+       INNER JOIN patients p ON v.patient_id = p.id
+       WHERE v.medecin_id = ? AND date(v.date_arrivee) = date('now')
+         AND v.statut IN ('EN_CONSULTATION', 'CLOTUREE') AND v.actif = 1
+       ORDER BY v.date_arrivee DESC`,
+      [doctorId]
+    );
+    const patientsReçusJourCount = patientsReçusAujourdhui.length;
+
+    // 6b. Rendez-vous du jour non honorés (patient n'est pas encore arrivé chez le médecin)
+    const rdvAujourdhui = await query<any>(
+      `SELECT r.id, r.numero_rdv, r.date_rdv, r.heure_rdv, r.statut, r.motif, r.visite_id,
+              COALESCE(p.nom, r.patient_nom_temp) as patient_nom,
+              COALESCE(p.prenom, r.patient_prenom_temp) as patient_prenom,
+              COALESCE(p.numero_dossier, 'SANS DOSSIER') as numero_dossier
+       FROM rendez_vous r
+       LEFT JOIN patients p ON r.patient_id = p.id
+       WHERE r.medecin_id = ? AND r.date_rdv = date('now')
+         AND r.statut NOT IN ('PATIENT PRÉSENT', 'HONORÉ', 'ABSENT', 'ANNULÉ') AND r.actif = 1
+       ORDER BY r.heure_rdv ASC`,
+      [doctorId]
+    );
+    const rdvEnAttenteCount = rdvAujourdhui.length;
+
+    // 6c. Consultations en attente de prise en charge (même logique que la file attente)
+    const consultationsEnAttente = attente;
+
+    // 6d. Ordonnances non remises (VALIDEE ou IMPRIMEE, pas REMISE) — sans filtre date
+    const ordonnancesAujourdhui = await query<any>(
+      `SELECT p.id, p.statut, p.date_prescription, p.imprimee_le, p.remise_le,
+              p.observations, c.id as consultation_id,
+              pat.numero_dossier, pat.nom as patient_nom, pat.prenom as patient_prenom,
+              v.numero_visite, c.motif_consultation,
+              pi.nom_medicament, pi.dosage
+       FROM prescriptions p
+       JOIN consultations c ON p.consultation_id = c.id
+       JOIN patients pat ON p.patient_id = pat.id
+       LEFT JOIN visites v ON p.visite_id = v.id
+       LEFT JOIN prescription_items pi ON pi.prescription_id = p.id
+       WHERE c.medecin_id = ? AND p.statut IN ('VALIDEE', 'IMPRIMEE')
+       ORDER BY p.created_at DESC`,
+      [doctorId]
+    );
+    // Grouper par prescription
+    const ordonnancesByPresc = new Map<string, any>();
+    for (const row of ordonnancesAujourdhui) {
+      if (!ordonnancesByPresc.has(row.id)) {
+        ordonnancesByPresc.set(row.id, {
+          ...row,
+          items: []
+        });
+      }
+      if (row.nom_medicament) {
+        ordonnancesByPresc.get(row.id).items.push({
+          nom_medicament: row.nom_medicament,
+          dosage: row.dosage
+        });
+      }
+    }
+    const ordonnancesList = Array.from(ordonnancesByPresc.values());
+    const ordonnancesCount = ordonnancesList.length;
+
+    // 6e. Résultats Labo non lus — tout resultat valide non lu, sans filtre date
+    const labResultsNonLus = await query<any>(
+      `SELECT n.id, n.titre, n.message, n.created_at, n.patient_id, n.consultation_id, n.lab_order_id,
+              pat.nom as patient_nom, pat.prenom as patient_prenom,
+              pat.numero_dossier,
+              d.numero_demande
+       FROM notifications n
+       LEFT JOIN patients pat ON n.patient_id = pat.id
+       LEFT JOIN demandes_laboratoire d ON n.lab_order_id = d.id
+       WHERE n.user_id = ? AND n.type = 'LAB_RESULTS_READY' AND n.lu = 0
+       ORDER BY n.created_at DESC`,
+      [doctorId]
+    );
+    const labResultsCount = labResultsNonLus.length;
+
+    // 6f. Bulletins labo disponibles (statut validé)
+    const bulletinsDispo = await query<any>(
+      `SELECT d.id, d.numero_demande, d.statut, d.date_demande, d.conclusion_globale,
+              pat.nom as patient_nom, pat.prenom as patient_prenom,
+              pat.numero_dossier
+       FROM demandes_laboratoire d
+       INNER JOIN patients pat ON d.patient_id = pat.id
+        WHERE d.medecin_id = ? AND d.statut IN ('RESULTATS_VALIDES', 'RESULTAT_VALIDE')
+        ORDER BY d.updated_at DESC`,
+      [doctorId]
+    );
+
+    // 6g. Demandes Labo non traitées
+    const demandesLaboNonTraitees = await query<any>(
+      `SELECT d.id, d.numero_demande, d.statut, d.date_demande, d.urgence, d.indication_clinique,
+              pat.nom as patient_nom, pat.prenom as patient_prenom,
+              pat.numero_dossier, v.numero_visite, c.motif_consultation
+       FROM demandes_laboratoire d
+       INNER JOIN patients pat ON d.patient_id = pat.id
+       LEFT JOIN visites v ON d.visite_id = v.id
+       LEFT JOIN consultations c ON d.consultation_id = c.id
+       WHERE d.medecin_id = ?
+          AND d.statut IN ('DEMANDE_CREEE', 'PRISE_EN_CHARGE', 'EN_ATTENTE_PRELEVEMENT',
+                           'PRELEVEMENT_EFFECTUE', 'ECHANTILLON_RECU', 'ECHANTILLON_NON_CONFORME',
+                           'EN_ANALYSE', 'RESULTATS_A_SAISIR', 'RESULTATS_SAISIS',
+                           'RESULTAT_A_VALIDER')
+        ORDER BY d.created_at DESC`,
+      [doctorId]
+    );
+    const demandesLaboCount = demandesLaboNonTraitees.length;
+
+    // 6h. Arrivées du jour
+    const arriveesJour = await queryOne<any>(
+      `SELECT COUNT(*) as count FROM visites v
+        WHERE v.medecin_id = ? AND date(v.date_arrivee) = date('now') AND v.actif = 1`,
+      [doctorId]
+    );
+
     await auditLogger.log({
       userId: user.id,
       action: 'DOCTOR_QUEUE_ACCESSED',
@@ -131,6 +252,23 @@ export async function getDoctorQueue(req: AuthenticatedRequest, res: Response): 
         en_cours: en_cours.length,
         a_finaliser: a_finaliser.length,
         terminees_jour: terminees_jour.length
+      },
+      quickAccess: {
+        patients: patientsReçusJourCount,
+        rdv: rdvEnAttenteCount,
+        ordonnances: ordonnancesCount,
+        labResults: labResultsCount,
+        bulletins: bulletinsDispo.length,
+        arriveesJour: arriveesJour ? Number(arriveesJour.count) : 0,
+        demandesLabo: demandesLaboCount
+      },
+      quickAccessLists: {
+        patientsReçusAujourdhui: patientsReçusAujourdhui,
+        rdvAujourdhui,
+        ordonnancesList,
+        labResultsNonLus,
+        bulletinsDispo,
+        demandesLaboNonTraitees
       },
       queue: {
         attente,
@@ -4164,17 +4302,18 @@ export async function getUserNotifications(req: AuthenticatedRequest, res: Respo
 
     const nowIso = new Date().toISOString();
 
-    // Règle métier stricte : si un bon de laboratoire est déjà payé à la caisse,
-    // on l'enlève des notifications non lues / alertes en le marquant lu = 1.
+// Règle métier stricte : si un bon de laboratoire est déjà payé à la caisse,
+    // on l'enève des notifications non lues / alertes en le marquant lu = 1.
+    // Filtre user_id pour ne toucher que les notifications de l'utilisateur connecté.
     await execute(
       `UPDATE notifications 
        SET lu = 1, lu_le = COALESCE(lu_le, ?)
-       WHERE lu = 0 AND lab_order_id IN (
+       WHERE user_id = ? AND lu = 0 AND lab_order_id IN (
          SELECT d.id FROM demandes_laboratoire d
          JOIN factures f ON d.facture_id = f.id
          WHERE f.statut = 'PAYÉ'
        )`,
-      [nowIso]
+      [nowIso, user.id]
     );
 
     const notifications = await query<any>(

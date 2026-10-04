@@ -11,7 +11,8 @@ import {
   Building2, 
   ShieldCheck, 
   History,
-  Info
+  Info,
+  FlaskConical
 } from 'lucide-react';
 import { api } from '../../lib/api';
 
@@ -213,111 +214,113 @@ export const LabReportModal: React.FC<LabReportModalProps> = ({ orderId, onClose
                 </div>
               </div>
 
-              {/* Tableau structuré des analyses */}
+              {/* Tableau structuré des analyses — responsive, sans scroll horizontal */}
               <div className="mb-6">
                 <div className="rounded-lg border border-slate-200 overflow-hidden">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead>
-                      <tr className="bg-slate-100 text-slate-700 font-semibold border-b border-slate-200 uppercase text-[11px] tracking-wider">
-                        <th className="py-2.5 px-3">Examen / Paramètre</th>
-                        <th className="py-2.5 px-3 text-center">Échantillon</th>
-                        <th className="py-2.5 px-3 text-right">Résultat mesuré</th>
-                        <th className="py-2.5 px-3 text-center">Unité</th>
-                        <th className="py-2.5 px-3 text-center">Valeurs Usuelles</th>
-                        <th className="py-2.5 px-3 text-center">Interprétation</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 text-slate-800">
-                      {bulletin.analyses && bulletin.analyses.length > 0 ? (
-                        bulletin.analyses.map((an: any) => {
-                          const isAnormal = an.interpretation === 'ANORMAL';
-                          const isCritique = an.interpretation === 'CRITIQUE';
-                          
-                          let parsedDetails: any = null;
-                          if (an.resultats_detailles) {
-                            try {
-                              parsedDetails = typeof an.resultats_detailles === 'string'
-                                ? JSON.parse(an.resultats_detailles)
-                                : an.resultats_detailles;
-                            } catch {}
-                          }
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse min-w-[640px]">
+                      <thead>
+                        <tr className="bg-slate-100 text-slate-700 font-semibold border-b border-slate-200 uppercase text-[11px] tracking-wider">
+                          <th className="py-2.5 px-3">Examen / Paramètre</th>
+                          <th className="py-2.5 px-3 text-center">Échantillon</th>
+                          <th className="py-2.5 px-3 text-right">Résultat mesuré</th>
+                          <th className="py-2.5 px-3 text-center">Unité</th>
+                          <th className="py-2.5 px-3 text-center">Valeurs Usuelles</th>
+                          <th className="py-2.5 px-3 text-center">Interprétation</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 text-slate-800">
+                        {bulletin.analyses && bulletin.analyses.length > 0 ? (
+                          bulletin.analyses.map((an: any) => {
+                            const isAnormal = an.interpretation === 'ANORMAL';
+                            const isCritique = an.interpretation === 'CRITIQUE';
+                            
+                            let parsedDetails: any = null;
+                            if (an.resultats_detailles) {
+                              try {
+                                parsedDetails = typeof an.resultats_detailles === 'string'
+                                  ? JSON.parse(an.resultats_detailles)
+                                  : an.resultats_detailles;
+                              } catch {}
+                            }
 
-                          return (
-                            <React.Fragment key={an.id}>
-                              <tr className={`hover:bg-slate-50/50 ${isCritique ? 'bg-rose-50/40' : isAnormal ? 'bg-amber-50/30' : ''}`}>
-                                <td className="py-2.5 px-3 font-semibold text-slate-900">
-                                  {an.nom_analyse}
-                                  {an.observation && (
-                                    <p className="text-[11px] text-slate-500 font-normal italic mt-0.5">
-                                      Note : {an.observation}
-                                    </p>
-                                  )}
-                                </td>
-                                <td className="py-2.5 px-3 text-center">
-                                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
-                                    {an.type_echantillon}
-                                  </span>
-                                </td>
-                                <td className={`py-2.5 px-3 text-right font-bold font-mono text-sm ${
-                                  isCritique ? 'text-rose-700' : isAnormal ? 'text-amber-700' : 'text-slate-900'
-                                }`}>
-                                  {an.valeur_mesuree || '—'}
-                                </td>
-                                <td className="py-2.5 px-3 text-center text-slate-600 font-mono">
-                                  {an.unite || '—'}
-                                </td>
-                                <td className="py-2.5 px-3 text-center text-slate-600 font-mono">
-                                  {an.valeurs_reference || '—'}
-                                </td>
-                                <td className="py-2.5 px-3 text-center">
-                                  {an.interpretation ? (
-                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                      isCritique 
-                                        ? 'bg-rose-100 text-rose-800 border border-rose-200' 
-                                        : isAnormal 
-                                        ? 'bg-amber-100 text-amber-800 border border-amber-200' 
-                                        : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                                    }`}>
-                                      {an.interpretation}
-                                    </span>
-                                  ) : (
-                                    <span className="text-slate-400">—</span>
-                                  )}
-                                </td>
-                              </tr>
-
-                              {/* Affichage des sous-paramètres structurés le cas échéant (ex: NFS, ECBU) */}
-                              {parsedDetails && Array.isArray(parsedDetails) && parsedDetails.length > 0 && (
-                                <tr className="bg-slate-50/70">
-                                  <td colSpan={6} className="py-2 px-4">
-                                    <div className="rounded border border-slate-200 bg-white p-2.5 space-y-1">
-                                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
-                                        Sous-paramètres détaillés ({an.nom_analyse}) :
+                            return (
+                              <React.Fragment key={an.id}>
+                                <tr className={`hover:bg-slate-50/50 ${isCritique ? 'bg-rose-50/40' : isAnormal ? 'bg-amber-50/30' : ''}`}>
+                                  <td className="py-2.5 px-3 font-semibold text-slate-900">
+                                    {an.nom_analyse}
+                                    {an.observation && (
+                                      <p className="text-[11px] text-slate-500 font-normal italic mt-0.5">
+                                        Note : {an.observation}
                                       </p>
-                                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px]">
-                                        {parsedDetails.map((sub: any, idx: number) => (
-                                          <div key={idx} className="flex items-center justify-between border-b border-slate-100 pb-0.5">
-                                            <span className="text-slate-600">{sub.label || sub.param} :</span>
-                                            <span className="font-mono font-semibold text-slate-900">{sub.value} {sub.unite}</span>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    </div>
+                                    )}
+                                  </td>
+                                  <td className="py-2.5 px-3 text-center">
+                                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
+                                      {an.type_echantillon}
+                                    </span>
+                                  </td>
+                                  <td className={`py-2.5 px-3 text-right font-bold font-mono text-sm ${
+                                    isCritique ? 'text-rose-700' : isAnormal ? 'text-amber-700' : 'text-slate-900'
+                                  }`}>
+                                    {an.valeur_mesuree || '—'}
+                                  </td>
+                                  <td className="py-2.5 px-3 text-center text-slate-600 font-mono">
+                                    {an.unite || '—'}
+                                  </td>
+                                  <td className="py-2.5 px-3 text-center text-slate-600 font-mono">
+                                    {an.valeurs_reference || '—'}
+                                  </td>
+                                  <td className="py-2.5 px-3 text-center">
+                                    {an.interpretation ? (
+                                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                        isCritique 
+                                          ? 'bg-rose-100 text-rose-800 border border-rose-200' 
+                                          : isAnormal 
+                                          ? 'bg-amber-100 text-amber-800 border border-amber-200' 
+                                          : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                      }`}>
+                                        {an.interpretation}
+                                      </span>
+                                    ) : (
+                                      <span className="text-slate-400">—</span>
+                                    )}
                                   </td>
                                 </tr>
-                              )}
-                            </React.Fragment>
-                          );
-                        })
-                      ) : (
-                        <tr>
-                          <td colSpan={6} className="py-6 text-center text-slate-400">
-                            Aucune analyse enregistrée.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
+
+                                {/* Affichage des sous-paramètres structurés le cas échéant (ex: NFS, ECBU) */}
+                                {parsedDetails && Array.isArray(parsedDetails) && parsedDetails.length > 0 && (
+                                  <tr className="bg-slate-50/70">
+                                    <td colSpan={6} className="py-2 px-4">
+                                      <div className="rounded border border-slate-200 bg-white p-2.5 space-y-1">
+                                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                                          Sous-paramètres détaillés ({an.nom_analyse}) :
+                                        </p>
+                                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[11px]">
+                                          {parsedDetails.map((sub: any, idx: number) => (
+                                            <div key={idx} className="flex items-center justify-between border-b border-slate-100 pb-0.5">
+                                              <span className="text-slate-600">{sub.label || sub.param} :</span>
+                                              <span className="font-mono font-semibold text-slate-900">{sub.value} {sub.unite}</span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                              </React.Fragment>
+                            );
+                          })
+                        ) : (
+                          <tr>
+                            <td colSpan={6} className="py-6 text-center text-slate-400">
+                              Aucune analyse enregistrée.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
 
@@ -385,6 +388,32 @@ export const LabReportModal: React.FC<LabReportModalProps> = ({ orderId, onClose
           ) : null}
         </div>
 
+        {/* Barre d'actions basse (Masquée à l'impression) */}
+        <div className="flex items-center justify-between px-6 py-3.5 bg-slate-900 text-white border-t border-slate-800 print:hidden">
+          <div className="flex items-center gap-2.5">
+            <FileText className="w-5 h-5 text-emerald-400" />
+            <span className="text-sm font-semibold">
+              Bulletin {bulletin?.demande?.numero_demande || ''}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handlePrint}
+              disabled={loading || !bulletin}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition disabled:opacity-50 cursor-pointer shadow-xs"
+            >
+              <Printer className="w-4 h-4" />
+              Imprimer
+            </button>
+            <button
+              onClick={onClose}
+              className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
+            >
+              <X className="w-4 h-4" />
+              Fermer
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -751,18 +751,18 @@ export const PatientHistoryModal: React.FC<PatientHistoryModalProps> = ({
                               {d.analyses && d.analyses.length > 0 ? (
                                 <div className="space-y-1.5 pt-1">
                                   {d.analyses.map((a) => {
-                                    const hasValue = a.valeur_resultat !== undefined && a.valeur_resultat !== null && a.valeur_resultat !== '';
-                                    return (
-                                      <div 
-                                        key={a.id} 
-                                        className={`p-2 rounded-lg border text-[11px] flex flex-wrap items-center justify-between gap-2 ${
-                                          a.flag_anomalie === 'CRITIQUE'
-                                            ? 'bg-rose-50 border-rose-300 font-bold text-rose-900'
-                                            : a.flag_anomalie && a.flag_anomalie !== 'NORMAL'
-                                              ? 'bg-amber-50 border-amber-300 text-amber-950'
-                                              : 'bg-slate-50 border-slate-200 text-slate-800'
-                                        }`}
-                                      >
+const hasValue = a.valeur_mesuree !== undefined && a.valeur_mesuree !== null && a.valeur_mesuree !== '';
+                                     return (
+                                       <div 
+                                         key={a.id} 
+                                         className={`p-2 rounded-lg border text-[11px] flex flex-wrap items-center justify-between gap-2 ${
+                                           a.interpretation === 'CRITIQUE'
+                                             ? 'bg-rose-50 border-rose-300 font-bold text-rose-900'
+                                             : a.interpretation && a.interpretation !== 'NORMAL'
+                                               ? 'bg-amber-50 border-amber-300 text-amber-950'
+                                               : 'bg-slate-50 border-slate-200 text-slate-800'
+                                         }`}
+                                       >
                                         <div className="flex items-center space-x-2">
                                           <span className="font-bold">{a.nom_analyse}</span>
                                           <span className="text-[10px] text-slate-500">({a.type_echantillon})</span>
@@ -771,28 +771,28 @@ export const PatientHistoryModal: React.FC<PatientHistoryModalProps> = ({
                                         <div className="flex items-center space-x-2">
                                           {hasValue ? (
                                             <span className="font-bold text-slate-900">
-                                              {a.valeur_resultat} {a.unite_mesure}
-                                              {a.normes_reference && (
-                                                <span className="font-normal text-slate-500 text-[10px] ml-1">
-                                                  [Norme: {a.normes_reference}]
-                                                </span>
-                                              )}
+                                              {a.valeur_mesuree} {a.unite}
+{a.valeurs_reference && (
+                                                 <span className="font-normal text-slate-500 text-[10px] ml-1">
+                                                   [Norme: {a.valeurs_reference}]
+                                                 </span>
+                                               )}
                                             </span>
                                           ) : (
                                             <span className="text-slate-400 italic text-[10px]">En cours d'analyse</span>
                                           )}
 
-                                          {a.flag_anomalie && (
-                                            <span className={`px-1.5 py-0.2 rounded-sm text-[9px] font-bold uppercase ${
-                                              a.flag_anomalie === 'CRITIQUE'
-                                                ? 'bg-rose-600 text-white'
-                                                : a.flag_anomalie !== 'NORMAL'
-                                                  ? 'bg-amber-500 text-white'
-                                                  : 'bg-emerald-100 text-emerald-800'
-                                            }`}>
-                                              {a.flag_anomalie}
-                                            </span>
-                                          )}
+{a.interpretation && (
+                                             <span className={`px-1.5 py-0.2 rounded-sm text-[9px] font-bold uppercase ${
+                                               a.interpretation === 'CRITIQUE'
+                                                 ? 'bg-rose-600 text-white'
+                                                 : a.interpretation !== 'NORMAL'
+                                                   ? 'bg-amber-500 text-white'
+                                                   : 'bg-emerald-100 text-emerald-800'
+                                             }`}>
+                                               {a.interpretation}
+                                             </span>
+                                           )}
                                         </div>
                                       </div>
                                     );

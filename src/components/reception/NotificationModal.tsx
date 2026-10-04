@@ -45,8 +45,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({ onClose })
     e.stopPropagation();
     try {
       await apiFetch(`/api/notifications/${id}/read`, { method: 'PATCH' });
-      setNotifications(prev => prev.map(n => n.id === id ? { ...n, est_lu: 1 } : n));
-      setUnreadCount(prev => Math.max(0, prev - 1));
+      await fetchNotifications();
     } catch (err) {
       console.error(err);
     }
@@ -55,8 +54,7 @@ export const NotificationModal: React.FC<NotificationModalProps> = ({ onClose })
   const handleMarkAllAsRead = async () => {
     try {
       await apiFetch('/api/notifications/read-all', { method: 'POST' });
-      setNotifications(prev => prev.map(n => ({ ...n, est_lu: 1 })));
-      setUnreadCount(0);
+      await fetchNotifications();
     } catch (err) {
       console.error(err);
     }

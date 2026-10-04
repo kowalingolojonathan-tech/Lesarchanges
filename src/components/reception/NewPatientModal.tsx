@@ -31,7 +31,6 @@ export const NewPatientModal: React.FC<NewPatientModalProps> = ({ initialData, o
   const [profession, setProfession] = useState('');
   const [etatCivil, setEtatCivil] = useState('');
   const [groupeSanguin, setGroupeSanguin] = useState('');
-  const [allergies, setAllergies] = useState('');
   const [antecedents, setAntecedents] = useState('');
   const [urgenceNom, setUrgenceNom] = useState('');
   const [urgenceTel, setUrgenceTel] = useState('');
@@ -122,7 +121,6 @@ export const NewPatientModal: React.FC<NewPatientModalProps> = ({ initialData, o
         profession: profession.trim() || null,
         etat_civil: etatCivil.trim() || null,
         groupe_sanguin: groupeSanguin || null,
-        allergies: allergies.trim() || null,
         antecedents: antecedents.trim() || null,
         contact_urgence_nom: urgenceNom.trim() || null,
         contact_urgence_telephone: urgenceTel.trim() || null,
@@ -494,20 +492,6 @@ export const NewPatientModal: React.FC<NewPatientModalProps> = ({ initialData, o
                 <option value="AB+">AB+</option>
                 <option value="AB-">AB-</option>
               </select>
-            </div>
-
-            <div className="sm:col-span-2">
-              <label htmlFor="input_patient_allergies" className="block text-xs font-semibold text-slate-700 mb-1">
-                Allergies signalées par le patient
-              </label>
-              <input
-                id="input_patient_allergies"
-                type="text"
-                value={allergies}
-                onChange={(e) => setAllergies(e.target.value)}
-                placeholder="Ex: Pénicilline, AINS, Sulfamides (sinon RAS)"
-                className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-md focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
-              />
             </div>
           </div>
 

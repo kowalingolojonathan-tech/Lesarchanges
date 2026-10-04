@@ -69,6 +69,10 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [paymentStatus, setPaymentStatus] = useState<string>('NON PAYÉ');
 
+  // Allergies — saisie & modification réservées au MÉDECIN
+  const [allergies, setAllergies] = useState<string>('');
+  const [editingAllergies, setEditingAllergies] = useState<boolean>(false);
+
   const fetchConsultation = async (preserveFormFields = false) => {
     setLoading(true);
     setError(null);
@@ -83,6 +87,7 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
       const data = await res.json();
       const c: Consultation = data.consultation;
       setConsultation(c);
+      setAllergies(c.allergies || '');
 
       // Statut de paiement en lecture seule pour le médecin
       if (c.visite_id) {
@@ -199,6 +204,36 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
   useEffect(() => {
     fetchConsultation();
   }, [consultationId]);
+
+  // --- SAISIE & MODIFICATION DES ALLERGIES (réservée au MÉDECIN) ---
+  const handleSaveAllergies = async () => {
+    if (!consultation?.patient_id) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await apiFetch(`/api/patients/${consultation.patient_id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ allergies: allergies.trim() || null })
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Erreur sauvegarde allergies');
+      }
+      const data = await res.json();
+      if (data.patient) {
+        setAllergies(data.patient.allergies || '');
+        setConsultation(prev => prev ? { ...prev, allergies: data.patient.allergies } : null);
+      }
+      setEditingAllergies(false);
+      setSuccessMessage('Allergies enregistrées avec succès.');
+      setTimeout(() => setSuccessMessage(null), 4000);
+    } catch (err: any) {
+      setError(err.message || 'Échec de la sauvegarde des allergies');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   // --- GESTION DU BLOC 1 : HYPOTHÈSES DIAGNOSTIQUES ---
   const handleAddHypothese = () => {
@@ -771,21 +806,62 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
 
         </div>
 
-        {/* Antécédents & Allergies (Alerte Visuelle) */}
+        {/* Antécédents & Allergies (Alerte Visuelle) — Saisie réservée au MÉDECIN */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-3 text-xs">
           <div className={`p-2.5 rounded-lg border flex items-start space-x-2 ${
-            consultation.allergies && consultation.allergies.toLowerCase() !== 'néant' && consultation.allergies.toLowerCase() !== 'aucune'
+            allergies && allergies.toLowerCase() !== 'néant' && allergies.toLowerCase() !== 'aucune'
               ? 'bg-rose-50 border-rose-200 text-rose-900'
               : 'bg-slate-50 border-slate-200 text-slate-700'
           }`}>
             <AlertTriangle className={`w-4 h-4 flex-shrink-0 mt-0.5 ${
-              consultation.allergies && consultation.allergies.toLowerCase() !== 'néant' && consultation.allergies.toLowerCase() !== 'aucune'
+              allergies && allergies.toLowerCase() !== 'néant' && allergies.toLowerCase() !== 'aucune'
                 ? 'text-rose-600'
                 : 'text-slate-400'
             }`} />
-            <div>
-              <strong>Allergies connues : </strong>
-              <span>{consultation.allergies || 'Aucune allergie signalée.'}</span>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between">
+                <strong>Allergies connues : </strong>
+                {!isFinalized && !editingAllergies && (
+                  <button
+                    type="button"
+                    onClick={() => setEditingAllergies(true)}
+                    className="text-[10px] font-bold text-rose-700 hover:underline"
+                  >
+                    Modifier
+                  </button>
+                )}
+              </div>
+              {editingAllergies ? (
+                <div className="mt-1 space-y-1.5">
+                  <input
+                    type="text"
+                    value={allergies}
+                    onChange={(e) => setAllergies(e.target.value)}
+                    placeholder="Ex: Pénicilline, AINS, Sulfamides (sinon RAS)"
+                    className="w-full px-2 py-1 text-xs border border-rose-300 rounded focus:ring-2 focus:ring-rose-500 focus:outline-hidden"
+                    autoFocus
+                  />
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={handleSaveAllergies}
+                      disabled={saving}
+                      className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-bold rounded disabled:opacity-50"
+                    >
+                      Enregistrer
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setEditingAllergies(false); setAllergies(consultation.allergies || ''); }}
+                      className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold rounded"
+                    >
+                      Annuler
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <span>{allergies || 'Aucune allergie signalée.'}</span>
+              )}
             </div>
           </div>
 

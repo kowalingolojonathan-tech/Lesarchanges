@@ -325,6 +325,23 @@ export interface DoctorQueueData {
     role: Role;
   };
   stats: DoctorQueueStats;
+  quickAccess?: {
+    patients: number;
+    rdv: number;
+    ordonnances: number;
+    labResults: number;
+    bulletins: number;
+    arriveesJour: number;
+    demandesLabo: number;
+  };
+  quickAccessLists?: {
+    patientsReçusAujourdhui: any[];
+    rdvAujourdhui: any[];
+    ordonnancesList: any[];
+    labResultsNonLus: any[];
+    bulletinsDispo: any[];
+    demandesLaboNonTraitees: any[];
+  };
   queue: {
     attente: Visite[];
     en_cours: Consultation[];

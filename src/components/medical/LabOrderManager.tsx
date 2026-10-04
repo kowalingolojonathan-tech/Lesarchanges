@@ -864,9 +864,9 @@ export const LabOrderManager: React.FC<LabOrderManagerProps> = ({
                     </div>
                     <div className="space-y-2">
                       {order.analyses && order.analyses.map((an, idx) => {
-                        const hasValue = an.valeur_resultat !== undefined && an.valeur_resultat !== null && an.valeur_resultat !== '';
-                        const isAbnormal = an.flag_anomalie && an.flag_anomalie !== 'NORMAL';
-                        const isCritical = an.flag_anomalie === 'CRITIQUE';
+                        const hasValue = an.valeur_mesuree !== undefined && an.valeur_mesuree !== null && an.valeur_mesuree !== '';
+                        const isAbnormal = an.interpretation && an.interpretation !== 'NORMAL';
+                        const isCritical = an.interpretation === 'CRITIQUE';
 
                         return (
                           <div 
@@ -893,15 +893,15 @@ export const LabOrderManager: React.FC<LabOrderManagerProps> = ({
                               </div>
 
                               {/* Flag d'anomalie */}
-                              {an.flag_anomalie && (
+                              {an.interpretation && (
                                 <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold uppercase ${
-                                  an.flag_anomalie === 'CRITIQUE'
+                                  an.interpretation === 'CRITIQUE'
                                     ? 'bg-rose-600 text-white animate-pulse'
-                                    : an.flag_anomalie === 'PATHOLOGIQUE' || an.flag_anomalie === 'ANORMAL'
+                                    : an.interpretation === 'PATHOLOGIQUE' || an.interpretation === 'ANORMAL'
                                       ? 'bg-amber-500 text-white'
                                       : 'bg-emerald-100 text-emerald-800'
                                 }`}>
-                                  {an.flag_anomalie}
+                                  {an.interpretation}
                                 </span>
                               )}
                             </div>
@@ -912,13 +912,13 @@ export const LabOrderManager: React.FC<LabOrderManagerProps> = ({
                                 <div>
                                   <div className="text-[10px] uppercase font-bold text-slate-400">Résultat mesuré</div>
                                   <div className="text-sm font-black text-slate-900">
-                                    {an.valeur_resultat} <span className="text-xs font-medium text-slate-600">{an.unite_mesure}</span>
+                                    {an.valeur_mesuree} <span className="text-xs font-medium text-slate-600">{an.unite}</span>
                                   </div>
                                 </div>
                                 <div>
                                   <div className="text-[10px] uppercase font-bold text-slate-400">Norme / Référence</div>
                                   <div className="text-xs font-semibold text-slate-700 mt-0.5">
-                                    {an.normes_reference || 'Non renseignée'}
+                                    {an.valeurs_reference || 'Non renseignée'}
                                   </div>
                                 </div>
                                 <div>

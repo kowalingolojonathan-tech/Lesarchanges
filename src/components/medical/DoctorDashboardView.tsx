@@ -23,6 +23,7 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
   const [activeConsultationId, setActiveConsultationId] = useState<string | null>(null);
   const [startingVisiteId, setStartingVisiteId] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState<number>(Date.now());
+  const [activeModal, setActiveModal] = useState<string | null>(null);
 
   // Horloge temps réel pour mise à jour continue du compteur d'attente patient
   useEffect(() => {
@@ -30,6 +31,14 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
       setCurrentTime(Date.now());
     }, 5000);
     return () => clearInterval(timer);
+  }, []);
+
+  // Auto-refresh des compteurs accès rapides toutes les 30 secondes
+  useEffect(() => {
+    const refreshTimer = setInterval(() => {
+      fetchDoctorQueue();
+    }, 30000);
+    return () => clearInterval(refreshTimer);
   }, []);
 
   // Calcul du temps d'attente patient et des alertes :
@@ -72,13 +81,13 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
 
       if (!res.ok) {
         const errData = await res.json();
-        throw new Error(errData.error || 'Impossible de récupérer la file d’attente médecin');
+        throw new Error(errData.error || 'Impossible de récupérer la file d\'attente médecin');
       }
 
       const result = await res.json();
       setData(result);
     } catch (err: any) {
-      setError(err.message || 'Erreur lors du chargement de la file d’attente.');
+      setError(err.message || 'Erreur lors du chargement de la file d\'attente.');
     } finally {
       setLoading(false);
     }
@@ -103,11 +112,13 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
 
       const resData = await res.json();
       if (!res.ok) {
-        throw new Error(resData.error || 'Erreur lors de l’ouverture de la consultation');
+        throw new Error(resData.error || 'Erreur lors de l\'ouverture de la consultation');
       }
 
       if (resData.consultation?.id) {
         setActiveConsultationId(resData.consultation.id);
+        setActiveModal(null);
+        fetchDoctorQueue();
       }
     } catch (err: any) {
       setError(err.message || 'Impossible de démarrer la consultation.');
@@ -237,6 +248,24 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
     );
   };
 
+  // Compteurs dérivés pour les accès rapides — toujours à jour depuis data
+  const q = data?.quickAccess ?? { patients: 0, rdv: 0, ordonnances: 0, labResults: 0, bulletins: 0, arriveesJour: 0, demandesLabo: 0 };
+  const s = data?.stats ?? { attente: 0, en_cours: 0, a_finaliser: 0, terminees_jour: 0 };
+  const qa = data?.quickAccessLists ?? { patientsReçusAujourdhui: [], rdvAujourdhui: [], ordonnancesList: [], labResultsNonLus: [], bulletinsDispo: [], demandesLaboNonTraitees: [] };
+
+  // Données utilisées par chaque modale — toujours cohérentes avec les compteurs
+  // Si quickAccessLists est manquant (ancien serveur), les listes seront vides
+  // mais les compteurs resteront exacts grâce à quickAccess
+  const modalData = {
+    patients: { count: q.patients, items: qa.patientsReçusAujourdhui || [] },
+    rdv: { count: q.rdv, items: qa.rdvAujourdhui || [] },
+    consultations: { count: s.attente, items: (data?.queue?.attente) || [] },
+    ordonnances: { count: q.ordonnances, items: qa.ordonnancesList || [] },
+    'lab-results': { count: q.labResults, items: qa.labResultsNonLus || [] },
+    'demandes-labo': { count: q.demandesLabo, items: qa.demandesLaboNonTraitees || [] },
+    finalisation: { count: s.a_finaliser, items: (data?.queue?.a_finaliser) || [] },
+  };
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-16">
       
@@ -286,71 +315,131 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
           <span>Accès Rapide Médecin</span>
           <span className="text-[10px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded font-semibold">Poste Clinique</span>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
-          {/* Patients */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-7 gap-2">
+          {/* Patients reçus aujourd'hui */}
           <button
             type="button"
-            onClick={() => onNavigate ? onNavigate('reception-patients') : null}
-            className="p-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl flex flex-col items-center justify-center text-center transition-all min-h-[48px] group"
+            onClick={() => setActiveModal('patients')}
+            className="p-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl flex flex-col items-center justify-center text-center transition-all min-h-[56px] group relative"
           >
-            <Users className="w-5 h-5 text-slate-700 group-hover:text-emerald-700 mb-1" />
+            <div className="relative">
+              <Users className="w-5 h-5 text-slate-700 group-hover:text-emerald-700 mb-1" />
+              {(q?.patients ?? 0) > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                  {q.patients}
+                </span>
+              )}
+            </div>
             <span className="text-xs font-bold text-slate-800">Patients</span>
-            <span className="text-[10px] text-slate-400">Dossiers</span>
+            <span className="text-[9px] text-slate-400 leading-tight">reçus auj.</span>
           </button>
 
-          {/* Rendez-vous */}
+          {/* Rendez-vous du jour */}
           <button
             type="button"
-            onClick={() => setActiveTab('attente')}
-            className="p-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl flex flex-col items-center justify-center text-center transition-all min-h-[48px] group"
+            onClick={() => setActiveModal('rdv')}
+            className="p-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl flex flex-col items-center justify-center text-center transition-all min-h-[56px] group relative"
           >
-            <Calendar className="w-5 h-5 text-slate-700 group-hover:text-blue-700 mb-1" />
+            <div className="relative">
+              <Calendar className="w-5 h-5 text-slate-700 group-hover:text-blue-700 mb-1" />
+              {(q?.rdv ?? 0) > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                  {q.rdv}
+                </span>
+              )}
+            </div>
             <span className="text-xs font-bold text-slate-800">Rendez-vous</span>
-            <span className="text-[10px] text-slate-400">Arrivées du jour</span>
+            <span className="text-[9px] text-slate-400 leading-tight">du jour</span>
           </button>
 
-          {/* Consultations */}
+          {/* Consultations en attente de prise en charge */}
           <button
             type="button"
-            onClick={() => setActiveTab('en_cours')}
-            className="p-2.5 bg-blue-50/60 hover:bg-blue-100/80 border border-blue-200 rounded-xl flex flex-col items-center justify-center text-center transition-all min-h-[48px] group"
+            onClick={() => setActiveModal('consultations')}
+            className="p-2.5 bg-blue-50/60 hover:bg-blue-100/80 border border-blue-200 rounded-xl flex flex-col items-center justify-center text-center transition-all min-h-[56px] group relative"
           >
-            <Stethoscope className="w-5 h-5 text-blue-700 mb-1" />
+            <div className="relative">
+              <Stethoscope className="w-5 h-5 text-blue-700 mb-1" />
+              {(s?.attente ?? 0) > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                  {s.attente}
+                </span>
+              )}
+            </div>
             <span className="text-xs font-bold text-blue-900">Consultations</span>
-            <span className="text-[10px] text-blue-600 font-semibold">{data?.stats?.en_cours || 0} active(s)</span>
+            <span className="text-[9px] text-blue-600 font-semibold">en attente</span>
           </button>
 
-          {/* Ordonnances */}
+          {/* Ordonnances à remettre */}
           <button
             type="button"
-            onClick={() => setActiveTab('terminees_jour')}
-            className="p-2.5 bg-emerald-50/60 hover:bg-emerald-100/80 border border-emerald-200 rounded-xl flex flex-col items-center justify-center text-center transition-all min-h-[48px] group"
+            onClick={() => setActiveModal('ordonnances')}
+            className="p-2.5 bg-emerald-50/60 hover:bg-emerald-100/80 border border-emerald-200 rounded-xl flex flex-col items-center justify-center text-center transition-all min-h-[56px] group relative"
           >
-            <FileText className="w-5 h-5 text-emerald-700 mb-1" />
+            <div className="relative">
+              <FileText className="w-5 h-5 text-emerald-700 mb-1" />
+              {(q?.ordonnances ?? 0) > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                  {q.ordonnances}
+                </span>
+              )}
+            </div>
             <span className="text-xs font-bold text-emerald-900">Ordonnances</span>
-            <span className="text-[10px] text-emerald-600 font-semibold">Historique</span>
+            <span className="text-[9px] text-emerald-600 font-semibold">à remettre</span>
           </button>
 
-          {/* Laboratoire */}
+          {/* Résultats Labo non lus */}
           <button
             type="button"
-            onClick={() => onNavigate ? onNavigate('lab-worklist') : null}
-            className="p-2.5 bg-purple-50/60 hover:bg-purple-100/80 border border-purple-200 rounded-xl flex flex-col items-center justify-center text-center transition-all min-h-[48px] group"
+            onClick={() => setActiveModal('lab-results')}
+            className="p-2.5 bg-purple-50/60 hover:bg-purple-100/80 border border-purple-200 rounded-xl flex flex-col items-center justify-center text-center transition-all min-h-[56px] group relative"
           >
-            <FlaskConical className="w-5 h-5 text-purple-700 mb-1" />
-            <span className="text-xs font-bold text-purple-900">Laboratoire</span>
-            <span className="text-[10px] text-purple-600 font-semibold">Examens</span>
+            <div className="relative">
+              <FlaskConical className="w-5 h-5 text-purple-700 mb-1" />
+              {(q?.labResults ?? 0) > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                  {q.labResults}
+                </span>
+              )}
+            </div>
+            <span className="text-xs font-bold text-purple-900">Résultats Labo</span>
+            <span className="text-[9px] text-purple-600 font-semibold">non lus</span>
+          </button>
+
+          {/* Demandes Labo non traitées */}
+          <button
+            type="button"
+            onClick={() => setActiveModal('demandes-labo')}
+            className="p-2.5 bg-teal-50/60 hover:bg-teal-100/80 border border-teal-200 rounded-xl flex flex-col items-center justify-center text-center transition-all min-h-[56px] group relative"
+          >
+            <div className="relative">
+              <Microscope className="w-5 h-5 text-teal-700 mb-1" />
+              {(q?.demandesLabo ?? 0) > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                  {q.demandesLabo}
+                </span>
+              )}
+            </div>
+            <span className="text-xs font-bold text-teal-900">Demandes Labo</span>
+            <span className="text-[9px] text-teal-600 font-semibold">en cours</span>
           </button>
 
           {/* Finalisation */}
           <button
             type="button"
-            onClick={() => setActiveTab('a_finaliser')}
-            className="p-2.5 bg-amber-50/60 hover:bg-amber-100/80 border border-amber-200 rounded-xl flex flex-col items-center justify-center text-center transition-all min-h-[48px] group"
+            onClick={() => setActiveModal('finalisation')}
+            className="p-2.5 bg-amber-50/60 hover:bg-amber-100/80 border border-amber-200 rounded-xl flex flex-col items-center justify-center text-center transition-all min-h-[56px] group relative"
           >
-            <CheckCircle2 className="w-5 h-5 text-amber-700 mb-1" />
+            <div className="relative">
+              <CheckCircle2 className="w-5 h-5 text-amber-700 mb-1" />
+              {(s?.a_finaliser ?? 0) > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                  {s.a_finaliser}
+                </span>
+              )}
+            </div>
             <span className="text-xs font-bold text-amber-900">Finalisation</span>
-            <span className="text-[10px] text-amber-700 font-bold">{data?.stats?.a_finaliser || 0} en attente</span>
+            <span className="text-[9px] text-amber-700 font-semibold">{s.a_finaliser} en attente</span>
           </button>
         </div>
       </div>
@@ -941,6 +1030,347 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
 
         </div>
       </div>
+
+      {/* Modal: Patients reçus aujourd'hui */}
+      {activeModal === 'patients' && (() => {
+        const items = modalData.patients.items;
+        return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setActiveModal(null)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[80vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+              <h2 className="text-sm font-bold text-slate-900">Patients reçus aujourd'hui ({modalData.patients.count})</h2>
+              <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+            </div>
+            <div className="overflow-y-auto flex-1 p-4">
+              {items.length > 0 ? (
+                <div className="space-y-2">
+                  {items.map((p: any) => (
+                    <div key={p.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-200">
+                      <div>
+                        <span className="text-xs font-bold text-slate-800">{p.patient_nom} {p.patient_prenom}</span>
+                        <span className="text-[10px] text-slate-500 ml-2 font-mono">{p.numero_dossier}</span>
+                        <div className="text-[10px] text-slate-400 mt-0.5">Visite N°{p.numero_visite} • {new Date(p.date_arrivee).toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit'})}</div>
+                      </div>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                        p.statut === 'EN_CONSULTATION' ? 'bg-blue-100 text-blue-800' : 'bg-emerald-100 text-emerald-800'
+                      }`}>{p.statut}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-8 text-center text-slate-400 text-sm">Aucun patient reçu aujourd'hui</div>
+              )}
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* Modal: Rendez-vous du jour */}
+      {activeModal === 'rdv' && (() => {
+        const items = modalData.rdv.items;
+        return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setActiveModal(null)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[80vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+              <h2 className="text-sm font-bold text-slate-900">Rendez-vous du jour ({modalData.rdv.count})</h2>
+              <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+            </div>
+            <div className="overflow-y-auto flex-1 p-4">
+              {items.length > 0 ? (
+                <div className="space-y-2">
+                  {items.map((r: any) => (
+                    <div key={r.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-200">
+                      <div>
+                        <span className="text-xs font-bold text-slate-800">{r.patient_nom} {r.patient_prenom}</span>
+                        <span className="text-[10px] text-slate-500 ml-2 font-mono">{r.numero_dossier}</span>
+                        <div className="text-[10px] text-slate-400 mt-0.5">{r.heure_rdv} • {r.motif || 'Consultation'}</div>
+                      </div>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-100 text-amber-800">{r.statut}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-8 text-center text-slate-400 text-sm">Aucun rendez-vous en attente aujourd'hui</div>
+              )}
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* Modal: Consultations en attente de prise en charge */}
+      {activeModal === 'consultations' && (() => {
+        const items = modalData.consultations.items;
+        return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setActiveModal(null)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[80vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+              <h2 className="text-sm font-bold text-slate-900">Consultations en attente ({modalData.consultations.count})</h2>
+              <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+            </div>
+            <div className="overflow-y-auto flex-1 p-4">
+              {items.length > 0 ? (
+                <div className="space-y-2">
+                  {items.map((v: any) => {
+                    const isStarting = startingVisiteId === v.id;
+                    return (
+                      <div key={v.id} className="p-3 bg-slate-50 rounded-lg border border-slate-200">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="text-xs font-bold text-slate-800">{v.patient_nom} {v.patient_prenom}</span>
+                            <span className="text-[10px] text-slate-500 ml-2 font-mono">{v.numero_dossier}</span>
+                            <div className="text-[10px] text-slate-400 mt-0.5">
+                              Visite N°{v.numero_visite} • Arrivé à {new Date(v.date_arrivee).toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit'})}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => handleStartConsultation(v.id)}
+                            disabled={isStarting}
+                            className="inline-flex items-center px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-bold rounded-lg transition-colors disabled:opacity-50 min-h-[36px]"
+                          >
+                            {isStarting ? (
+                              <><Activity className="w-3 h-3 mr-1 animate-spin" />Ouverture...</>
+                            ) : (
+                              <><Play className="w-3 h-3 mr-1 fill-current" />Prendre en charge</>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="py-8 text-center text-slate-400 text-sm">Aucune consultation en attente</div>
+              )}
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* Modal: Ordonnances à remettre */}
+      {activeModal === 'ordonnances' && (() => {
+        const items = modalData.ordonnances.items;
+        return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setActiveModal(null)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[80vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+              <h2 className="text-sm font-bold text-slate-900">Ordonnances à remettre ({modalData.ordonnances.count})</h2>
+              <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+            </div>
+            <div className="overflow-y-auto flex-1 p-4">
+              {items.length > 0 ? (
+                <div className="space-y-3">
+                  {items.map((ord: any) => (
+                    <div key={ord.id} className="p-3 bg-emerald-50 rounded-lg border border-emerald-200">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <span className="text-xs font-bold text-slate-800">{ord.patient_nom} {ord.patient_prenom}</span>
+                          <span className="text-[10px] text-slate-500 ml-2 font-mono">{ord.numero_dossier}</span>
+                          <div className="text-[10px] text-slate-400 mt-0.5">
+                            {ord.motif_consultation || 'Consultation'} • Statut: <span className="font-bold text-emerald-700">{ord.statut}</span>
+                          </div>
+                          {ord.items && ord.items.length > 0 && (
+                            <div className="mt-1 text-[10px] text-slate-600">
+                              {ord.items.map((item: any, i: number) => (
+                                <div key={i}>• {item.nom_medicament}{item.dosage ? ` (${item.dosage})` : ''}</div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => setActiveConsultationId(ord.consultation_id || '')}
+                            className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold rounded-lg transition-colors"
+                          >
+                            Voir
+                          </button>
+                          {ord.statut === 'VALIDEE' && (
+                            <button
+                              onClick={async () => {
+                                try {
+                                  await apiFetch(`/api/medical/prescriptions/${ord.id}/print`, { method: 'POST' });
+                                  fetchDoctorQueue();
+                                } catch {}
+                              }}
+                              className="px-2 py-1 bg-blue-100 hover:bg-blue-200 text-blue-800 text-[10px] font-bold rounded-lg transition-colors"
+                            >
+                              Imprimer
+                            </button>
+                          )}
+                          {(ord.statut === 'VALIDEE' || ord.statut === 'IMPRIMEE') && (
+                            <button
+                              onClick={async () => {
+                                try {
+                                  await apiFetch(`/api/medical/prescriptions/${ord.id}/deliver`, { method: 'POST' });
+                                  fetchDoctorQueue();
+                                } catch (err: any) {
+                                  setError(err.message || 'Erreur lors de la remise');
+                                }
+                              }}
+                              className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold rounded-lg transition-colors"
+                            >
+                              Remettre
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-8 text-center text-slate-400 text-sm">Aucune ordonnance en attente de remise</div>
+              )}
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* Modal: Résultats Labo non lus */}
+      {activeModal === 'lab-results' && (() => {
+        const items = modalData['lab-results'].items;
+        return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setActiveModal(null)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[80vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+              <h2 className="text-sm font-bold text-slate-900">Résultats Labo non lus ({modalData['lab-results'].count})</h2>
+              <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+            </div>
+            <div className="overflow-y-auto flex-1 p-4">
+              {items.length > 0 ? (
+                <div className="space-y-2">
+                  {items.map((n: any) => (
+                    <div key={n.id} className="p-3 bg-purple-50 rounded-lg border border-purple-200">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <span className="text-xs font-bold text-slate-800">{n.patient_nom} {n.patient_prenom}</span>
+                          <span className="text-[10px] text-slate-500 ml-2 font-mono">{n.numero_dossier}</span>
+                          <div className="text-[10px] text-purple-700 mt-0.5">{n.titre || n.message}</div>
+                          <div className="text-[10px] text-slate-400 mt-0.5">Demande N°{n.numero_demande}</div>
+                        </div>
+                        <button
+                          onClick={async () => {
+                            try {
+                              await apiFetch(`/api/notifications/${n.id}/read`, { method: 'PATCH' });
+                              fetchDoctorQueue();
+                            } catch {}
+                          }}
+                          className="px-2 py-1 bg-purple-600 hover:bg-purple-700 text-white text-[10px] font-bold rounded-lg transition-colors"
+                        >
+                          Marquer Lu
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-8 text-center text-slate-400 text-sm">Aucun résultat labo non lu</div>
+              )}
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* Modal: Demandes Labo non traitées */}
+      {activeModal === 'demandes-labo' && (() => {
+        const items = modalData['demandes-labo'].items;
+        return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setActiveModal(null)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[80vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+              <h2 className="text-sm font-bold text-slate-900">Demandes Labo en cours ({modalData['demandes-labo'].count})</h2>
+              <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+            </div>
+            <div className="overflow-y-auto flex-1 p-4">
+              {items.length > 0 ? (
+                <div className="space-y-2">
+                  {items.map((d: any) => (
+                    <div key={d.id} className="p-3 bg-teal-50 rounded-lg border border-teal-200">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <span className="text-xs font-bold text-slate-800">{d.patient_nom} {d.patient_prenom}</span>
+                          <span className="text-[10px] text-slate-500 ml-2 font-mono">{d.numero_dossier}</span>
+                          <div className="text-[10px] text-slate-400 mt-0.5">
+                            Demande N°{d.numero_demande} • {d.indication_clinique || 'Sans indication'}
+                            {d.urgence === 'URGENTE' && <span className="ml-1 text-red-600 font-bold">URGENT</span>}
+                          </div>
+                        </div>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                          d.statut === 'DEMANDE_CREEE' ? 'bg-slate-100 text-slate-700' :
+                          d.statut === 'EN_ANALYSE' ? 'bg-blue-100 text-blue-800' :
+                          d.statut === 'RESULTATS_A_SAISIR' ? 'bg-amber-100 text-amber-800' :
+                          'bg-purple-100 text-purple-800'
+                        }`}>{d.statut.replace(/_/g, ' ')}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-8 text-center text-slate-400 text-sm">Aucune demande labo en cours</div>
+              )}
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* Modal: Finalisation */}
+      {activeModal === 'finalisation' && (() => {
+        const items = modalData.finalisation.items;
+        return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setActiveModal(null)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[80vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+              <h2 className="text-sm font-bold text-slate-900">Dossiers en attente de finalisation ({modalData.finalisation.count})</h2>
+              <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+            </div>
+            <div className="overflow-y-auto flex-1 p-4">
+              {items.length > 0 ? (
+                <div className="space-y-2">
+                  {items.map((c: any) => {
+                    const waitMinutes = c.heure_debut_consultation
+                      ? Math.max(0, Math.floor((currentTime - new Date(c.heure_debut_consultation).getTime()) / 60000))
+                      : 0;
+                    return (
+                      <div key={c.id} className="p-3 bg-amber-50 rounded-lg border border-amber-200">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="text-xs font-bold text-slate-800">{c.patient_nom} {c.patient_prenom}</span>
+                            <span className="text-[10px] text-slate-500 ml-2 font-mono">{c.numero_dossier}</span>
+                            <div className="text-[10px] text-slate-400 mt-0.5">
+                              {c.motif_consultation || 'Consultation'}
+                            </div>
+                            {waitMinutes > 0 && (
+                              <div className="text-[10px] text-amber-700 mt-0.5 font-semibold">
+                                En cours depuis {waitMinutes} min
+                              </div>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => {
+                              setActiveConsultationId(c.id);
+                              setActiveModal(null);
+                            }}
+                            className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-bold rounded-lg transition-colors"
+                          >
+                            Ouvrir
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="py-8 text-center text-slate-400 text-sm">Aucun dossier en attente de finalisation</div>
+              )}
+            </div>
+          </div>
+        </div>
+        );
+      })()}
 
     </div>
   );

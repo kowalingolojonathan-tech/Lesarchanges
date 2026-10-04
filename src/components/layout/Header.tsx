@@ -47,8 +47,17 @@ export const Header: React.FC<HeaderProps> = ({
 
   useEffect(() => {
     fetchNotifications();
-    const interval = setInterval(fetchNotifications, 15000); // 15 secondes
+    const interval = setInterval(fetchNotifications, 15000);
     return () => clearInterval(interval);
+  }, [user]);
+
+  // Rafraîchir les notifications lorsque l'utilisateur revient sur l'onglet / focale
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (!document.hidden) fetchNotifications();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, [user]);
 
   // Écouteur d'événement global pour ouvrir les notifications depuis n'importe quel composant
@@ -76,8 +85,7 @@ export const Header: React.FC<HeaderProps> = ({
     e.stopPropagation();
     try {
       await apiFetch(`/api/notifications/${id}/read`, { method: 'PATCH' });
-      setNotifications(prev => prev.map(n => n.id === id ? { ...n, est_lu: 1 } : n));
-      setUnreadCount(prev => Math.max(0, prev - 1));
+      await fetchNotifications();
     } catch (err) {
       console.error(err);
     }
@@ -86,8 +94,7 @@ export const Header: React.FC<HeaderProps> = ({
   const handleMarkAllAsRead = async () => {
     try {
       await apiFetch('/api/notifications/read-all', { method: 'POST' });
-      setNotifications(prev => prev.map(n => ({ ...n, est_lu: 1 })));
-      setUnreadCount(0);
+      await fetchNotifications();
     } catch (err) {
       console.error(err);
     }
@@ -248,7 +255,7 @@ export const Header: React.FC<HeaderProps> = ({
                 >
                   <Bell className="w-5 h-5" />
                   {unreadCount > 0 && (
-                    <span className="absolute 1 top-1 right-1 min-w-[18px] h-[18px] bg-rose-600 text-white font-bold text-[10px] rounded-full flex items-center justify-center px-1 shadow-xs animate-bounce">
+                    <span className="absolute top-1 right-1 min-w-[18px] h-[18px] bg-rose-600 text-white font-bold text-[10px] rounded-full flex items-center justify-center px-1 shadow-xs animate-bounce">
                       {unreadCount}
                     </span>
                   )}
