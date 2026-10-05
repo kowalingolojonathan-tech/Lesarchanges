@@ -5106,3 +5106,96 @@ export async function getPendingOrientations(req: AuthenticatedRequest, res: Res
   }
 }
 
+/**
+ * Récupère tous les examens actifs du catalogue laboratoire
+ * GET /api/lab/catalogue/exams
+ * Rôles autorisés : MÉDECIN, LABORATOIRE, ADMINISTRATEUR
+ */
+export async function getCatalogueExams(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !['MÉDECIN', 'MEDECIN', 'LABORATOIRE', 'ADMINISTRATEUR', 'DIRECTEUR'].includes(user.role)) {
+      res.status(403).json({ error: 'Accès interdit.' });
+      return;
+    }
+
+    const exams = await query<any>(
+      `SELECT id, nom, code, description, actif, ordre_affichage, prix_global_usd
+       FROM examens_laboratoire
+       WHERE actif = 1
+       ORDER BY ordre_affichage ASC, nom ASC`
+    );
+
+    // Charge les paramètres pour chaque examen
+    const examsWithParams = await Promise.all(
+      exams.map(async (exam: any) => {
+        const params = await query<any>(
+          `SELECT id, nom, code, unite, type_resultat, obligatoire, ordre_affichage, actif, prix_usd
+           FROM parametres_laboratoire
+           WHERE examen_id = ? AND actif = 1
+           ORDER BY ordre_affichage ASC`,
+          [exam.id]
+        );
+        const paramsWithSubs = await Promise.all(
+          params.map(async (param: any) => {
+            const subs = await query<any>(
+              `SELECT id, nom, code, unite, type_resultat, obligatoire, ordre_affichage, actif, prix_usd
+               FROM sous_parametres_laboratoire
+               WHERE parametre_id = ? AND actif = 1
+               ORDER BY ordre_affichage ASC`,
+              [param.id]
+            );
+            return { ...param, sous_parametres: subs };
+          })
+        );
+        return { ...exam, parametres: paramsWithSubs };
+      })
+    );
+
+    res.json({ exams: examsWithParams });
+  } catch (error: any) {
+    console.error('Erreur récupération catalogue examens:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la récupération du catalogue.' });
+  }
+}
+
+/**
+ * Récupère les paramètres et sous-paramètres d'un examen du catalogue
+ * GET /api/lab/catalogue/exams/:id/details
+ * Rôles autorisés : MÉDECIN, LABORATOIRE
+ */
+export async function getCatalogueExamDetails(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const { id } = req.params;
+
+    const exam = await queryOne<any>(
+      `SELECT * FROM examens_laboratoire WHERE id = ? AND actif = 1`,
+      [id]
+    );
+    if (!exam) {
+      res.status(404).json({ error: 'Examen introuvable dans le catalogue.' });
+      return;
+    }
+
+    const params = await query<any>(
+      `SELECT * FROM parametres_laboratoire WHERE examen_id = ? AND actif = 1 ORDER BY ordre_affichage ASC`,
+      [id]
+    );
+
+    const paramsWithSubs = await Promise.all(
+      params.map(async (param: any) => {
+        const subs = await query<any>(
+          `SELECT * FROM sous_parametres_laboratoire WHERE parametre_id = ? AND actif = 1 ORDER BY ordre_affichage ASC`,
+          [param.id]
+        );
+        return { ...param, sous_parametres: subs };
+      })
+    );
+
+    res.json({ exam, parametres: paramsWithSubs });
+  } catch (error: any) {
+    console.error('Erreur récupération détails examen catalogue:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la récupération du catalogue.' });
+  }
+}
+

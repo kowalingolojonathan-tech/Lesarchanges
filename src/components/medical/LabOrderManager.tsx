@@ -4,7 +4,7 @@ import {
   Printer, Clock, FileText, ChevronDown, ChevronUp, Save, 
   X, AlertTriangle, ShieldAlert, Sparkles, RefreshCw, Eye, Ban, UserCheck, Check
 } from 'lucide-react';
-import { DemandeLaboratoire, AnalyseLaboratoire, LabOrderUrgence, EchantillonType, LaborantinUser } from '../../types';
+import { DemandeLaboratoire, AnalyseLaboratoire, LabOrderUrgence, EchantillonType, LaborantinUser, CatalogueExam, CatalogueParametre, CatalogueSousParametre, ModePrescription } from '../../types';
 import { apiFetch } from '../../lib/api';
 import { LabReportModal } from './LabReportModal';
 
@@ -17,6 +17,22 @@ interface LabOrderManagerProps {
   amendementMotif?: string;
   initialLabOrders?: DemandeLaboratoire[];
   onLabOrdersUpdated?: () => void;
+}
+
+interface AnalysisRowState {
+  id?: string;
+  nom_analyse: string;
+  type_echantillon: EchantillonType;
+  instructions?: string;
+  ordre?: number;
+  // Champs catalogue
+  examen_id?: string | null;
+  mode?: ModePrescription;
+  parametre_id?: string | null;
+  sous_parametre_id?: string | null;
+  selection_details?: { parametre_id?: string; sous_parametre_id?: string }[] | null;
+  prix_usd?: number | null;
+  tarif_id?: string;
 }
 
 const COMMON_EXAMS: { nom: string; type: EchantillonType; instructions?: string }[] = [
@@ -33,6 +49,16 @@ const COMMON_EXAMS: { nom: string; type: EchantillonType; instructions?: string 
   { nom: 'Transaminases (ASAT / ALAT)', type: 'SANG', instructions: 'Bilan hépatique' },
   { nom: 'Sérodiagnostic de Widal (Typhoïde)', type: 'SANG', instructions: 'Tube sec' }
 ];
+
+const getInitialAnalysisRow = (): AnalysisRowState => ({
+  nom_analyse: '',
+  type_echantillon: 'SANG',
+  instructions: '',
+  examen_id: null,
+  mode: 'GLOBAL',
+  selection_details: null,
+  prix_usd: null,
+});
 
 export const LabOrderManager: React.FC<LabOrderManagerProps> = ({
   consultationId,
@@ -56,9 +82,14 @@ export const LabOrderManager: React.FC<LabOrderManagerProps> = ({
   const [commentaire, setCommentaire] = useState<string>('');
   const [selectedLaborantinId, setSelectedLaborantinId] = useState<string>('');
   const [laborantins, setLaborantins] = useState<LaborantinUser[]>([]);
-  const [analyses, setAnalyses] = useState<Partial<AnalyseLaboratoire>[]>([
-    { nom_analyse: '', type_echantillon: 'SANG', instructions: '' }
-  ]);
+  const [analyses, setAnalyses] = useState<AnalysisRowState[]>([getInitialAnalysisRow()]);
+
+  // Catalogue laboratoire (Phase 2C-5)
+  const [catalogueExams, setCatalogueExams] = useState<CatalogueExam[]>([]);
+  const [catalogueLoading, setCatalogueLoading] = useState<boolean>(false);
+  const [searchExam, setSearchExam] = useState<string>('');
+  const [showExamPicker, setShowExamPicker] = useState<number | null>(null);
+  const [pickerActiveRowIdx, setPickerActiveRowIdx] = useState<number | null>(null);
 
   // Mode amendement spécifique
   const [orderAmendmentMode, setOrderAmendmentMode] = useState<boolean>(false);
@@ -80,6 +111,22 @@ export const LabOrderManager: React.FC<LabOrderManagerProps> = ({
       }
     } catch (err: any) {
       console.error('Erreur chargement laborantins:', err);
+    }
+  };
+
+  // Charger le catalogue des examens (Phase 2C-5)
+  const fetchCatalogue = async () => {
+    try {
+      setCatalogueLoading(true);
+      const res = await apiFetch('/api/lab/catalogue/exams');
+      if (res.ok) {
+        const data = await res.json();
+        setCatalogueExams(data.exams || []);
+      }
+    } catch (err: any) {
+      console.error('Erreur chargement catalogue:', err);
+    } finally {
+      setCatalogueLoading(false);
     }
   };
 
@@ -110,8 +157,22 @@ export const LabOrderManager: React.FC<LabOrderManagerProps> = ({
     if (consultationId) {
       fetchLabOrders();
       fetchLaborantins();
+      fetchCatalogue();
     }
   }, [consultationId]);
+
+  // Fermer le sélecteur d'examen au clic extérieur
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('[data-exam-picker]')) {
+        setShowExamPicker(null);
+        setPickerActiveRowIdx(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const toggleExpand = (id: string) => {
     setExpandedOrderIds(prev => ({
@@ -132,9 +193,7 @@ export const LabOrderManager: React.FC<LabOrderManagerProps> = ({
     setIndicationClinique('');
     setCommentaire('');
     setSelectedLaborantinId('');
-    setAnalyses([
-      { nom_analyse: '', type_echantillon: 'SANG', instructions: '' }
-    ]);
+    setAnalyses([getInitialAnalysisRow()]);
     setOrderAmendmentMode(isConsultationFinalized);
     setOrderAmendmentMotif(amendementMotif || '');
     setError(null);
@@ -151,7 +210,8 @@ export const LabOrderManager: React.FC<LabOrderManagerProps> = ({
       setAnalyses([{
         nom_analyse: preset.nom,
         type_echantillon: preset.type,
-        instructions: preset.instructions || ''
+        instructions: preset.instructions || '',
+        mode: 'GLOBAL',
       }]);
     } else {
       setAnalyses(prev => [
@@ -159,7 +219,8 @@ export const LabOrderManager: React.FC<LabOrderManagerProps> = ({
         {
           nom_analyse: preset.nom,
           type_echantillon: preset.type,
-          instructions: preset.instructions || ''
+          instructions: preset.instructions || '',
+          mode: 'GLOBAL',
         }
       ]);
     }
@@ -167,29 +228,75 @@ export const LabOrderManager: React.FC<LabOrderManagerProps> = ({
 
   // Ajouter une ligne d'analyse manuelle
   const handleAddAnalysisRow = () => {
-    setAnalyses(prev => [
-      ...prev,
-      { nom_analyse: '', type_echantillon: 'SANG', instructions: '' }
-    ]);
+    setAnalyses(prev => [...prev, getInitialAnalysisRow()]);
   };
 
   // Retirer une ligne d'analyse
   const handleRemoveAnalysisRow = (index: number) => {
     if (analyses.length <= 1) {
-      setAnalyses([{ nom_analyse: '', type_echantillon: 'SANG', instructions: '' }]);
+      setAnalyses([getInitialAnalysisRow()]);
       return;
     }
     setAnalyses(prev => prev.filter((_, idx) => idx !== index));
   };
 
   // Mettre à jour un champ d'une analyse
-  const handleUpdateAnalysis = (index: number, field: keyof AnalyseLaboratoire, value: any) => {
+  const handleUpdateAnalysis = (index: number, field: keyof AnalysisRowState, value: any) => {
+    setAnalyses(prev => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], [field]: value };
+      return updated;
+    });
+  };
+
+  // Sélectionner un examen depuis le catalogue
+  const handleSelectCatalogueExam = (index: number, exam: CatalogueExam) => {
     setAnalyses(prev => {
       const updated = [...prev];
       updated[index] = {
         ...updated[index],
-        [field]: value
+        nom_analyse: exam.nom,
+        type_echantillon: updated[index].type_echantillon,
+        examen_id: exam.id,
+        mode: 'GLOBAL',
+        selection_details: null,
+        instructions: exam.description || updated[index].instructions,
       };
+      return updated;
+    });
+    setShowExamPicker(null);
+    setPickerActiveRowIdx(null);
+    setSearchExam('');
+  };
+
+  // Changer le mode GLOBAL / PERSONNALISE
+  const handleChangeMode = (index: number, mode: ModePrescription) => {
+    setAnalyses(prev => {
+      const updated = [...prev];
+      updated[index] = {
+        ...updated[index],
+        mode,
+        selection_details: mode === 'PERSONNALISE' ? [] : null,
+      };
+      return updated;
+    });
+  };
+
+  // Basculer la sélection d'un paramètre
+  const toggleParamSelection = (rowIndex: number, parametreId: string, sousParametreId?: string) => {
+    setAnalyses(prev => {
+      const updated = [...prev];
+      const row = { ...updated[rowIndex] };
+      const currentSelection = row.selection_details ? [...row.selection_details] : [];
+      const existingIdx = currentSelection.findIndex(
+        s => s.sous_parametre_id === (sousParametreId || parametreId) && s.parametre_id === parametreId
+      );
+      if (existingIdx >= 0) {
+        currentSelection.splice(existingIdx, 1);
+      } else {
+        currentSelection.push({ parametre_id: parametreId, sous_parametre_id: sousParametreId });
+      }
+      updated[rowIndex] = { ...row, selection_details: currentSelection };
       return updated;
     });
   };
@@ -224,6 +331,14 @@ export const LabOrderManager: React.FC<LabOrderManagerProps> = ({
         setError(`Type d'échantillon invalide pour "${it.nom_analyse}".`);
         return;
       }
+      // Validation PERSONNALISÉ : au moins un paramètre/sous-paramètre sélectionné
+      if (it.mode === 'PERSONNALISE') {
+        const hasSelection = (it.selection_details || []).length > 0;
+        if (!hasSelection) {
+          setError(`L'examen "${it.nom_analyse}" est en mode PERSONNALISÉ mais aucun paramètre n'est sélectionné.`);
+          return;
+        }
+      }
     }
 
     if (isConsultationFinalized && !isAmendmentMode && !orderAmendmentMode) {
@@ -239,19 +354,27 @@ export const LabOrderManager: React.FC<LabOrderManagerProps> = ({
 
     setSaving(true);
     try {
-      const payload: any = {
-        consultation_id: consultationId,
-        urgence,
-        laborantin_id: selectedLaborantinId && selectedLaborantinId.trim() !== '' ? selectedLaborantinId.trim() : null,
-        indication_clinique: indicationClinique.trim() || undefined,
-        commentaire: commentaire.trim() || undefined,
-        analyses: validAnalyses.map((a, i) => ({
-          nom_analyse: a.nom_analyse!.trim(),
-          type_echantillon: a.type_echantillon || 'SANG',
-          instructions: a.instructions?.trim() || undefined,
-          ordre: i
-        }))
-      };
+    const payload: any = {
+      consultation_id: consultationId,
+      urgence,
+      laborantin_id: selectedLaborantinId && selectedLaborantinId.trim() !== '' ? selectedLaborantinId.trim() : null,
+      indication_clinique: indicationClinique.trim() || undefined,
+      commentaire: commentaire.trim() || undefined,
+      analyses: validAnalyses.map((a, i) => ({
+        nom_analyse: a.nom_analyse!.trim(),
+        type_echantillon: a.type_echantillon || 'SANG',
+        instructions: a.instructions?.trim() || undefined,
+        ordre: i,
+        // Champs catalogue Phase 2C-5
+        examen_id: a.examen_id || null,
+        mode: a.mode || 'GLOBAL',
+        parametre_id: a.parametre_id || null,
+        sous_parametre_id: a.sous_parametre_id || null,
+        selection_details: a.selection_details,
+        prix_usd: a.prix_usd || null,
+        tarif_id: a.tarif_id || undefined,
+      }))
+    };
 
       if (isConsultationFinalized || orderAmendmentMode) {
         payload.is_amendment = true;
@@ -578,60 +701,223 @@ export const LabOrderManager: React.FC<LabOrderManagerProps> = ({
               </button>
             </div>
 
-            <div className="space-y-2">
-              {analyses.map((it, idx) => (
-                <div key={idx} className="p-3 bg-white border border-indigo-200 rounded-xl flex flex-col md:flex-row items-start md:items-center gap-2 shadow-2xs">
-                  <div className="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-800 flex items-center justify-center text-xs font-bold shrink-0">
-                    {idx + 1}
-                  </div>
+            <div className="space-y-3">
+              {analyses.map((it, idx) => {
+                const filteredExams = catalogueExams.filter(e =>
+                  e.nom.toLowerCase().includes(searchExam.toLowerCase()) ||
+                  e.code.toLowerCase().includes(searchExam.toLowerCase())
+                );
+                const selectedExam = catalogueExams.find(e => e.id === it.examen_id);
+                const isGlobalMode = it.mode === 'GLOBAL';
+                const isPersonnaliseMode = it.mode === 'PERSONNALISE';
 
-                  {/* Nom analyse */}
-                  <div className="flex-1 w-full">
-                    <input
-                      type="text"
-                      value={it.nom_analyse || ''}
-                      onChange={(e) => handleUpdateAnalysis(idx, 'nom_analyse', e.target.value)}
-                      placeholder="Nom de l'analyse (ex: NFS, Hémoculture, CRP, Bilan lipidique...)"
-                      className="w-full text-xs p-2 bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-hidden font-semibold text-slate-900"
-                    />
-                  </div>
+                return (
+                  <div key={idx} className="p-3 bg-white border border-indigo-200 rounded-xl shadow-2xs space-y-3">
+                    {/* Ligne 1 : Sélection examen + Type échantillon */}
+                    <div className="flex flex-col md:flex-row items-start md:items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-800 flex items-center justify-center text-xs font-bold shrink-0">
+                        {idx + 1}
+                      </div>
 
-                  {/* Type d'échantillon */}
-                  <div className="w-full md:w-36 shrink-0">
-                    <select
-                      value={it.type_echantillon || 'SANG'}
-                      onChange={(e) => handleUpdateAnalysis(idx, 'type_echantillon', e.target.value as EchantillonType)}
-                      className="w-full text-xs p-2 bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-hidden font-medium text-slate-800"
-                    >
-                      <option value="SANG">🩸 Sang</option>
-                      <option value="URINE">🧪 Urine</option>
-                      <option value="SELLES">🔬 Selles</option>
-                      <option value="AUTRE">📋 Autre</option>
-                    </select>
-                  </div>
+                      {/* Sélecteur examen catalogue */}
+                      <div className="relative flex-1 w-full">
+                        <button
+                          type="button"
+                          onClick={() => { setShowExamPicker(showExamPicker === idx ? null : idx); setPickerActiveRowIdx(idx); setSearchExam(''); }}
+                          className="w-full text-left text-xs p-2 bg-slate-50 border border-slate-300 rounded-lg hover:border-indigo-400 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden font-semibold text-slate-900 flex items-center justify-between"
+                        >
+                          <span className="truncate">
+                            {selectedExam ? `📋 ${selectedExam.nom}` : it.examen_id ? `📋 Examen sélectionné` : '➕ Sélectionner un examen du catalogue'}
+                          </span>
+                          <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${showExamPicker === idx ? 'rotate-180' : ''}`} />
+                        </button>
 
-                  {/* Instructions prélèvement */}
-                  <div className="flex-1 w-full">
-                    <input
-                      type="text"
-                      value={it.instructions || ''}
-                      onChange={(e) => handleUpdateAnalysis(idx, 'instructions', e.target.value)}
-                      placeholder="Instructions (ex: à jeun, tube hépariné, 2e jet...)"
-                      className="w-full text-xs p-2 bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-hidden text-slate-700"
-                    />
-                  </div>
+                        {showExamPicker === idx && (
+                          <div data-exam-picker className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-indigo-200 rounded-xl shadow-xl max-h-60 overflow-y-auto">
+                            <div className="p-2 border-b border-slate-100 sticky top-0 bg-white">
+                              <input
+                                type="text"
+                                value={searchExam}
+                                onChange={(e) => setSearchExam(e.target.value)}
+                                placeholder="Rechercher un examen..."
+                                className="w-full text-xs p-2 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                              />
+                            </div>
+                            {catalogueLoading ? (
+                              <div className="p-3 text-center text-xs text-slate-400">Chargement...</div>
+                            ) : filteredExams.length === 0 ? (
+                              <div className="p-3 text-center text-xs text-slate-400">Aucun examen trouvé dans le catalogue</div>
+                            ) : (
+                              filteredExams.map((exam) => (
+                                <button
+                                  key={exam.id}
+                                  type="button"
+                                  onClick={() => handleSelectCatalogueExam(idx, exam)}
+                                  className={`w-full text-left px-3 py-2 text-xs hover:bg-indigo-50 transition-colors border-b border-slate-100 last:border-none ${
+                                    it.examen_id === exam.id ? 'bg-indigo-100' : ''
+                                  }`}
+                                >
+                                  <div className="font-semibold text-slate-900">{exam.nom}</div>
+                                  <div className="text-[10px] text-slate-500">{exam.code} {exam.prix_global_usd != null && `— ${exam.prix_global_usd.toFixed(2)} USD`}</div>
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
 
-                  {/* Bouton supprimer */}
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveAnalysisRow(idx)}
-                    title="Supprimer cette ligne"
-                    className="p-2 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition-colors shrink-0"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              ))}
+                      {/* Type d'échantillon */}
+                      <div className="w-full md:w-32 shrink-0">
+                        <select
+                          value={it.type_echantillon || 'SANG'}
+                          onChange={(e) => handleUpdateAnalysis(idx, 'type_echantillon', e.target.value as EchantillonType)}
+                          className="w-full text-xs p-2 bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-hidden font-medium text-slate-800"
+                        >
+                          <option value="SANG">🩸 Sang</option>
+                          <option value="URINE">🧪 Urine</option>
+                          <option value="SELLES">🔬 Selles</option>
+                          <option value="AUTRE">📋 Autre</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Ligne 2 : Mode GLOBAL / PERSONNALISÉ */}
+                    {it.examen_id && selectedExam && (
+                      <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-100">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Mode :</span>
+                        <button
+                          type="button"
+                          onClick={() => handleChangeMode(idx, 'GLOBAL')}
+                          className={`px-3 py-1 text-xs font-bold rounded-lg border transition-all ${
+                            isGlobalMode
+                              ? 'bg-indigo-600 text-white border-indigo-700 shadow-2xs'
+                              : 'bg-white text-slate-600 border-slate-300 hover:bg-indigo-50'
+                          }`}
+                        >
+                          🏥 GLOBAL
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleChangeMode(idx, 'PERSONNALISE')}
+                          className={`px-3 py-1 text-xs font-bold rounded-lg border transition-all ${
+                            isPersonnaliseMode
+                              ? 'bg-emerald-600 text-white border-emerald-700 shadow-2xs'
+                              : 'bg-white text-slate-600 border-slate-300 hover:bg-emerald-50'
+                          }`}
+                        >
+                          ✂️ PERSONNALISÉ
+                        </button>
+
+                        {isGlobalMode && selectedExam.prix_global_usd != null && (
+                          <span className="text-[10px] text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full font-semibold ml-auto">
+                            Prix global : {selectedExam.prix_global_usd.toFixed(2)} USD
+                          </span>
+                        )}
+                        {isPersonnaliseMode && (
+                          <span className="text-[10px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full ml-auto">
+                            Mode détaillé — cochez les paramètres
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Arbre paramètres / sous-paramètres pour mode PERSONNALISÉ */}
+                    {isPersonnaliseMode && selectedExam?.parametres && (
+                      <div className="bg-emerald-50/50 border border-emerald-200 rounded-lg p-2.5 space-y-2 max-h-48 overflow-y-auto">
+                        {selectedExam.parametres.map((param: CatalogueParametre) => (
+                          <div key={param.id} className="space-y-1">
+                            <label className="flex items-center gap-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={
+                                  (it.selection_details || []).some(
+                                    s => s.parametre_id === param.id && !s.sous_parametre_id
+                                  )
+                                }
+                                onChange={() => toggleParamSelection(idx, param.id)}
+                                className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                              />
+                              <span className="text-xs font-bold text-slate-800">{param.nom}</span>
+                              <span className="text-[10px] text-slate-500">{param.type_resultat}</span>
+                              {param.prix_usd != null && (
+                                <span className="text-[10px] font-semibold text-emerald-700 ml-auto">{param.prix_usd.toFixed(2)} USD</span>
+                              )}
+                            </label>
+                            {param.sous_parametres && param.sous_parametres.length > 0 && (
+                              <div className="ml-6 space-y-1 border-l-2 border-emerald-200 pl-2">
+                                {param.sous_parametres.map((sub: CatalogueSousParametre) => (
+                                  <label key={sub.id} className="flex items-center gap-2 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={
+                                        (it.selection_details || []).some(
+                                          s => s.sous_parametre_id === sub.id
+                                        )
+                                      }
+                                      onChange={() => toggleParamSelection(idx, param.id, sub.id)}
+                                      className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                                    />
+                                    <span className="text-[11px] text-slate-700">{sub.nom}</span>
+                                    {sub.prix_usd != null && (
+                                      <span className="text-[10px] text-emerald-700 ml-auto">{sub.prix_usd.toFixed(2)} USD</span>
+                                    )}
+                                  </label>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                        {((it.selection_details || []).length > 0) && (
+                          <div className="pt-1 border-t border-emerald-200 text-xs font-bold text-emerald-900">
+                            Sous-total : {(() => {
+                              let total = 0;
+                              for (const sel of it.selection_details!) {
+                                const param = selectedExam.parametres?.find(p => p.id === sel.parametre_id);
+                                if (sel.sous_parametre_id) {
+                                  total += param?.sous_parametres?.find(s => s.id === sel.sous_parametre_id)?.prix_usd || 0;
+                                } else {
+                                  total += param?.prix_usd || 0;
+                                }
+                              }
+                              return total.toFixed(2);
+                            })()} USD
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Ligne 3 : Nom manuel + Instructions */}
+                    <div className="flex flex-col md:flex-row items-start md:items-center gap-2">
+                      <div className="flex-1 w-full">
+                        <input
+                          type="text"
+                          value={it.nom_analyse || ''}
+                          onChange={(e) => handleUpdateAnalysis(idx, 'nom_analyse', e.target.value)}
+                          placeholder={selectedExam ? 'Nom affiché (modifiable)' : 'Nom de l\'analyse (ex: NFS, Hémoculture...)'}
+                          className="w-full text-xs p-2 bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-hidden font-semibold text-slate-900"
+                        />
+                      </div>
+                      <div className="flex-1 w-full">
+                        <input
+                          type="text"
+                          value={it.instructions || ''}
+                          onChange={(e) => handleUpdateAnalysis(idx, 'instructions', e.target.value)}
+                          placeholder="Instructions (ex: à jeun, tube hépariné...)"
+                          className="w-full text-xs p-2 bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:ring-2 focus:ring-indigo-500 focus:outline-hidden text-slate-700"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveAnalysisRow(idx)}
+                        title="Supprimer cette ligne"
+                        className="p-2 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition-colors shrink-0"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
 

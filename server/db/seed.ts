@@ -312,4 +312,644 @@ export async function seedDatabase(): Promise<void> {
       WHERE username = 'labo.technicien';
     `);
   }
+
+  // 6. Initialisation du Catalogue Réel de Laboratoire (Phase 4)
+  const existingExamensCount = await queryOne<{ count: number }>('SELECT count(*) as count FROM examens_laboratoire', []);
+  if (!existingExamensCount || Number(existingExamensCount.count) === 0) {
+    const now = new Date().toISOString();
+
+    const realExams = [
+      // 1. NFS
+      {
+        id: 'exam-nfs',
+        nom: 'Numération Formule Sanguine (NFS)',
+        code: 'NFS',
+        description: 'Hémogramme complet automatisé avec numération et formule leucocytaire',
+        prix_global_usd: 15.0,
+        ordre_affichage: 1,
+        parametres: [
+          {
+            id: 'param-gb',
+            nom: 'Globules Blancs (Leucocytes)',
+            code: 'NFS_GB',
+            unite: '10^3/µL',
+            type_resultat: 'NUMERIQUE',
+            obligatoire: 1,
+            ordre_affichage: 1,
+            prix_usd: 3.0,
+            valeurs_ref: { type: 'GENERAL', min: 4.0, max: 10.0, unite: '10^3/µL' }
+          },
+          {
+            id: 'param-gr',
+            nom: 'Globules Rouges (Hématies)',
+            code: 'NFS_GR',
+            unite: '10^6/µL',
+            type_resultat: 'NUMERIQUE',
+            obligatoire: 1,
+            ordre_affichage: 2,
+            prix_usd: 3.0,
+            valeurs_ref: { type: 'GENERAL', min: 4.0, max: 5.5, unite: '10^6/µL' }
+          },
+          {
+            id: 'param-hb',
+            nom: 'Hémoglobine',
+            code: 'NFS_HB',
+            unite: 'g/dL',
+            type_resultat: 'NUMERIQUE',
+            obligatoire: 1,
+            ordre_affichage: 3,
+            prix_usd: 3.0,
+            valeurs_ref: { type: 'GENERAL', min: 12.0, max: 17.0, unite: 'g/dL' }
+          },
+          {
+            id: 'param-ht',
+            nom: 'Hématocrite',
+            code: 'NFS_HT',
+            unite: '%',
+            type_resultat: 'NUMERIQUE',
+            obligatoire: 1,
+            ordre_affichage: 4,
+            prix_usd: 2.0,
+            valeurs_ref: { type: 'GENERAL', min: 36.0, max: 50.0, unite: '%' }
+          },
+          {
+            id: 'param-plq',
+            nom: 'Plaquettes',
+            code: 'NFS_PLQ',
+            unite: '10^3/µL',
+            type_resultat: 'NUMERIQUE',
+            obligatoire: 1,
+            ordre_affichage: 5,
+            prix_usd: 3.0,
+            valeurs_ref: { type: 'GENERAL', min: 150.0, max: 450.0, unite: '10^3/µL' }
+          },
+          {
+            id: 'param-formule',
+            nom: 'Formule Leucocytaire',
+            code: 'NFS_FORMULE',
+            unite: '%',
+            type_resultat: 'TEXTE',
+            obligatoire: 0,
+            ordre_affichage: 6,
+            prix_usd: 4.0,
+            sous_parametres: [
+              {
+                id: 'sp-pnn',
+                nom: 'Polynucléaires Neutrophiles',
+                code: 'NFS_PNN',
+                unite: '%',
+                type_resultat: 'NUMERIQUE',
+                obligatoire: 1,
+                ordre_affichage: 1,
+                prix_usd: 1.0,
+                valeurs_ref: { type: 'GENERAL', min: 40.0, max: 75.0, unite: '%' }
+              },
+              {
+                id: 'sp-pne',
+                nom: 'Polynucléaires Éosinophiles',
+                code: 'NFS_PNE',
+                unite: '%',
+                type_resultat: 'NUMERIQUE',
+                obligatoire: 0,
+                ordre_affichage: 2,
+                prix_usd: 1.0,
+                valeurs_ref: { type: 'GENERAL', min: 1.0, max: 4.0, unite: '%' }
+              },
+              {
+                id: 'sp-pnb',
+                nom: 'Polynucléaires Basophiles',
+                code: 'NFS_PNB',
+                unite: '%',
+                type_resultat: 'NUMERIQUE',
+                obligatoire: 0,
+                ordre_affichage: 3,
+                prix_usd: 1.0,
+                valeurs_ref: { type: 'GENERAL', min: 0.0, max: 1.0, unite: '%' }
+              },
+              {
+                id: 'sp-lym',
+                nom: 'Lymphocytes',
+                code: 'NFS_LYM',
+                unite: '%',
+                type_resultat: 'NUMERIQUE',
+                obligatoire: 1,
+                ordre_affichage: 4,
+                prix_usd: 1.0,
+                valeurs_ref: { type: 'GENERAL', min: 20.0, max: 45.0, unite: '%' }
+              },
+              {
+                id: 'sp-mon',
+                nom: 'Monocytes',
+                code: 'NFS_MON',
+                unite: '%',
+                type_resultat: 'NUMERIQUE',
+                obligatoire: 0,
+                ordre_affichage: 5,
+                prix_usd: 1.0,
+                valeurs_ref: { type: 'GENERAL', min: 2.0, max: 10.0, unite: '%' }
+              }
+            ]
+          }
+        ]
+      },
+
+      // 2. Goutte Épaisse & Frottis
+      {
+        id: 'exam-ge',
+        nom: 'Goutte Épaisse & TDR Paludisme',
+        code: 'GE_PALU',
+        description: 'Recherche qualitative et quantitative de Plasmodium',
+        prix_global_usd: 10.0,
+        ordre_affichage: 2,
+        parametres: [
+          {
+            id: 'param-ge-result',
+            nom: 'Résultat Goutte Épaisse',
+            code: 'GE_RES',
+            unite: '',
+            type_resultat: 'CHOIX',
+            obligatoire: 1,
+            ordre_affichage: 1,
+            prix_usd: 5.0,
+            valeurs_ref: { type: 'GENERAL', texte: 'NÉGATIF' }
+          },
+          {
+            id: 'param-ge-densite',
+            nom: 'Densité Parasitaire',
+            code: 'GE_DP',
+            unite: 'trophozoïtes/µL',
+            type_resultat: 'NUMERIQUE',
+            obligatoire: 0,
+            ordre_affichage: 2,
+            prix_usd: 3.0,
+            valeurs_ref: { type: 'GENERAL', min: 0, max: 0, unite: 'trophozoïtes/µL' }
+          },
+          {
+            id: 'param-ge-espece',
+            nom: 'Espèce Plasmodiale',
+            code: 'GE_ESP',
+            unite: '',
+            type_resultat: 'TEXTE',
+            obligatoire: 0,
+            ordre_affichage: 3,
+            prix_usd: 2.0
+          },
+          {
+            id: 'param-tdr-palu',
+            nom: 'TDR Paludisme (Ag Pf/Pan)',
+            code: 'TDR_PALU',
+            unite: '',
+            type_resultat: 'CHOIX',
+            obligatoire: 0,
+            ordre_affichage: 4,
+            prix_usd: 3.0,
+            valeurs_ref: { type: 'GENERAL', texte: 'NÉGATIF' }
+          }
+        ]
+      },
+
+      // 3. Glycémie à jeun
+      {
+        id: 'exam-gly',
+        nom: 'Glycémie à jeun',
+        code: 'GLYCEMIE',
+        description: 'Dosage du glucose plasmatique à jeun',
+        prix_global_usd: 8.0,
+        ordre_affichage: 3,
+        parametres: [
+          {
+            id: 'param-gly-val',
+            nom: 'Glycémie veineuse à jeun',
+            code: 'GLY_VAL',
+            unite: 'mg/dL',
+            type_resultat: 'NUMERIQUE',
+            obligatoire: 1,
+            ordre_affichage: 1,
+            prix_usd: 8.0,
+            valeurs_ref: { type: 'GENERAL', min: 70.0, max: 110.0, unite: 'mg/dL' }
+          }
+        ]
+      },
+
+      // 4. CRP
+      {
+        id: 'exam-crp',
+        nom: 'Protéine C-Réactive (CRP)',
+        code: 'CRP',
+        description: 'Marqueur de l\'inflammation aiguë',
+        prix_global_usd: 12.0,
+        ordre_affichage: 4,
+        parametres: [
+          {
+            id: 'param-crp-val',
+            nom: 'Dosage quantitatif CRP',
+            code: 'CRP_VAL',
+            unite: 'mg/L',
+            type_resultat: 'NUMERIQUE',
+            obligatoire: 1,
+            ordre_affichage: 1,
+            prix_usd: 12.0,
+            valeurs_ref: { type: 'GENERAL', min: 0.0, max: 6.0, unite: 'mg/L' }
+          }
+        ]
+      },
+
+      // 5. Ionogramme Sanguin
+      {
+        id: 'exam-iono',
+        nom: 'Ionogramme Sanguin',
+        code: 'IONO',
+        description: 'Bilan électrolytique plasmatique de base',
+        prix_global_usd: 18.0,
+        ordre_affichage: 5,
+        parametres: [
+          {
+            id: 'param-na',
+            nom: 'Sodium (Na+)',
+            code: 'IONO_NA',
+            unite: 'mmol/L',
+            type_resultat: 'NUMERIQUE',
+            obligatoire: 1,
+            ordre_affichage: 1,
+            prix_usd: 5.0,
+            valeurs_ref: { type: 'GENERAL', min: 135.0, max: 145.0, unite: 'mmol/L' }
+          },
+          {
+            id: 'param-k',
+            nom: 'Potassium (K+)',
+            code: 'IONO_K',
+            unite: 'mmol/L',
+            type_resultat: 'NUMERIQUE',
+            obligatoire: 1,
+            ordre_affichage: 2,
+            prix_usd: 5.0,
+            valeurs_ref: { type: 'GENERAL', min: 3.5, max: 5.0, unite: 'mmol/L' }
+          },
+          {
+            id: 'param-cl',
+            nom: 'Chlore (Cl-)',
+            code: 'IONO_CL',
+            unite: 'mmol/L',
+            type_resultat: 'NUMERIQUE',
+            obligatoire: 1,
+            ordre_affichage: 3,
+            prix_usd: 5.0,
+            valeurs_ref: { type: 'GENERAL', min: 95.0, max: 105.0, unite: 'mmol/L' }
+          },
+          {
+            id: 'param-ca',
+            nom: 'Calcium total (Ca2+)',
+            code: 'IONO_CA',
+            unite: 'mg/dL',
+            type_resultat: 'NUMERIQUE',
+            obligatoire: 0,
+            ordre_affichage: 4,
+            prix_usd: 5.0,
+            valeurs_ref: { type: 'GENERAL', min: 8.5, max: 10.5, unite: 'mg/dL' }
+          }
+        ]
+      },
+
+      // 6. Fonction Rénale (Créatininémie & Urée)
+      {
+        id: 'exam-renal',
+        nom: 'Bilan Rénal (Urée & Créatinine)',
+        code: 'RENAL',
+        description: 'Évaluation de la fonction de filtration glomérulaire',
+        prix_global_usd: 12.0,
+        ordre_affichage: 6,
+        parametres: [
+          {
+            id: 'param-creat',
+            nom: 'Créatininémie',
+            code: 'CREAT',
+            unite: 'mg/dL',
+            type_resultat: 'NUMERIQUE',
+            obligatoire: 1,
+            ordre_affichage: 1,
+            prix_usd: 6.0,
+            valeurs_ref: { type: 'GENERAL', min: 0.6, max: 1.2, unite: 'mg/dL' }
+          },
+          {
+            id: 'param-uree',
+            nom: 'Urée sanguine',
+            code: 'UREE',
+            unite: 'mg/dL',
+            type_resultat: 'NUMERIQUE',
+            obligatoire: 1,
+            ordre_affichage: 2,
+            prix_usd: 6.0,
+            valeurs_ref: { type: 'GENERAL', min: 15.0, max: 45.0, unite: 'mg/dL' }
+          },
+          {
+            id: 'param-clairance',
+            nom: 'Clairance estimée (DFG / CKD-EPI)',
+            code: 'DFG_ESTIM',
+            unite: 'mL/min/1.73m²',
+            type_resultat: 'NUMERIQUE',
+            obligatoire: 0,
+            ordre_affichage: 3,
+            prix_usd: 2.0,
+            valeurs_ref: { type: 'GENERAL', min: 90.0, max: 120.0, unite: 'mL/min/1.73m²' }
+          }
+        ]
+      },
+
+      // 7. Bilan Hépatique (Transaminases)
+      {
+        id: 'exam-foie',
+        nom: 'Bilan Hépatique (ASAT / ALAT)',
+        code: 'HEPATIQUE',
+        description: 'Cytolyse et enzymes hépatiques',
+        prix_global_usd: 14.0,
+        ordre_affichage: 7,
+        parametres: [
+          {
+            id: 'param-asat',
+            nom: 'Transaminases ASAT (GOT)',
+            code: 'ASAT_GOT',
+            unite: 'UI/L',
+            type_resultat: 'NUMERIQUE',
+            obligatoire: 1,
+            ordre_affichage: 1,
+            prix_usd: 7.0,
+            valeurs_ref: { type: 'GENERAL', min: 5.0, max: 40.0, unite: 'UI/L' }
+          },
+          {
+            id: 'param-alat',
+            nom: 'Transaminases ALAT (GPT)',
+            code: 'ALAT_GPT',
+            unite: 'UI/L',
+            type_resultat: 'NUMERIQUE',
+            obligatoire: 1,
+            ordre_affichage: 2,
+            prix_usd: 7.0,
+            valeurs_ref: { type: 'GENERAL', min: 5.0, max: 45.0, unite: 'UI/L' }
+          },
+          {
+            id: 'param-bili-tot',
+            nom: 'Bilirubine Totale',
+            code: 'BILI_TOT',
+            unite: 'mg/dL',
+            type_resultat: 'NUMERIQUE',
+            obligatoire: 0,
+            ordre_affichage: 3,
+            prix_usd: 4.0,
+            valeurs_ref: { type: 'GENERAL', min: 0.2, max: 1.0, unite: 'mg/dL' }
+          }
+        ]
+      },
+
+      // 8. Sédiment Urinaire & Bandelette
+      {
+        id: 'exam-urine',
+        nom: 'Sédiment Urinaire & Bandelette',
+        code: 'BANDELETTE_URINE',
+        description: 'Chimie urinaire et cytologie sommaire',
+        prix_global_usd: 10.0,
+        ordre_affichage: 8,
+        parametres: [
+          {
+            id: 'param-bu-leuco',
+            nom: 'Leucocytes urinaires',
+            code: 'BU_LEUCO',
+            unite: '',
+            type_resultat: 'CHOIX',
+            obligatoire: 1,
+            ordre_affichage: 1,
+            prix_usd: 2.5,
+            valeurs_ref: { type: 'GENERAL', texte: 'NÉGATIF' }
+          },
+          {
+            id: 'param-bu-nitrites',
+            nom: 'Nitrites',
+            code: 'BU_NITRITES',
+            unite: '',
+            type_resultat: 'CHOIX',
+            obligatoire: 1,
+            ordre_affichage: 2,
+            prix_usd: 2.5,
+            valeurs_ref: { type: 'GENERAL', texte: 'NÉGATIF' }
+          },
+          {
+            id: 'param-bu-prot',
+            nom: 'Protéines urinaires',
+            code: 'BU_PROT',
+            unite: '',
+            type_resultat: 'CHOIX',
+            obligatoire: 1,
+            ordre_affichage: 3,
+            prix_usd: 2.5,
+            valeurs_ref: { type: 'GENERAL', texte: 'NÉGATIF' }
+          },
+          {
+            id: 'param-bu-sang',
+            nom: 'Sang / Hémoglobine',
+            code: 'BU_SANG',
+            unite: '',
+            type_resultat: 'CHOIX',
+            obligatoire: 1,
+            ordre_affichage: 4,
+            prix_usd: 2.5,
+            valeurs_ref: { type: 'GENERAL', texte: 'NÉGATIF' }
+          }
+        ]
+      },
+
+      // 9. Sérodiagnostic de Widal (Typhoïde)
+      {
+        id: 'exam-widal',
+        nom: 'Sérodiagnostic de Widal (Typhoïde)',
+        code: 'WIDAL',
+        description: 'Agglutination sérique Salmonella typhi / paratyphi',
+        prix_global_usd: 12.0,
+        ordre_affichage: 9,
+        parametres: [
+          {
+            id: 'param-widal-to',
+            nom: 'Antigène O (Soma)',
+            code: 'WIDAL_TO',
+            unite: 'titre',
+            type_resultat: 'TEXTE',
+            obligatoire: 1,
+            ordre_affichage: 1,
+            prix_usd: 6.0,
+            valeurs_ref: { type: 'GENERAL', texte: '< 1/80 (Négatif)' }
+          },
+          {
+            id: 'param-widal-th',
+            nom: 'Antigène H (Flagelle)',
+            code: 'WIDAL_TH',
+            unite: 'titre',
+            type_resultat: 'TEXTE',
+            obligatoire: 1,
+            ordre_affichage: 2,
+            prix_usd: 6.0,
+            valeurs_ref: { type: 'GENERAL', texte: '< 1/80 (Négatif)' }
+          }
+        ]
+      },
+
+      // 10. Vitesse de Sédimentation (VS) - ajouté séparément
+      {
+        id: 'exam-vs',
+        nom: 'Vitesse de Sédimentation (VS)',
+        code: 'VS',
+        description: 'Taux de sédimentation des globules rouges',
+        prix_global_usd: 5.0,
+        ordre_affichage: 10,
+        parametres: [
+          {
+            id: 'param-vs-val',
+            nom: 'Vitesse de sédimentation',
+            code: 'VS_VAL',
+            unite: 'mm/h',
+            type_resultat: 'NUMERIQUE',
+            obligatoire: 1,
+            ordre_affichage: 1,
+            prix_usd: 5.0,
+            valeurs_ref: { type: 'GENERAL', min: 0.0, max: 20.0, unite: 'mm/h' }
+          }
+        ]
+      },
+
+      // 11. Bandelette Urinaire - ajouté séparément
+      {
+        id: 'exam-ban',
+        nom: 'Bandelette Urinaire',
+        code: 'BAN_S',
+        description: 'Dosage par bandelette réactive des paramètres urinaires',
+        prix_global_usd: 8.0,
+        ordre_affichage: 11,
+        parametres: [
+          {
+            id: 'param-ban-leuco',
+            nom: 'Leucocytes',
+            code: 'BAN_LEUCO',
+            unite: '',
+            type_resultat: 'CHOIX',
+            obligatoire: 1,
+            ordre_affichage: 1,
+            prix_usd: 2.0,
+            valeurs_ref: { type: 'GENERAL', texte: 'NÉGATIF' }
+          },
+          {
+            id: 'param-ban-nitrites',
+            nom: 'Nitrites',
+            code: 'BAN_NIT',
+            unite: '',
+            type_resultat: 'CHOIX',
+            obligatoire: 1,
+            ordre_affichage: 2,
+            prix_usd: 2.0,
+            valeurs_ref: { type: 'GENERAL', texte: 'NÉGATIF' }
+          },
+          {
+            id: 'param-ban-sang',
+            nom: 'Sang',
+            code: 'BAN_SANG',
+            unite: '',
+            type_resultat: 'CHOIX',
+            obligatoire: 1,
+            ordre_affichage: 3,
+            prix_usd: 2.0,
+            valeurs_ref: { type: 'GENERAL', texte: 'NÉGATIF' }
+          },
+          {
+            id: 'param-ban-prot',
+            nom: 'Protéines',
+            code: 'BAN_PROT',
+            unite: '',
+            type_resultat: 'CHOIX',
+            obligatoire: 1,
+            ordre_affichage: 4,
+            prix_usd: 2.0,
+            valeurs_ref: { type: 'GENERAL', texte: 'NÉGATIF' }
+          }
+        ]
+      }
+    ];
+
+    for (const ex of realExams) {
+      // Insertion examen
+      await execute(`
+        INSERT OR IGNORE INTO examens_laboratoire (
+          id, nom, code, description, actif, ordre_affichage, prix_global_usd, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)
+      `, [
+        ex.id,
+        ex.nom,
+        ex.code,
+        ex.description,
+        ex.ordre_affichage,
+        ex.prix_global_usd,
+        now,
+        now
+      ]);
+
+      // Insertion paramètres
+      for (const p of ex.parametres) {
+        await execute(`
+          INSERT OR IGNORE INTO parametres_laboratoire (
+            id, examen_id, nom, code, unite, type_resultat, obligatoire, ordre_affichage, actif, prix_usd, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+        `, [
+          p.id,
+          ex.id,
+          p.nom,
+          p.code,
+          p.unite,
+          p.type_resultat,
+          p.obligatoire,
+          p.ordre_affichage,
+          p.prix_usd,
+          now,
+          now
+        ]); // Valeurs de référence insérées séparément via migration ou API
+
+await execute(`
+          INSERT OR IGNORE INTO parametres_laboratoire (
+            id, examen_id, nom, code, unite, type_resultat, obligatoire, ordre_affichage, actif, prix_usd, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+        `, [
+          p.id,
+          ex.id,
+          p.nom,
+          p.code,
+          p.unite,
+          p.type_resultat,
+          p.obligatoire,
+          p.ordre_affichage,
+          p.prix_usd,
+          now,
+          now
+        ]); // Valeurs de référence et sous-paramètres insérés via migration/API
+
+        // Insertion sous-paramètres si existants
+        // Vérification runtime : la propriété peut être absente selon le type narrowed de TS
+        if ('sous_parametres' in p && p.sous_parametres !== undefined) {
+          for (let i = 0; i < p.sous_parametres.length; i++) {
+            const sp = p.sous_parametres[i];
+            await execute(`
+              INSERT OR IGNORE INTO sous_parametres_laboratoire (
+                id, parametre_id, nom, code, unite, type_resultat, obligatoire, ordre_affichage, actif, prix_usd, created_at, updated_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+            `, [
+              sp.id,
+              p.id,
+              sp.nom,
+              sp.code,
+              sp.unite,
+              sp.type_resultat,
+              sp.obligatoire,
+              sp.ordre_affichage,
+              sp.prix_usd,
+              now,
+              now
+            ]);
+          }
+        }
+    }
+  }
+}
 }

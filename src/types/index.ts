@@ -588,6 +588,73 @@ export interface LaboratoryQueueData {
   total_count: number;
 }
 
+// ==========================================
+// TYPES CATALOGUE LABORATOIRE (Phase 2C-5)
+// ==========================================
+
+export type TypeResultat = 'NUMERIQUE' | 'TEXTE' | 'CHOIX';
+export type ModePrescription = 'GLOBAL' | 'PERSONNALISE';
+
+export interface CatalogueExam {
+  id: string;
+  nom: string;
+  code: string;
+  description?: string | null;
+  actif: number | boolean;
+  ordre_affichage: number;
+  prix_global_usd?: number | null;
+  created_at?: string;
+  updated_at?: string;
+  parametres?: CatalogueParametre[];
+}
+
+export interface CatalogueParametre {
+  id: string;
+  examen_id: string;
+  nom: string;
+  code: string;
+  unite?: string | null;
+  type_resultat: TypeResultat;
+  obligatoire: number | boolean;
+  ordre_affichage: number;
+  actif: number | boolean;
+  prix_usd?: number | null;
+  created_at?: string;
+  updated_at?: string;
+  sous_parametres?: CatalogueSousParametre[];
+}
+
+export interface CatalogueSousParametre {
+  id: string;
+  parametre_id: string;
+  nom: string;
+  code: string;
+  unite?: string | null;
+  type_resultat: TypeResultat;
+  obligatoire: number | boolean;
+  ordre_affichage: number;
+  actif: number | boolean;
+  prix_usd?: number | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface LabOrderPrescription {
+  id?: string;
+  nom_analyse: string;
+  type_echantillon: EchantillonType;
+  instructions?: string;
+  ordre?: number;
+  // Champs nouveau catalogue
+  examen_id?: string | null;
+  mode?: ModePrescription;
+  parametre_id?: string | null;
+  sous_parametre_id?: string | null;
+  selection_details?: { parametre_id?: string; sous_parametre_id?: string }[] | null;
+  prix_usd?: number | null;
+  tarif_id?: string;
+}
+
 export interface AppNotification {
   id: string;
   user_id: string;

@@ -166,6 +166,10 @@ async function startServer() {
   app.post('/api/laboratory/orders/:id/claim', requireAuth, requireRole(['LABORATOIRE']), medicalCtrl.claimLabOrder);
   app.patch('/api/laboratory/orders/:id/assign', requireAuth, requireRole(['MÉDECIN', 'LABORATOIRE', 'ADMINISTRATEUR']), medicalCtrl.assignLabOrder);
 
+  // --- ROUTES API PHASE 2C-5 : CATALOGUE LABORATOIRE ---
+  app.get('/api/lab/catalogue/exams', requireAuth, medicalCtrl.getCatalogueExams);
+  app.get('/api/lab/catalogue/exams/:id/details', requireAuth, medicalCtrl.getCatalogueExamDetails);
+
   // --- ROUTES API PHASE 2C-4 : RÉSULTATS, VALIDATION, NOTIFICATIONS & AMENDEMENTS ---
   app.post('/api/laboratory/orders/:id/prelevement', requireAuth, requireRole(['LABORATOIRE']), medicalCtrl.recordLabPrelevement);
   app.post('/api/laboratory/orders/:id/results', requireAuth, requireRole(['LABORATOIRE']), medicalCtrl.saveLabResults);
