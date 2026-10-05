@@ -200,29 +200,43 @@ export const LabOrderManager: React.FC<LabOrderManagerProps> = ({
     setIsEditing(true);
   };
 
-  // Ajouter un examen pré-configuré (Quick Pick)
+  // Ajouter un examen pré-configuré (Quick Pick / Gagner du temps)
   const handleAddPresetExam = (preset: { nom: string; type: EchantillonType; instructions?: string }) => {
-    if (analyses.some(a => a.nom_analyse?.toLowerCase() === preset.nom.toLowerCase())) {
-      return; // Déjà présent
-    }
-    // Si la seule ligne existante est vide, on la remplace
-    if (analyses.length === 1 && !analyses[0].nom_analyse?.trim()) {
-      setAnalyses([{
-        nom_analyse: preset.nom,
-        type_echantillon: preset.type,
-        instructions: preset.instructions || '',
-        mode: 'GLOBAL',
-      }]);
-    } else {
-      setAnalyses(prev => [
-        ...prev,
-        {
+    // Essayer de trouver l'examen correspondant dans le catalogue réel
+    const catalogMatch = catalogueExams.find(
+      e => e.nom.toLowerCase() === preset.nom.toLowerCase() ||
+           e.code.toLowerCase() === preset.nom.split('(')[0].trim().toLowerCase()
+    );
+
+    const baseRow: AnalysisRowState = catalogMatch 
+      ? {
+          nom_analyse: catalogMatch.nom,
+          type_echantillon: preset.type,
+          instructions: preset.instructions || catalogMatch.description || '',
+          examen_id: catalogMatch.id,
+          mode: 'GLOBAL',
+          selection_details: null,
+          prix_usd: catalogMatch.prix_global_usd,
+        }
+      : {
           nom_analyse: preset.nom,
           type_echantillon: preset.type,
           instructions: preset.instructions || '',
+          examen_id: null,
           mode: 'GLOBAL',
-        }
-      ]);
+          selection_details: null,
+          prix_usd: null,
+        };
+
+    if (analyses.some(a => a.nom_analyse?.toLowerCase() === (catalogMatch?.nom || preset.nom).toLowerCase())) {
+      return; // Déjà présent
+    }
+
+    // Si la seule ligne existante est vide, on la remplace
+    if (analyses.length === 1 && !analyses[0].nom_analyse?.trim()) {
+      setAnalyses([baseRow]);
+    } else {
+      setAnalyses(prev => [...prev, baseRow]);
     }
   };
 
