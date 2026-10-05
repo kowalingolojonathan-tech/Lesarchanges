@@ -334,6 +334,7 @@ export interface DoctorQueueData {
     bulletins: number;
     arriveesJour: number;
     demandesLabo: number;
+    orientations: number;
   };
   quickAccessLists?: {
     patientsReçusAujourdhui: any[];
@@ -343,6 +344,7 @@ export interface DoctorQueueData {
     labResultsNonLus: any[];
     bulletinsDispo: any[];
     demandesLaboNonTraitees: any[];
+    orientationsEnAttente: any[];
   };
   queue: {
     attente: Visite[];

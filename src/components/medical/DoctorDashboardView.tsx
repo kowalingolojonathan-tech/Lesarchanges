@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Stethoscope, Users, Clock, CheckCircle2, AlertTriangle, X,
   HeartPulse, Activity, ChevronRight, Play, RefreshCw, FileText,
-  UserCheck, ShieldCheck, Calendar, ArrowRight, Eye, FileSearch, Microscope,
+  UserCheck, ShieldCheck, Calendar, ArrowRight, ArrowRightCircle, Eye, FileSearch, Microscope,
   Thermometer, Wind, Scale, Ruler, Heart, FlaskConical, Plus, UserPlus, Search, CreditCard
 } from 'lucide-react';
 import { DoctorQueueData, Visite, Consultation, Patient } from '../../types';
@@ -291,9 +291,9 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
   };
 
   // Compteurs dérivés pour les accès rapides — toujours à jour depuis data
-  const q = data?.quickAccess ?? { patients: 0, rdv: 0, rdvPlanifies: 0, ordonnances: 0, labResults: 0, bulletins: 0, arriveesJour: 0, demandesLabo: 0 };
+  const q = data?.quickAccess ?? { patients: 0, rdv: 0, rdvPlanifies: 0, ordonnances: 0, labResults: 0, bulletins: 0, arriveesJour: 0, demandesLabo: 0, orientations: 0 };
   const s = data?.stats ?? { attente: 0, en_cours: 0, a_finaliser: 0, terminees_jour: 0 };
-  const qa = data?.quickAccessLists ?? { patientsReçusAujourdhui: [], rdvAujourdhui: [], rdvPlanifiesFuturs: [], ordonnancesList: [], labResultsNonLus: [], bulletinsDispo: [], demandesLaboNonTraitees: [] };
+  const qa = data?.quickAccessLists ?? { patientsReçusAujourdhui: [], rdvAujourdhui: [], rdvPlanifiesFuturs: [], ordonnancesList: [], labResultsNonLus: [], bulletinsDispo: [], demandesLaboNonTraitees: [], orientationsEnAttente: [] };
 
   // Données utilisées par chaque modale — toujours cohérentes avec les compteurs
   // Si quickAccessLists est manquant (ancien serveur), les listes seront vides
@@ -313,6 +313,7 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
     },
     'demandes-labo': { count: q.demandesLabo, items: qa.demandesLaboNonTraitees || [] },
     finalisation: { count: s.a_finaliser, items: (data?.queue?.a_finaliser) || [] },
+    orientations: { count: q.orientations, items: qa.orientationsEnAttente || [] },
   };
 
   return (
@@ -471,6 +472,24 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
             </div>
             <span className="text-xs font-bold text-teal-900">Demandes Labo</span>
             <span className="text-[9px] text-teal-600 font-semibold">en cours</span>
+          </button>
+
+          {/* Orientations à suivre */}
+          <button
+            type="button"
+            onClick={() => setActiveModal('orientations')}
+            className="p-2.5 bg-indigo-50/60 hover:bg-indigo-100/80 border border-indigo-200 rounded-xl flex flex-col items-center justify-center text-center transition-all min-h-[56px] group relative"
+          >
+            <div className="relative">
+              <ArrowRightCircle className="w-5 h-5 text-indigo-700 mb-1" />
+              {(q?.orientations ?? 0) > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                  {q.orientations}
+                </span>
+              )}
+            </div>
+            <span className="text-xs font-bold text-indigo-900">Orientations</span>
+            <span className="text-[9px] text-indigo-600 font-semibold">à suivre</span>
           </button>
 
           {/* Finalisation */}
@@ -1476,6 +1495,74 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
                 </div>
               ) : (
                 <div className="py-8 text-center text-slate-400 text-sm">Aucune demande labo en cours</div>
+              )}
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* Modal: Orientations à suivre */}
+      {activeModal === 'orientations' && (() => {
+        const items = modalData.orientations.items;
+        return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setActiveModal(null)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[80vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between">
+              <h2 className="text-sm font-bold text-slate-900">Orientations à suivre ({modalData.orientations.count})</h2>
+              <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+            </div>
+            <div className="overflow-y-auto flex-1 p-4">
+              {items.length > 0 ? (
+                <div className="space-y-3">
+                  {items.map((o: any) => (
+                    <div key={o.id} className="p-3 bg-indigo-50 rounded-lg border border-indigo-200">
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-xs font-bold text-slate-800">{o.patient_nom} {o.patient_prenom}</span>
+                            <span className="text-[10px] text-slate-500 font-mono">{o.numero_dossier}</span>
+                          </div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                              o.type_orientation === 'INTERNE' 
+                                ? 'bg-blue-100 text-blue-800' 
+                                : 'bg-orange-100 text-orange-800'
+                            }`}>
+                              {o.type_orientation}
+                            </span>
+                            <span className="text-[10px] text-slate-600 font-medium">{o.specialite}</span>
+                          </div>
+                          <div className="text-[11px] text-slate-700 mt-1">
+                            {o.type_orientation === 'INTERNE' 
+                              ? `→ ${o.destinataire_nom || 'Médecin destinataire'}`
+                              : `→ ${o.etablissement_destinataire}`
+                            }
+                          </div>
+                          <div className="text-[10px] text-slate-500 mt-1 line-clamp-2">
+                            {o.motif_orientation}
+                          </div>
+                          {o.niveau_urgence && o.niveau_urgence !== 'ROUTINE' && (
+                            <div className="text-[10px] font-bold mt-1 text-red-600">
+                              ⚠ {o.niveau_urgence.replace(/_/g, ' ')}
+                            </div>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => {
+                            setActiveModal(null);
+                            setActiveConsultationId(o.consultation_id);
+                          }}
+                          className="ml-2 p-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-semibold transition-colors"
+                        >
+                          Ouvrir
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-8 text-center text-slate-400 text-sm">Aucune orientation en attente</div>
               )}
             </div>
           </div>
