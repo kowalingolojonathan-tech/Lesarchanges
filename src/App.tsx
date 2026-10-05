@@ -16,6 +16,7 @@ import { BillingCashierView } from './components/reception/BillingCashierView.js
 import { TriageVitalsModal } from './components/reception/TriageVitalsModal.js';
 import { AssignDoctorModal } from './components/reception/AssignDoctorModal.js';
 import { DoctorDashboardView } from './components/medical/DoctorDashboardView.js';
+import { DoctorReportsView } from './components/medical/DoctorReportsView.js';
 import { LaboratoryQueueView } from './components/medical/LaboratoryQueueView.js';
 import { MobileBottomNav } from './components/layout/MobileBottomNav.js';
 import { Visite } from './types/index.js';
@@ -142,20 +143,7 @@ const MainApp: React.FC = () => {
         );
 
       case 'doctor-reports':
-        return (
-          <Phase2Placeholder
-            moduleName="Rapports / Historique des Dossiers"
-            roleRequired="MÉDECIN"
-            description="Espace de recherche, de suivi et d'historique des consultations, dossiers, orientations et comptes-rendus."
-            workflowSteps={[
-              "Recherche par patient, date, type de dossier ou statut.",
-              "Consultation des dossiers finalisés et comptes-rendus externes.",
-              "Suivi des orientations en attente et dossiers nécessitant une action.",
-              "Accès rapide à l'activité médicale du médecin."
-            ]}
-            onBack={() => setCurrentTab('dashboard')}
-          />
-        );
+        return <DoctorReportsView onBack={() => setCurrentTab('dashboard')} />;
 
       default:
         return <RoleDashboard onNavigate={setCurrentTab} />;

@@ -4887,13 +4887,22 @@ export async function searchDoctorReports(req: AuthenticatedRequest, res: Respon
       return;
     }
 
-    const { q, patient_id, date_debut, date_fin, statut } = req.query;
+    const { q, patient_id, date_debut, date_fin, statut, nom_patient, numero_dossier } = req.query;
     const conditions: string[] = ['c.medecin_id = ?'];
     const params: any[] = [user.id];
 
     if (patient_id) {
       conditions.push('c.patient_id = ?');
       params.push(patient_id);
+    }
+    if (nom_patient && typeof nom_patient === 'string' && nom_patient.trim().length >= 2) {
+      conditions.push('(p.nom LIKE ? OR p.prenom LIKE ?)');
+      const like = `%${nom_patient.trim()}%`;
+      params.push(like, like);
+    }
+    if (numero_dossier && typeof numero_dossier === 'string' && numero_dossier.trim().length >= 2) {
+      conditions.push('p.numero_dossier LIKE ?');
+      params.push(`%${numero_dossier.trim()}%`);
     }
     if (date_debut) {
       conditions.push('date(c.date_consultation) >= ?');
