@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { queryAll, queryOne, execute, getDb, saveDb } from '../db/database.js';
+import { queryAll, query, queryOne, execute, getDb, saveDb } from '../db/database.js';
 import { AuthenticatedRequest } from '../middleware/auth.js';
 
 export interface PrestationInput {
@@ -1174,7 +1174,7 @@ export async function getLabOrdersToCollect(req: Request, res: Response): Promis
     const enriched = await Promise.all(
       orders.map(async (ord) => {
         const analyses = await queryAll<any>(
-          `SELECT id, nom_analyse, type_echantillon, instructions FROM analyses_laboratoire WHERE demande_laboratoire_id = ? ORDER BY ordre ASC`,
+          `SELECT * FROM analyses_laboratoire WHERE demande_laboratoire_id = ? ORDER BY ordre ASC`,
           [ord.id]
         );
 
@@ -1192,7 +1192,76 @@ export async function getLabOrdersToCollect(req: Request, res: Response): Promis
           statutPaiement = 'NON PAYÉ (Avec Dérogation)';
         }
 
-        const montantTotalUsd = finDetails ? finDetails.montant_total_usd : (parseFloat(ord.montant_total_facture) || analyses.length * 10);
+        let montantTotalUsd = finDetails ? finDetails.montant_total_usd : 0;
+        if (!finDetails) {
+          for (const a of analyses) {
+            const modeVal = a.mode === 'PERSONNALISE' ? 'PERSONNALISE' : 'GLOBAL';
+            let itemPrice = 0;
+            if (modeVal === 'GLOBAL' && a.examen_id) {
+              const examRow = await queryOne<any>(
+                `SELECT prix_global_usd FROM examens_laboratoire WHERE id = ? AND actif = 1`,
+                [a.examen_id]
+              );
+              if (examRow && examRow.prix_global_usd != null) {
+                itemPrice = parseFloat(examRow.prix_global_usd);
+              }
+              if (itemPrice === 0) {
+                const fb = await queryOne<any>(
+                  `SELECT prix_usd FROM tarifs WHERE ( categorie = 'EXAMEN_LABORATOIRE' OR categorie = 'LABORATOIRE' ) AND nom LIKE ? AND actif = 1 LIMIT 1`,
+                  [`%${a.nom_analyse}%`]
+                );
+                itemPrice = fb && fb.prix_usd ? parseFloat(fb.prix_usd) : 10;
+              }
+            } else if (modeVal === 'PERSONNALISE') {
+              const selectedIds: string[] = [];
+              if (a.parametre_id) selectedIds.push(a.parametre_id);
+              if (a.sous_parametre_id) selectedIds.push(a.sous_parametre_id);
+              if (a.selection_details) {
+                try {
+                  const parsed = JSON.parse(a.selection_details);
+                  if (Array.isArray(parsed)) {
+                    for (const sel of parsed) {
+                      if (sel.parametre_id) selectedIds.push(sel.parametre_id);
+                      if (sel.sous_parametre_id) selectedIds.push(sel.sous_parametre_id);
+                    }
+                  }
+                } catch {}
+              }
+              if (selectedIds.length > 0) {
+                const placeholders = selectedIds.map(() => '?').join(',');
+                const priceRows = await query<any>(
+                  `SELECT prix_usd FROM parametres_laboratoire WHERE id IN (${placeholders}) AND actif = 1`,
+                  selectedIds
+                );
+                const sousIds = selectedIds.filter((sid: string) => sid.startsWith('sp-'));
+                if (sousIds.length > 0) {
+                  const sousPlaceholders = sousIds.map(() => '?').join(',');
+                  const sousPriceRows = await query<any>(
+                    `SELECT prix_usd FROM sous_parametres_laboratoire WHERE id IN (${sousPlaceholders}) AND actif = 1`,
+                    sousIds
+                  );
+                  priceRows.push(...sousPriceRows);
+                }
+                itemPrice = priceRows.reduce((sum: number, r: any) => sum + (parseFloat(r.prix_usd) || 0), 0);
+              }
+              if (itemPrice === 0) {
+                const fb = await queryOne<any>(
+                  `SELECT prix_usd FROM tarifs WHERE ( categorie = 'EXAMEN_LABORATOIRE' OR categorie = 'LABORATOIRE' ) AND nom LIKE ? AND actif = 1 LIMIT 1`,
+                  [`%${a.nom_analyse}%`]
+                );
+                itemPrice = fb && fb.prix_usd ? parseFloat(fb.prix_usd) : 10;
+              }
+            } else {
+              const fb = await queryOne<any>(
+                `SELECT prix_usd FROM tarifs WHERE ( categorie = 'EXAMEN_LABORATOIRE' OR categorie = 'LABORATOIRE' ) AND nom LIKE ? AND actif = 1 LIMIT 1`,
+                [`%${a.nom_analyse}%`]
+              );
+              itemPrice = fb && fb.prix_usd ? parseFloat(fb.prix_usd) : 10;
+            }
+            montantTotalUsd += itemPrice;
+          }
+          if (analyses.length === 0) montantTotalUsd = 10;
+        }
         const montantTotalFc = Math.round(montantTotalUsd * tauxActuel);
         const soldeUsd = finDetails ? finDetails.solde_usd : (statutPaiement === 'PAYÉ' ? 0 : montantTotalUsd);
         const soldeFc = Math.round(soldeUsd * tauxActuel);
@@ -1281,12 +1350,78 @@ export async function collectLabOrderPayment(req: Request, res: Response): Promi
         `SELECT * FROM analyses_laboratoire WHERE demande_laboratoire_id = ?`,
         [id]
       );
-      const billedItems = analyses.map((a: any) => ({
-        description: `Examen Labo: ${a.nom_analyse}`,
-        categorie: 'EXAMEN_LABORATOIRE',
-        quantite: 1,
-        prix_unitaire: 10
-      }));
+      const billedItems: any[] = [];
+      for (const a of analyses) {
+        const modeVal = a.mode === 'PERSONNALISE' ? 'PERSONNALISE' : 'GLOBAL';
+        let itemPrice = 0;
+        if (modeVal === 'GLOBAL' && a.examen_id) {
+          const examRow = await queryOne<any>(
+            `SELECT prix_global_usd FROM examens_laboratoire WHERE id = ? AND actif = 1`,
+            [a.examen_id]
+          );
+          if (examRow && examRow.prix_global_usd != null) {
+            itemPrice = parseFloat(examRow.prix_global_usd);
+          }
+          if (itemPrice === 0) {
+            const fallback = await queryOne<any>(
+              `SELECT prix_usd FROM tarifs WHERE ( categorie = 'EXAMEN_LABORATOIRE' OR categorie = 'LABORATOIRE' ) AND nom LIKE ? AND actif = 1 LIMIT 1`,
+              [`%${a.nom_analyse}%`]
+            );
+            itemPrice = fallback && fallback.prix_usd ? parseFloat(fallback.prix_usd) : 10;
+          }
+        } else if (modeVal === 'PERSONNALISE') {
+          const selectedIds: string[] = [];
+          if (a.parametre_id) selectedIds.push(a.parametre_id);
+          if (a.sous_parametre_id) selectedIds.push(a.sous_parametre_id);
+          if (a.selection_details) {
+            try {
+              const parsed = JSON.parse(a.selection_details);
+              if (Array.isArray(parsed)) {
+                for (const sel of parsed) {
+                  if (sel.parametre_id) selectedIds.push(sel.parametre_id);
+                  if (sel.sous_parametre_id) selectedIds.push(sel.sous_parametre_id);
+                }
+              }
+            } catch {}
+          }
+          if (selectedIds.length > 0) {
+            const placeholders = selectedIds.map(() => '?').join(',');
+            const priceRows = await query<any>(
+              `SELECT prix_usd FROM parametres_laboratoire WHERE id IN (${placeholders}) AND actif = 1`,
+              selectedIds
+            );
+            const sousIds = selectedIds.filter((sid: string) => sid.startsWith('sp-'));
+            if (sousIds.length > 0) {
+              const sousPlaceholders = sousIds.map(() => '?').join(',');
+              const sousPriceRows = await query<any>(
+                `SELECT prix_usd FROM sous_parametres_laboratoire WHERE id IN (${sousPlaceholders}) AND actif = 1`,
+                sousIds
+              );
+              priceRows.push(...sousPriceRows);
+            }
+            itemPrice = priceRows.reduce((sum: number, r: any) => sum + (parseFloat(r.prix_usd) || 0), 0);
+          }
+          if (itemPrice === 0) {
+            const fallback = await queryOne<any>(
+              `SELECT prix_usd FROM tarifs WHERE ( categorie = 'EXAMEN_LABORATOIRE' OR categorie = 'LABORATOIRE' ) AND nom LIKE ? AND actif = 1 LIMIT 1`,
+              [`%${a.nom_analyse}%`]
+            );
+            itemPrice = fallback && fallback.prix_usd ? parseFloat(fallback.prix_usd) : 10;
+          }
+        } else {
+          const fallback = await queryOne<any>(
+            `SELECT prix_usd FROM tarifs WHERE ( categorie = 'EXAMEN_LABORATOIRE' OR categorie = 'LABORATOIRE' ) AND nom LIKE ? AND actif = 1 LIMIT 1`,
+            [`%${a.nom_analyse}%`]
+          );
+          itemPrice = fallback && fallback.prix_usd ? parseFloat(fallback.prix_usd) : 10;
+        }
+        billedItems.push({
+          description: `Examen Labo: ${a.nom_analyse} (${modeVal})`,
+          categorie: 'EXAMEN_LABORATOIRE',
+          quantite: 1,
+          prix_unitaire: itemPrice
+        });
+      }
 
       const factureResult = await createLinkedFactureCore({
         patient_id: labOrder.patient_id,

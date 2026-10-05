@@ -1525,6 +1525,149 @@ export async function runMigrations(): Promise<void> {
     console.error('Erreur lors de la migration type_orientation:', err);
   }
 
+  // ------------------------------------------------------------------------
+  // PHASE 2C-5 : CATALOGUE LABORATOIRE — EXAMEN → PARAMÈTRE → SOUS-PARAMÈTRE
+  // ------------------------------------------------------------------------
+  try {
+    // 1. Table des Examens de laboratoire (catalogue de référence)
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS examens_laboratoire (
+        id TEXT PRIMARY KEY,
+        nom TEXT NOT NULL,
+        code TEXT UNIQUE NOT NULL,
+        description TEXT,
+        actif INTEGER NOT NULL DEFAULT 1 CHECK(actif IN (0, 1)),
+        ordre_affichage INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_examens_code ON examens_laboratoire(code);
+      CREATE INDEX IF NOT EXISTS idx_examens_actif ON examens_laboratoire(actif);
+    `);
+
+    // 2. Table des Paramètres (dépend de examens_laboratoire)
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS parametres_laboratoire (
+        id TEXT PRIMARY KEY,
+        examen_id TEXT NOT NULL,
+        nom TEXT NOT NULL,
+        code TEXT UNIQUE NOT NULL,
+        unite TEXT,
+        type_resultat TEXT NOT NULL CHECK(type_resultat IN ('NUMERIQUE', 'TEXTE', 'CHOIX')),
+        obligatoire INTEGER NOT NULL DEFAULT 0 CHECK(obligatoire IN (0, 1)),
+        ordre_affichage INTEGER NOT NULL DEFAULT 0,
+        actif INTEGER NOT NULL DEFAULT 1 CHECK(actif IN (0, 1)),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (examen_id) REFERENCES examens_laboratoire(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_parametres_examen ON parametres_laboratoire(examen_id);
+      CREATE INDEX IF NOT EXISTS idx_parametres_code ON parametres_laboratoire(code);
+      CREATE INDEX IF NOT EXISTS idx_parametres_actif ON parametres_laboratoire(actif);
+    `);
+
+    // 3. Table des Sous-Paramètres (dépend de parametres_laboratoire)
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS sous_parametres_laboratoire (
+        id TEXT PRIMARY KEY,
+        parametre_id TEXT NOT NULL,
+        nom TEXT NOT NULL,
+        code TEXT UNIQUE NOT NULL,
+        unite TEXT,
+        type_resultat TEXT NOT NULL CHECK(type_resultat IN ('NUMERIQUE', 'TEXTE', 'CHOIX')),
+        obligatoire INTEGER NOT NULL DEFAULT 0 CHECK(obligatoire IN (0, 1)),
+        ordre_affichage INTEGER NOT NULL DEFAULT 0,
+        actif INTEGER NOT NULL DEFAULT 1 CHECK(actif IN (0, 1)),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (parametre_id) REFERENCES parametres_laboratoire(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_sous_parametres_parametre ON sous_parametres_laboratoire(parametre_id);
+      CREATE INDEX IF NOT EXISTS idx_sous_parametres_code ON sous_parametres_laboratoire(code);
+      CREATE INDEX IF NOT EXISTS idx_sous_parametres_actif ON sous_parametres_laboratoire(actif);
+    `);
+
+    // 4. Table des Valeurs de référence (structurée pour future gestion sexe/âge)
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS valeurs_reference_laboratoire (
+        id TEXT PRIMARY KEY,
+        parametre_id TEXT NOT NULL,
+        sous_parametre_id TEXT,
+        reference_type TEXT NOT NULL DEFAULT 'GENERAL' CHECK(reference_type IN ('GENERAL', 'SEXE', 'AGE', 'SEXE_ET_AGE')),
+        valeur_min REAL,
+        valeur_max REAL,
+        valeur_texte TEXT,
+        unite TEXT,
+        age_min INTEGER,
+        age_max INTEGER,
+        masculin INTEGER NOT NULL DEFAULT 0 CHECK(masculin IN (0, 1)),
+        feminin INTEGER NOT NULL DEFAULT 0 CHECK(feminin IN (0, 1)),
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (parametre_id) REFERENCES parametres_laboratoire(id) ON DELETE CASCADE,
+        FOREIGN KEY (sous_parametre_id) REFERENCES sous_parametres_laboratoire(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_ref_parametre ON valeurs_reference_laboratoire(parametre_id);
+      CREATE INDEX IF NOT EXISTS idx_ref_sous_parametre ON valeurs_reference_laboratoire(sous_parametre_id);
+      CREATE INDEX IF NOT EXISTS idx_ref_type ON valeurs_reference_laboratoire(reference_type);
+    `);
+
+    // 5. Ajout des colonnes de tarification dans les tables du catalogue
+    const examColsRes = db.exec("PRAGMA table_info(examens_laboratoire);");
+    if (examColsRes.length > 0 && examColsRes[0].values.length > 0) {
+      const examCols = examColsRes[0].values.map((v: any[]) => String(v[1]).toUpperCase());
+      if (!examCols.includes('PRIX_GLOBAL_USD')) {
+        db.exec("ALTER TABLE examens_laboratoire ADD COLUMN prix_global_usd REAL;");
+      }
+    }
+    const parColsRes = db.exec("PRAGMA table_info(parametres_laboratoire);");
+    if (parColsRes.length > 0 && parColsRes[0].values.length > 0) {
+      const parCols = parColsRes[0].values.map((v: any[]) => String(v[1]).toUpperCase());
+      if (!parCols.includes('PRIX_USD')) {
+        db.exec("ALTER TABLE parametres_laboratoire ADD COLUMN prix_usd REAL;");
+      }
+    }
+    const spColsRes = db.exec("PRAGMA table_info(sous_parametres_laboratoire);");
+    if (spColsRes.length > 0 && spColsRes[0].values.length > 0) {
+      const spCols = spColsRes[0].values.map((v: any[]) => String(v[1]).toUpperCase());
+      if (!spCols.includes('PRIX_USD')) {
+        db.exec("ALTER TABLE sous_parametres_laboratoire ADD COLUMN prix_usd REAL;");
+      }
+    }
+
+    // 6. Enrichissement de la table analyses_laboratoire avec mode et prix
+    const aColsRes = db.exec("PRAGMA table_info(analyses_laboratoire);");
+    if (aColsRes.length > 0 && aColsRes[0].values.length > 0) {
+      const aCols = aColsRes[0].values.map((v: any[]) => String(v[1]).toUpperCase());
+      if (!aCols.includes('EXAMEN_ID')) {
+        db.exec("ALTER TABLE analyses_laboratoire ADD COLUMN examen_id TEXT REFERENCES examens_laboratoire(id);");
+      }
+      if (!aCols.includes('PARAMETRE_ID')) {
+        db.exec("ALTER TABLE analyses_laboratoire ADD COLUMN parametre_id TEXT REFERENCES parametres_laboratoire(id);");
+      }
+      if (!aCols.includes('SOUS_PARAMETRE_ID')) {
+        db.exec("ALTER TABLE analyses_laboratoire ADD COLUMN sous_parametre_id TEXT REFERENCES sous_parametres_laboratoire(id);");
+      }
+      if (!aCols.includes('MODE')) {
+        db.exec("ALTER TABLE analyses_laboratoire ADD COLUMN mode TEXT NOT NULL DEFAULT 'GLOBAL' CHECK(mode IN ('GLOBAL', 'PERSONNALISE'));");
+      }
+      if (!aCols.includes('PRIX_USD')) {
+        db.exec("ALTER TABLE analyses_laboratoire ADD COLUMN prix_usd REAL;");
+      }
+      if (!aCols.includes('SELECTION_DETAILS')) {
+        db.exec("ALTER TABLE analyses_laboratoire ADD COLUMN selection_details TEXT;");
+      }
+    }
+
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_analyses_examen ON analyses_laboratoire(examen_id);`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_analyses_parametre ON analyses_laboratoire(parametre_id);`);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_analyses_sous_parametre ON analyses_laboratoire(sous_parametre_id);`);
+
+  } catch (err) {
+    console.error('Erreur lors de la migration catalogue laboratoire (Phase 2C-5):', err);
+  }
+
   db.exec('PRAGMA foreign_keys = ON;');
   saveDb();
 }

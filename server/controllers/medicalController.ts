@@ -2501,11 +2501,17 @@ export async function createLabOrder(req: AuthenticatedRequest, res: Response): 
       for (let i = 0; i < analysesArray.length; i++) {
         const it = analysesArray[i];
         const analysisId = `als-${crypto.randomUUID().substring(0, 12)}`;
+        const modeVal = it.mode === 'PERSONNALISE' ? 'PERSONNALISE' : 'GLOBAL';
+        const examId = it.examen_id || null;
+        const parametreId = it.parametre_id || null;
+        const sousParametreId = it.sous_parametre_id || null;
+        const selectionDetails = it.selection_details ? JSON.stringify(it.selection_details) : null;
         await execute(
           `INSERT INTO analyses_laboratoire (
             id, demande_laboratoire_id, nom_analyse, type_echantillon, statut,
-            instructions, ordre, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            instructions, ordre, mode, examen_id, parametre_id, sous_parametre_id,
+            selection_details, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             analysisId,
             orderId,
@@ -2514,6 +2520,11 @@ export async function createLabOrder(req: AuthenticatedRequest, res: Response): 
             targetStatus,
             it.instructions?.trim() || null,
             it.ordre !== undefined ? Number(it.ordre) : i,
+            modeVal,
+            examId,
+            parametreId,
+            sousParametreId,
+            selectionDetails,
             now,
             now
           ]
@@ -2564,25 +2575,90 @@ export async function createLabOrder(req: AuthenticatedRequest, res: Response): 
       });
     }
 
-    // Facturation automatique liée des examens de laboratoire
+// Facturation automatique liée des examens de laboratoire (mode GLOBAL / PERSONNALISE)
     let totalAmountUsd = 0;
     const billedItems: any[] = [];
     const exchangeRateRow = await queryOne<any>("SELECT value FROM clinic_settings WHERE key = 'EXCHANGE_RATE_USD_FC' OR key = 'EXCHANGE_RATE_USD_CDF' LIMIT 1");
     const officialRate = exchangeRateRow && exchangeRateRow.value ? parseFloat(exchangeRateRow.value) : 2850;
 
     for (const an of analysesArray) {
-      const tarifRow = await queryOne<any>(
-        `SELECT * FROM tarifs WHERE (categorie = 'EXAMEN_LABORATOIRE' OR categorie = 'LABORATOIRE') AND (nom LIKE ? OR id = ?) AND actif = 1 LIMIT 1`,
-        [`%${an.nom_analyse}%`, an.tarif_id || '']
-      ) || await queryOne<any>(
-        `SELECT * FROM tarifs WHERE categorie = 'EXAMEN_LABORATOIRE' AND actif = 1 LIMIT 1`
-      );
+      const modeVal = an.mode === 'PERSONNALISE' ? 'PERSONNALISE' : 'GLOBAL';
+      let itemPrice = 0;
+      let tarifRow: any = null;
 
-      const itemPrice = tarifRow && tarifRow.prix_usd ? parseFloat(tarifRow.prix_usd) : 10;
+      if (modeVal === 'GLOBAL' && an.examen_id) {
+        // MODE GLOBAL : utiliser le prix global de l'examen
+        tarifRow = await queryOne<any>(
+          `SELECT * FROM examens_laboratoire WHERE id = ? AND actif = 1`,
+          [an.examen_id]
+        );
+        if (tarifRow && tarifRow.prix_global_usd != null) {
+          itemPrice = parseFloat(tarifRow.prix_global_usd);
+        }
+        if (itemPrice === 0) {
+          const fallbackTarif = await queryOne<any>(
+            `SELECT * FROM tarifs WHERE ( categorie = 'EXAMEN_LABORATOIRE' OR categorie = 'LABORATOIRE' ) AND (nom LIKE ? OR id = ?) AND actif = 1 LIMIT 1`,
+            [`%${an.nom_analyse}%`, an.tarif_id || '']
+          ) || await queryOne<any>(
+            `SELECT * FROM tarifs WHERE categorie = 'EXAMEN_LABORATOIRE' AND actif = 1 LIMIT 1`
+          );
+          itemPrice = fallbackTarif && fallbackTarif.prix_usd ? parseFloat(fallbackTarif.prix_usd) : 10;
+          tarifRow = fallbackTarif;
+        }
+      } else if (modeVal === 'PERSONNALISE') {
+        // MODE PERSONNALISE : somme des prix des paramètres/sous-paramètres sélectionnés
+        const selectedIds: string[] = [];
+        if (an.parametre_id) selectedIds.push(an.parametre_id);
+        if (an.sous_parametre_id) selectedIds.push(an.sous_parametre_id);
+        if (an.selection_details && Array.isArray(an.selection_details)) {
+          for (const sel of an.selection_details) {
+            if (sel.parametre_id) selectedIds.push(sel.parametre_id);
+            if (sel.sous_parametre_id) selectedIds.push(sel.sous_parametre_id);
+          }
+        }
+        if (selectedIds.length > 0) {
+          const placeholders = selectedIds.map(() => '?').join(',');
+          const priceRows = await query<any>(
+            `SELECT prix_usd FROM parametres_laboratoire WHERE id IN (${placeholders}) AND actif = 1`,
+            selectedIds
+          );
+          const sousIds = selectedIds.filter(id => id.startsWith('sp-'));
+          if (sousIds.length > 0) {
+            const sousPlaceholders = sousIds.map(() => '?').join(',');
+            const sousPriceRows = await query<any>(
+              `SELECT prix_usd FROM sous_parametres_laboratoire WHERE id IN (${sousPlaceholders}) AND actif = 1`,
+              sousIds
+            );
+            priceRows.push(...sousPriceRows);
+          }
+          itemPrice = priceRows.reduce((sum: number, r: any) => sum + (parseFloat(r.prix_usd) || 0), 0);
+        }
+        if (itemPrice === 0) {
+          const fallbackTarif = await queryOne<any>(
+            `SELECT * FROM tarifs WHERE ( categorie = 'EXAMEN_LABORATOIRE' OR categorie = 'LABORATOIRE' ) AND (nom LIKE ? OR id = ?) AND actif = 1 LIMIT 1`,
+            [`%${an.nom_analyse}%`, an.tarif_id || '']
+          ) || await queryOne<any>(
+            `SELECT * FROM tarifs WHERE categorie = 'EXAMEN_LABORATOIRE' AND actif = 1 LIMIT 1`
+          );
+          itemPrice = fallbackTarif && fallbackTarif.prix_usd ? parseFloat(fallbackTarif.prix_usd) : 10;
+          tarifRow = fallbackTarif;
+        }
+      } else {
+        // Fallback rétrocompatibilité : recherche dans tarifs
+        const fallbackTarif = await queryOne<any>(
+          `SELECT * FROM tarifs WHERE ( categorie = 'EXAMEN_LABORATOIRE' OR categorie = 'LABORATOIRE' ) AND (nom LIKE ? OR id = ?) AND actif = 1 LIMIT 1`,
+          [`%${an.nom_analyse}%`, an.tarif_id || '']
+        ) || await queryOne<any>(
+          `SELECT * FROM tarifs WHERE categorie = 'EXAMEN_LABORATOIRE' AND actif = 1 LIMIT 1`
+        );
+        itemPrice = fallbackTarif && fallbackTarif.prix_usd ? parseFloat(fallbackTarif.prix_usd) : 10;
+        tarifRow = fallbackTarif;
+      }
+
       totalAmountUsd += itemPrice;
       billedItems.push({
         tarif_id: tarifRow?.id || null,
-        description: `Examen: ${an.nom_analyse}`,
+        description: `Examen: ${an.nom_analyse} (${modeVal})`,
         categorie: 'EXAMEN_LABORATOIRE',
         quantite: 1,
         prix_unitaire: itemPrice
@@ -3033,11 +3109,17 @@ export async function updateLabOrder(req: AuthenticatedRequest, res: Response): 
         for (let i = 0; i < analyses.length; i++) {
           const it = analyses[i];
           const analysisId = `als-${crypto.randomUUID().substring(0, 12)}`;
+          const modeVal = it.mode === 'PERSONNALISE' ? 'PERSONNALISE' : 'GLOBAL';
+          const examId = it.examen_id || null;
+          const parametreId = it.parametre_id || null;
+          const sousParametreId = it.sous_parametre_id || null;
+          const selectionDetails = it.selection_details ? JSON.stringify(it.selection_details) : null;
           await execute(
             `INSERT INTO analyses_laboratoire (
               id, demande_laboratoire_id, nom_analyse, type_echantillon, statut,
-              instructions, ordre, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              instructions, ordre, mode, examen_id, parametre_id, sous_parametre_id,
+              selection_details, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               analysisId,
               id,
@@ -3046,6 +3128,11 @@ export async function updateLabOrder(req: AuthenticatedRequest, res: Response): 
               targetStatus,
               it.instructions?.trim() || null,
               it.ordre !== undefined ? Number(it.ordre) : i,
+              modeVal,
+              examId,
+              parametreId,
+              sousParametreId,
+              selectionDetails,
               now,
               now
             ]
