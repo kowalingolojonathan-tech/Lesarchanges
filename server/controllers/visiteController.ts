@@ -862,7 +862,8 @@ export async function createInterpretationVisite(req: AuthenticatedRequest, res:
       devise = 'USD',
       mode_paiement = 'ESPECES',
       reference_transaction,
-      motif_non_paiement
+      motif_non_paiement,
+      orientation_id
     } = req.body;
 
     if (!patient_id) {
@@ -948,7 +949,9 @@ export async function createInterpretationVisite(req: AuthenticatedRequest, res:
         medecin_id: targetMedecinId,
         medecin_nom: targetMedecinNom,
         consultation_origine_id,
-        elements: elements_a_interpreter
+        elements: elements_a_interpreter,
+        orientation_id: orientation_id || null,
+        orientation_retour: !!orientation_id
       }),
       ipAddress: req.ip || req.socket?.remoteAddress || '127.0.0.1'
     });
@@ -1016,6 +1019,23 @@ export async function createInterpretationVisite(req: AuthenticatedRequest, res:
 
     saveDb();
 
+    // Lier l'orientation externe sélectionnée à cette visite de retour
+    let orientationInfo: any = null;
+    if (orientation_id) {
+      const orient = await queryOne<any>(
+        `SELECT * FROM orientations_specialistes WHERE id = ?`,
+        [orientation_id]
+      );
+      if (orient) {
+        await execute(
+          `UPDATE orientations_specialistes SET visite_retour_id = ?, statut = 'COMPTE_RENDU_RECU'
+           WHERE id = ?`,
+          [visiteId, orientation_id]
+        );
+        orientationInfo = orient;
+      }
+    }
+
     const createdVisite = await queryOne(
       `SELECT v.*, p.numero_dossier, p.nom as patient_nom, p.prenom as patient_prenom,
               u.nom_complet as medecin_nom,
@@ -1033,12 +1053,40 @@ export async function createInterpretationVisite(req: AuthenticatedRequest, res:
       facture: linkedFacture,
       paiement: paiementInfo,
       recu: paiementInfo?.numero_recu || null,
-      message: targetMedecinId 
+      orientation: orientationInfo,
+      message: targetMedecinId
         ? `Visite créée, encaissée et orientée vers le Dr. ${targetMedecinNom}.`
         : 'Visite d\'interprétation créée et encaissée avec succès.'
     });
-  } catch (error: any) {
+   } catch (error: any) {
     console.error('Erreur création visite interprétation:', error);
     res.status(500).json({ error: 'Erreur interne lors de la création de la visite d\'interprétation.' });
+  }
+}
+
+/**
+ * Récupérer les orientations externes d'un patient éligibles à un retour
+ * GET /api/medical/patients/:id/orientations-pending
+ */
+export async function getPendingOrientationsForPatient(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const { id: patientId } = req.params;
+    const user = req.user;
+    if (!patientId || !user) {
+      res.status(400).json({ error: 'Paramètre patient_id requis.' });
+      return;
+    }
+    // Statuts éligibles : ENVOYE (attend CR) ou COMPTE_RENDU_RECU (CR reçu, en attente interprétation)
+    const orientations = await query<any>(
+      `SELECT * FROM orientations_specialistes
+       WHERE patient_id = ? AND type_orientation = 'EXTERNE'
+         AND statut IN ('ENVOYE', 'COMPTE_RENDU_RECU')
+       ORDER BY date_orientation DESC`,
+      [patientId]
+    );
+    res.json({ success: true, orientations });
+  } catch (error: any) {
+    console.error('Erreur chargement orientations patient pending:', error);
+    res.status(500).json({ error: 'Erreur interne.' });
   }
 }

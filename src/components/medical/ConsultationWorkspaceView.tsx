@@ -4,7 +4,7 @@ import {
   HeartPulse, Heart, User, ShieldAlert, History, Plus, X, Stethoscope, 
   FileText, Activity, AlertTriangle, Clock, Pill, FlaskConical, ExternalLink,
   FileSearch, Microscope, Scale, Thermometer, ShieldCheck, CheckSquare, Sparkles,
-  Wind, Ruler, Lightbulb, HelpCircle, ArrowRight, Check, Trash2, Tag, AlertOctagon
+  Wind, Ruler, Lightbulb, HelpCircle, ArrowRight, Check, Trash2, Tag, AlertOctagon, Printer
 } from 'lucide-react';
 import { 
   Consultation, Patient, SignesVitaux, Visite,
@@ -72,6 +72,23 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
   // Allergies — saisie & modification réservées au MÉDECIN
   const [allergies, setAllergies] = useState<string>('');
   const [editingAllergies, setEditingAllergies] = useState<boolean>(false);
+
+  // Orientations — state & modale
+  const [orientations, setOrientations] = useState<any[]>([]);
+  const [showOrientationModal, setShowOrientationModal] = useState<boolean>(false);
+  const [orientationLoading, setOrientationLoading] = useState<boolean>(false);
+  const [previewOrientation, setPreviewOrientation] = useState<any | null>(null);
+  const [orientationType, setOrientationType] = useState<'EXTERNE' | 'INTERNE'>('EXTERNE');
+  const [doctors, setDoctors] = useState<any[]>([]);
+  const [orientationForm, setOrientationForm] = useState({
+    specialite: '',
+    etablissement_destinataire: '',
+    praticien_destinataire: '',
+    medecin_destinataire_id: '',
+    motif_orientation: '',
+    donnees_cliniques: '',
+    niveau_urgence: 'ROUTINE' as 'ROUTINE' | 'URGENT' | 'TRES_URGENT'
+  });
 
   const fetchConsultation = async (preserveFormFields = false) => {
     setLoading(true);
@@ -204,6 +221,38 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
   useEffect(() => {
     fetchConsultation();
   }, [consultationId]);
+
+  const fetchOrientations = async () => {
+    try {
+      const res = await apiFetch(`/api/medical/consultations/${consultationId}/orientations`);
+      if (res.ok) {
+        const data = await res.json();
+        setOrientations(data.orientations || []);
+      }
+    } catch (err) {
+      console.error('Erreur chargement orientations:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchOrientations();
+  }, [consultationId]);
+
+  const fetchDoctors = async () => {
+    try {
+      const res = await apiFetch('/api/doctors');
+      if (res.ok) {
+        const data = await res.json();
+        setDoctors(data.doctors || []);
+      }
+    } catch (err) {
+      console.error('Erreur chargement médecins:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchDoctors();
+  }, []);
 
   // --- SAISIE & MODIFICATION DES ALLERGIES (réservée au MÉDECIN) ---
   const handleSaveAllergies = async () => {
@@ -1307,6 +1356,27 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
                 ))}
               </div>
             )}
+
+            {/* Badge "Retour d'orientation externe" si applicable */}
+            {(() => {
+              const externalOrientations = orientations.filter(
+                (o: any) => o.type_orientation === 'EXTERNE' && (o.visite_retour_id || o.consultation_id === consultation.id)
+              );
+              if (externalOrientations.length === 0) return null;
+              return (
+                <div className="flex flex-wrap gap-1 mt-2">
+                  {externalOrientations.map((o: any) => (
+                    <span
+                      key={o.id}
+                      className="bg-amber-200/80 text-amber-900 border border-amber-400 text-[11px] font-bold px-2.5 py-0.5 rounded-md flex items-center space-x-1"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      <span>Retour d'orientation : {o.etablissement_destinataire}</span>
+                    </span>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
@@ -1367,6 +1437,83 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
                 </div>
               )}
             </div>
+
+            {/* Colonne : Retour d'orientation externe (si applicable) */}
+            {(() => {
+              const externalOrientations = orientations.filter(
+                (o: any) => o.type_orientation === 'EXTERNE' && (o.visite_retour_id || o.consultation_id === consultation.id)
+              );
+              if (externalOrientations.length === 0) return null;
+              return (
+                <div className="lg:col-span-12 bg-amber-50/40 border-2 border-amber-300 rounded-xl p-4 space-y-3 text-xs shadow-xs">
+                  <div className="flex items-center space-x-2 text-amber-900">
+                    <ExternalLink className="w-5 h-5 text-amber-700" />
+                    <h4 className="font-bold uppercase tracking-wider text-[11px]">
+                      Retour d'Orientation Externe — Informations Originales
+                    </h4>
+                  </div>
+
+                  {externalOrientations.map((o: any) => (
+                    <div key={o.id} className="bg-white p-3.5 rounded-lg border border-amber-200 space-y-2">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <span className="font-bold text-slate-700 block text-[10px] uppercase tracking-wider">Établissement</span>
+                          <p className="font-semibold text-slate-900 mt-0.5">{o.etablissement_destinataire}</p>
+                        </div>
+                        <div>
+                          <span className="font-bold text-slate-700 block text-[10px] uppercase tracking-wider">Spécialité</span>
+                          <p className="font-semibold text-slate-900 mt-0.5">{o.specialite}</p>
+                        </div>
+                        {o.praticien_destinataire && (
+                          <div className="col-span-2">
+                            <span className="font-bold text-slate-700 block text-[10px] uppercase tracking-wider">Praticien destinataire</span>
+                            <p className="font-semibold text-slate-900 mt-0.5">Dr. {o.praticien_destinataire}</p>
+                          </div>
+                        )}
+                        <div>
+                          <span className="font-bold text-slate-700 block text-[10px] uppercase tracking-wider">N° Orientation</span>
+                          <p className="font-mono text-slate-900 mt-0.5">{o.numero_orientation}</p>
+                        </div>
+                        <div>
+                          <span className="font-bold text-slate-700 block text-[10px] uppercase tracking-wider">Niveau d'urgence</span>
+                          <p className={`font-bold mt-0.5 ${
+                            o.niveau_urgence === 'TRES_URGENT' ? 'text-rose-700' :
+                            o.niveau_urgence === 'URGENT' ? 'text-amber-700' : 'text-slate-700'
+                          }`}>
+                            {o.niveau_urgence === 'TRES_URGENT' ? 'TRÈS URGENT' :
+                             o.niveau_urgence === 'URGENT' ? 'URGENT' : 'ROUTINE'}
+                          </p>
+                        </div>
+                        <div>
+                          <span className="font-bold text-slate-700 block text-[10px] uppercase tracking-wider">Statut</span>
+                          <p className="font-semibold text-slate-900 mt-0.5">
+                            {o.statut === 'ENVOYE' ? 'Envoyée' :
+                             o.statut === 'COMPTE_RENDU_RECU' ? 'Compte-rendu reçu' :
+                             o.statut || 'En cours'}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="pt-2 border-t border-amber-200">
+                        <span className="font-bold text-slate-700 block text-[10px] uppercase tracking-wider">Motif de l'orientation</span>
+                        <p className="text-slate-800 mt-0.5 leading-relaxed">{o.motif_orientation}</p>
+                      </div>
+                      {o.donnees_cliniques && (
+                        <div className="pt-1.5">
+                          <span className="font-bold text-slate-700 block text-[10px] uppercase tracking-wider">Données cliniques</span>
+                          <p className="text-slate-700 mt-0.5 italic leading-relaxed">{o.donnees_cliniques}</p>
+                        </div>
+                      )}
+                      <div className="pt-1.5 flex items-center justify-between text-[10px] text-slate-500">
+                        <span>Créée le {new Date(o.date_orientation).toLocaleDateString('fr-FR', {
+                          day: '2-digit', month: 'long', year: 'numeric'
+                        })}</span>
+                        <span>N° {o.numero_orientation}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
 
             {/* Colonne Droite : Résultats des Analyses du Laboratoire (7/12) */}
             <div className="lg:col-span-7 bg-white p-4 rounded-xl border border-purple-200 space-y-3 text-xs shadow-xs">
@@ -2036,48 +2183,532 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
           />
         </div>
 
-        {/* SECTION DÉDIÉE : PRESCRIPTIONS MÉDICALES & ORDONNANCES (PHASE 2C-1) */}
-        <div id="sec_prescriptions" className="pt-2">
-          <PrescriptionManager
-            consultationId={consultation.id}
-            patientId={consultation.patient_id}
-            visiteId={consultation.visite_id}
-            isConsultationFinalized={isFinalized}
-            isAmendmentMode={isAmendmentMode}
-            amendementMotif={amendementMotif}
-            initialPrescriptions={consultation.prescriptions || []}
-            onPrescriptionsUpdated={() => fetchConsultation(true)}
-          />
-        </div>
+        {/* ─────────────────────────────────────────────────────────────────
+            ORDONNANCES, LABORATOIRE & SUIVI — Sections empilées verticalement
+            ───────────────────────────────────────────────────────────────── */}
+        <div className="space-y-6 pt-2">
 
-        {/* SECTION DÉDIÉE : DEMANDES D'ANALYSES DE LABORATOIRE (PHASE 2C-2) */}
-        <div id="sec_labo" className="pt-2">
-          <LabOrderManager
-            consultationId={consultation.id}
-            patientId={consultation.patient_id}
-            visiteId={consultation.visite_id}
-            isConsultationFinalized={isFinalized}
-            isAmendmentMode={isAmendmentMode}
-            amendementMotif={amendementMotif}
-            initialLabOrders={consultation.lab_orders || []}
-            onLabOrdersUpdated={() => fetchConsultation(true)}
-          />
-        </div>
+          {/* 1. ORDONNANCES — pleine largeur, priorité clinique absolue */}
+          <div id="sec_prescriptions" className="w-full">
+            <PrescriptionManager
+              consultationId={consultation.id}
+              patientId={consultation.patient_id}
+              visiteId={consultation.visite_id}
+              isConsultationFinalized={isFinalized}
+              isAmendmentMode={isAmendmentMode}
+              amendementMotif={amendementMotif}
+              initialPrescriptions={consultation.prescriptions || []}
+              onPrescriptionsUpdated={() => fetchConsultation(true)}
+            />
+          </div>
 
-        {/* SECTION DÉDIÉE : RENDEZ-VOUS DE CONTRÔLE & SUIVI CLINIQUE (ÉTAPE 7 - CALENDRIER PARTAGÉ) */}
-        <div id="sec_suivi" className="pt-2">
-          <FollowUpAppointmentSection
-            consultationId={consultation.id}
-            patientId={consultation.patient_id}
-            visiteId={consultation.visite_id}
-            medecinId={consultation.medecin_id}
-            patientNom={consultation.patient_nom}
-            patientPrenom={consultation.patient_prenom}
-            isConsultationFinalized={isFinalized}
-          />
-        </div>
+          {/* 2. LABORATOIRE — pleine largeur, sous les ordonnances */}
+          <div id="sec_labo" className="w-full">
+            <LabOrderManager
+              consultationId={consultation.id}
+              patientId={consultation.patient_id}
+              visiteId={consultation.visite_id}
+              isConsultationFinalized={isFinalized}
+              isAmendmentMode={isAmendmentMode}
+              amendementMotif={amendementMotif}
+              initialLabOrders={consultation.lab_orders || []}
+              onLabOrdersUpdated={() => fetchConsultation(true)}
+            />
+          </div>
 
-      </div>
+          {/* 3. RENDEZ-VOUS — pleine largeur, en bas de la page */}
+          <div id="sec_suivi" className="w-full">
+            <FollowUpAppointmentSection
+              consultationId={consultation.id}
+              patientId={consultation.patient_id}
+              visiteId={consultation.visite_id}
+              medecinId={consultation.medecin_id}
+              patientNom={consultation.patient_nom}
+              patientPrenom={consultation.patient_prenom}
+              isConsultationFinalized={isFinalized}
+            />
+          </div>
+
+          {/* 4. ORIENTATIONS VERS SPÉCIALISTES */}
+          <div id="sec_orientations" className="w-full">
+            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+              <div className="p-4 bg-gradient-to-r from-purple-900 to-violet-900 text-white flex items-center justify-between">
+                <div className="flex items-center space-x-2.5">
+                  <div className="p-2 bg-purple-700/80 rounded-lg">
+                    <ExternalLink className="w-5 h-5 text-purple-200" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm tracking-wide">
+                      Orientations vers Spécialistes Externes
+                    </h3>
+                    <p className="text-xs text-purple-200">
+                      Fiche d'orientation médicale — {orientations.length} orientation(s)
+                    </p>
+                  </div>
+                </div>
+                {!isFinalized && (
+                  <button
+                    type="button"
+                    onClick={() => setShowOrientationModal(true)}
+                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold rounded-lg transition-colors flex items-center shadow-xs"
+                  >
+                    <Plus className="w-4 h-4 mr-1.5" />
+                    Créer une Orientation
+                  </button>
+                )}
+              </div>
+
+              {orientations.length === 0 ? (
+                <div className="p-8 text-center">
+                  <ExternalLink className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                  <p className="text-xs font-medium text-slate-500">Aucune orientation externe créée pour cette consultation</p>
+                  <p className="text-[11px] text-slate-400 mt-1">Cliquez sur "Créer une Orientation" pour envoyer un patient vers un spécialiste.</p>
+                </div>
+              ) : (
+                <div className="p-4 space-y-3">
+                  {orientations.map((o) => (
+                    <div key={o.id} className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center space-x-2">
+                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                            o.type_orientation === 'INTERNE'
+                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                              : 'bg-purple-100 text-purple-800 border border-purple-300'
+                          }`}>
+                            {o.type_orientation === 'INTERNE' ? 'INTERNE' : 'EXTERNE'}
+                          </span>
+                          <span className="text-xs font-bold text-slate-900">
+                            {o.specialite || 'Spécialiste'}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-mono">({o.numero_orientation})</span>
+                        </div>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                          o.niveau_urgence === 'TRES_URGENT' ? 'bg-rose-100 text-rose-800' :
+                          o.niveau_urgence === 'URGENT' ? 'bg-amber-100 text-amber-800' :
+                          'bg-slate-200 text-slate-700'
+                        }`}>
+                          {o.niveau_urgence === 'TRES_URGENT' ? 'TRÈS URGENT' :
+                           o.niveau_urgence === 'URGENT' ? 'URGENT' : 'ROUTINE'}
+                        </span>
+                      </div>
+                      {o.type_orientation === 'INTERNE' ? (
+                        <p className="text-xs text-slate-600 mb-1">
+                          <strong className="text-slate-700">Médecin destinataire :</strong> {o.praticien_destinataire || o.etablissement_destinataire}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-slate-600 mb-1">
+                          <strong className="text-slate-700">Établissement :</strong> {o.etablissement_destinataire}
+                          {o.praticien_destinataire && <span> — Dr. {o.praticien_destinataire}</span>}
+                        </p>
+                      )}
+                      <p className="text-xs text-slate-600 mb-1">
+                        <strong className="text-slate-700">Motif :</strong> {o.motif_orientation}
+                      </p>
+                      {o.donnees_cliniques && (
+                        <p className="text-[11px] text-slate-500 italic">{o.donnees_cliniques}</p>
+                      )}
+                      <div className="mt-2 pt-2 border-t border-slate-200 flex items-center justify-between">
+                        <span className="text-[10px] text-slate-400">
+                          Créée le {new Date(o.date_orientation).toLocaleDateString('fr-FR', {
+                            day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit'
+                          })}
+                        </span>
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                          o.statut === 'ENVOYE' ? 'bg-blue-100 text-blue-800 border border-blue-300' :
+                          o.statut === 'CONSULTATION_EXTERNE_EFFECTUEE' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' :
+                          o.statut === 'COMPTE_RENDU_RECU' ? 'bg-violet-100 text-violet-800 border border-violet-300' :
+                          'bg-slate-100 text-slate-600 border border-slate-300'
+                        }`}>
+                          {o.statut === 'ENVOYE' ? '📤 Envoyée' :
+                           o.statut === 'CONSULTATION_EXTERNE_EFFECTUEE' ? '✅ Consultation externe faite' :
+                           o.statut === 'COMPTE_RENDU_RECU' ? '📋 Compte-rendu reçu' :
+                           o.statut || 'En cours'}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setPreviewOrientation(o)}
+                          className="ml-2 px-2 py-1 text-[10px] font-semibold bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 rounded-md flex items-center transition-colors"
+                          title="Imprimer le bon de liaison"
+                        >
+                          <Printer className="w-3 h-3 mr-1" />
+                          Imprimer
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* MODALE CRÉATION ORIENTATION */}
+          {showOrientationModal && (
+            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-200">
+                <div className="p-4 bg-gradient-to-r from-purple-900 to-violet-900 text-white flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <ExternalLink className="w-5 h-5 text-purple-200" />
+                    <span className="font-bold text-sm">Créer une Fiche d'Orientation</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setShowOrientationModal(false); setOrientationType('EXTERNE'); setOrientationForm({ specialite: '', etablissement_destinataire: '', praticien_destinataire: '', medecin_destinataire_id: '', motif_orientation: '', donnees_cliniques: '', niveau_urgence: 'ROUTINE' }); }}
+                    className="text-purple-200 hover:text-white p-1"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="p-5 space-y-4">
+                  {/* Sélecteur de type */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">Type d'orientation</label>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => { setOrientationType('EXTERNE'); setOrientationForm(p => ({ ...p, medecin_destinataire_id: '' })); }}
+                        className={`flex-1 py-2 text-xs font-semibold rounded-lg border transition-colors ${
+                          orientationType === 'EXTERNE'
+                            ? 'bg-purple-700 border-purple-800 text-white'
+                            : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        Externe (Hôpital)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setOrientationType('INTERNE'); setOrientationForm(p => ({ ...p, etablissement_destinataire: '' })); }}
+                        className={`flex-1 py-2 text-xs font-semibold rounded-lg border transition-colors ${
+                          orientationType === 'INTERNE'
+                            ? 'bg-emerald-700 border-emerald-800 text-white'
+                            : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        Interne (Collègue)
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Info contextuelle */}
+                  <div className="text-[11px] text-slate-500 bg-slate-50 p-2 rounded-lg">
+                    {orientationType === 'EXTERNE'
+                      ? 'Orientation vers un établissement ou spécialiste externe à la clinique.'
+                      : `Orientation vers un professionnel de santé interne à la clinique (${doctors.length} disponible(s)).`}
+                  </div>
+
+                  {/* Champs communs */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">Spécialité *</label>
+                      <input
+                        type="text"
+                        value={orientationForm.specialite}
+                        onChange={(e) => setOrientationForm(p => ({ ...p, specialite: e.target.value }))}
+                        placeholder={orientationType === 'EXTERNE' ? 'Ex: Cardiologie...' : 'Ex: Pédiatrie...'}
+                        className="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:outline-hidden"
+                      />
+                    </div>
+                    {orientationType === 'EXTERNE' ? (
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">Établissement / Hôpital *</label>
+                        <input
+                          type="text"
+                          value={orientationForm.etablissement_destinataire}
+                          onChange={(e) => setOrientationForm(p => ({ ...p, etablissement_destinataire: e.target.value }))}
+                          placeholder="Ex: CHU, Hôpital Général..."
+                          className="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:outline-hidden"
+                        />
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">Médecin destinataire *</label>
+                        <select
+                          value={orientationForm.medecin_destinataire_id}
+                          onChange={(e) => setOrientationForm(p => ({ ...p, medecin_destinataire_id: e.target.value }))}
+                          className="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-hidden text-slate-800"
+                        >
+                          <option value="">Sélectionner un confrère...</option>
+                          {doctors.filter(d => d.id !== consultation?.medecin_id).map((d) => (
+                            <option key={d.id} value={d.id}>
+                              Dr. {d.nom_complet} ({d.role_nom || d.role})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+
+                  {orientationType === 'EXTERNE' && (
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">Praticien destinataire (optionnel)</label>
+                      <input
+                        type="text"
+                        value={orientationForm.praticien_destinataire}
+                        onChange={(e) => setOrientationForm(p => ({ ...p, praticien_destinataire: e.target.value }))}
+                        placeholder="Ex: Dr. Kabangu"
+                        className="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:outline-hidden"
+                      />
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Motif d'orientation *</label>
+                    <textarea
+                      rows={3}
+                      value={orientationForm.motif_orientation}
+                      onChange={(e) => setOrientationForm(p => ({ ...p, motif_orientation: e.target.value }))}
+                      placeholder={orientationType === 'EXTERNE'
+                        ? "Ex: Bilan cardiologique complet, Suspicion de dermatite eczémateuse..."
+                        : "Ex: Suivi pédiatrique de l'enfant, Avis cardiologique pré-opératoire..."}
+                      className="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:outline-hidden"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">Données cliniques complémentaires (optionnel)</label>
+                    <textarea
+                      rows={2}
+                      value={orientationForm.donnees_cliniques}
+                      onChange={(e) => setOrientationForm(p => ({ ...p, donnees_cliniques: e.target.value }))}
+                      placeholder="Ex: Diagnostic principal: Hypertension artérielle stade 2..."
+                      className="w-full text-xs p-2.5 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:outline-hidden"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1.5">Niveau d'urgence</label>
+                    <div className="flex gap-2">
+                      {(['ROUTINE', 'URGENT', 'TRES_URGENT'] as const).map((u) => (
+                        <button
+                          key={u}
+                          type="button"
+                          onClick={() => setOrientationForm(p => ({ ...p, niveau_urgence: u }))}
+                          className={`flex-1 py-2 text-xs font-semibold rounded-lg border transition-colors ${
+                            orientationForm.niveau_urgence === u
+                              ? u === 'TRES_URGENT' ? 'bg-rose-600 border-rose-700 text-white'
+                                : u === 'URGENT' ? 'bg-amber-600 border-amber-700 text-white'
+                                : 'bg-purple-600 border-purple-700 text-white'
+                              : 'bg-white border-slate-300 text-slate-600 hover:bg-slate-50'
+                          }`}
+                        >
+                          {u === 'TRES_URGENT' ? 'TRÈS URGENT' : u === 'URGENT' ? 'URGENT' : 'ROUTINE'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => { setShowOrientationModal(false); setOrientationType('EXTERNE'); setOrientationForm({ specialite: '', etablissement_destinataire: '', praticien_destinataire: '', medecin_destinataire_id: '', motif_orientation: '', donnees_cliniques: '', niveau_urgence: 'ROUTINE' }); }}
+                      className="px-4 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg"
+                    >
+                      Annuler
+                    </button>
+                    <button
+                      type="button"
+                      disabled={orientationLoading || !orientationForm.specialite.trim() || !orientationForm.motif_orientation.trim() || (orientationType === 'EXTERNE' && !orientationForm.etablissement_destinataire.trim()) || (orientationType === 'INTERNE' && !orientationForm.medecin_destinataire_id)}
+                      onClick={async () => {
+                        setOrientationLoading(true);
+                        try {
+                          const res = await apiFetch('/api/medical/orientations', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              consultation_id: consultationId,
+                              patient_id: consultation?.patient_id,
+                              visite_id: consultation?.visite_id,
+                              type_orientation: orientationType,
+                              ...orientationForm
+                            })
+                          });
+                          if (!res.ok) {
+                            const err = await res.json();
+                            throw new Error(err.error || 'Erreur lors de la création');
+                          }
+                          setShowOrientationModal(false);
+                          setOrientationType('EXTERNE');
+                          setOrientationForm({ specialite: '', etablissement_destinataire: '', praticien_destinataire: '', medecin_destinataire_id: '', motif_orientation: '', donnees_cliniques: '', niveau_urgence: 'ROUTINE' });
+                          await fetchOrientations();
+                        } catch (err: any) {
+                          console.error('Erreur orientation:', err);
+                        } finally {
+                          setOrientationLoading(false);
+                        }
+                      }}
+                      className="px-4 py-2 text-xs font-semibold text-white bg-purple-700 hover:bg-purple-800 rounded-lg disabled:opacity-50 flex items-center"
+                    >
+                      {orientationLoading ? 'Création...' : 'Créer l\'orientation'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* MODALE IMPRESSION BON DE LIAISON */}
+          {previewOrientation && (
+            <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl max-w-xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-slate-200">
+                <div className="p-4 bg-slate-100 border-b border-slate-200 flex items-center justify-between no-print">
+                  <span className="font-bold text-slate-800 text-sm flex items-center">
+                    <Printer className="w-4 h-4 mr-2 text-purple-700" />
+                    Aperçu du Bon de Liaison — Orientation Externe
+                  </span>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => window.print()}
+                      className="px-3 py-1.5 bg-purple-700 hover:bg-purple-800 text-white text-xs font-semibold rounded-lg transition-colors flex items-center"
+                    >
+                      <Printer className="w-3.5 h-3.5 mr-1.5" />
+                      Imprimer
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPreviewOrientation(null)}
+                      className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Document Bon de Liaison */}
+                <div id="printable-document" className="p-8 space-y-6 text-slate-900 font-serif print-area">
+                  {/* En-tête clinique officiel */}
+                  <div className="border-b-2 border-purple-800 pb-4 text-center">
+                    <h1 className="text-xl font-bold tracking-wider text-purple-900 uppercase">
+                      Clinique Les Archanges
+                    </h1>
+                    <p className="text-xs text-slate-600 font-sans tracking-wide">
+                      À 100 mètres après l'arrêt Libaya (en venant du quartier Salongo-Nord), commune de Lemba, Kinshasa.
+                    </p>
+                    <p className="text-[11px] text-slate-500 font-sans">
+                      Téléphone : +243 989 715 771 • Horaires : Ouvert 24h/24 et 7j/7.
+                    </p>
+                  </div>
+
+                  {/* Titre Bon de Liaison */}
+                  <div className="text-center py-2">
+                    <h2 className="text-base font-bold uppercase tracking-widest text-slate-900 font-sans border-y-2 border-purple-300 py-1 inline-block px-8">
+                      Bon de Liaison — Orientation Médicale
+                    </h2>
+                  </div>
+
+                  {/* Références */}
+                  <div className="grid grid-cols-2 gap-4 text-xs font-sans pb-3 border-b border-slate-200">
+                    <div>
+                      <span className="font-bold text-slate-800 block uppercase">N° Orientation :</span>
+                      <span className="font-mono text-slate-900 font-semibold">{previewOrientation.numero_orientation}</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="font-bold text-slate-800 block uppercase">Date :</span>
+                      <span className="text-slate-900 font-semibold">
+                        {new Date(previewOrientation.date_orientation).toLocaleDateString('fr-FR', {
+                          day: '2-digit', month: 'long', year: 'numeric'
+                        })}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Patient & Médecin */}
+                  <div className="grid grid-cols-2 gap-4 text-xs font-sans pb-3 border-b border-slate-200">
+                    <div>
+                      <span className="font-bold text-slate-800 block uppercase">Patient :</span>
+                      <span className="text-slate-900 font-semibold">
+                        {consultation?.patient_nom} {consultation?.patient_prenom}
+                      </span>
+                      {consultation?.numero_dossier && (
+                        <span className="block text-slate-500 text-[11px]">N° Dossier : {consultation.numero_dossier}</span>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <span className="font-bold text-slate-800 block uppercase">Médecin prescripteur :</span>
+                      <span className="text-slate-900 font-semibold">
+                        Dr. {consultation?.medecin_nom || 'Médecin'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Spécialité & Destinataire (adapté selon le type) */}
+                  <div className="text-xs font-sans space-y-2 pb-3 border-b border-slate-200">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <span className="font-bold text-slate-800">Spécialité :</span>
+                        <p className="text-slate-900 font-semibold mt-0.5">{previewOrientation.specialite}</p>
+                      </div>
+                      <div>
+                        <span className="font-bold text-slate-800">
+                          {previewOrientation.type_orientation === 'INTERNE' ? 'Professionnel destinataire :' : 'Établissement destinataire :'}
+                        </span>
+                        <p className="text-slate-900 font-semibold mt-0.5">
+                          {previewOrientation.type_orientation === 'INTERNE'
+                            ? (previewOrientation.praticien_destinataire || previewOrientation.etablissement_destinataire || '—')
+                            : (previewOrientation.etablissement_destinataire || '—')}
+                        </p>
+                      </div>
+                    </div>
+                    {previewOrientation.type_orientation === 'EXTERNE' && previewOrientation.praticien_destinataire && (
+                      <div>
+                        <span className="font-bold text-slate-800">Praticien destinataire :</span>
+                        <p className="text-slate-900 mt-0.5">Dr. {previewOrientation.praticien_destinataire}</p>
+                      </div>
+                    )}
+                    {previewOrientation.type_orientation === 'INTERNE' && (
+                      <div>
+                        <span className="font-bold text-slate-800">Type d'orientation :</span>
+                        <p className="text-emerald-700 font-semibold mt-0.5">Interne — Colleque de la clinique</p>
+                      </div>
+                    )}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <span className="font-bold text-slate-800">Niveau d'urgence :</span>
+                        <p className={`font-bold mt-0.5 ${
+                          previewOrientation.niveau_urgence === 'TRES_URGENT' ? 'text-rose-700' :
+                          previewOrientation.niveau_urgence === 'URGENT' ? 'text-amber-700' :
+                          'text-slate-700'
+                        }`}>
+                          {previewOrientation.niveau_urgence === 'TRES_URGENT' ? 'TRÈS URGENT' :
+                           previewOrientation.niveau_urgence === 'URGENT' ? 'URGENT' : 'ROUTINE'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="font-bold text-slate-800">Statut :</span>
+                        <p className="text-slate-900 font-semibold mt-0.5">
+                          {previewOrientation.statut === 'ENVOYE' ? 'Envoyée' :
+                           previewOrientation.statut === 'CONSULTATION_EXTERNE_EFFECTUEE' ? 'Consultation externe effectuée' :
+                           previewOrientation.statut === 'COMPTE_RENDU_RECU' ? 'Compte-rendu reçu' :
+                           previewOrientation.statut || 'En cours'}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Motif */}
+                  <div className="text-xs font-sans pb-3 border-b border-slate-200">
+                    <span className="font-bold text-slate-800">Motif de l'orientation :</span>
+                    <p className="text-slate-900 mt-1 leading-relaxed">{previewOrientation.motif_orientation}</p>
+                  </div>
+
+                  {/* Données cliniques */}
+                  {previewOrientation.donnees_cliniques && (
+                    <div className="text-xs font-sans pb-3 border-b border-slate-200">
+                      <span className="font-bold text-slate-800">Données cliniques complémentaires :</span>
+                      <p className="text-slate-700 mt-1 italic leading-relaxed">{previewOrientation.donnees_cliniques}</p>
+                    </div>
+                  )}
+
+                  {/* Signature */}
+                  <div className="pt-6 flex justify-end font-sans">
+                    <div className="text-center w-48 border-t border-slate-400 pt-2">
+                      <p className="text-xs font-bold text-slate-800">Signature et Cachet du Médecin</p>
+                      <p className="text-[11px] text-slate-500 italic mt-8">Dr. {consultation?.medecin_nom || 'Médecin'}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+        </div>
 
       {/* BOUTONS EXTENSIONS DISPONIBLES DANS PHASES SUIVANTES */}
       <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs">
@@ -2283,8 +2914,11 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
             <span>Modifier la consultation (Amendement)</span>
           </button>
         </div>
-      )}
+)}
+
+  </div>
 
     </div>
   );
+
 };

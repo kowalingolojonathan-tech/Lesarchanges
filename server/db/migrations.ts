@@ -1503,6 +1503,28 @@ export async function runMigrations(): Promise<void> {
     console.error('Erreur lors de la migration Améliorations Socle Clinique:', err);
   }
 
+  // Migration : ajouter type_orientation aux orientations_specialistes
+  try {
+    const colsRes = db.exec("PRAGMA table_info(orientations_specialistes);");
+    const cols = colsRes.length > 0 && colsRes[0].values.length > 0
+      ? colsRes[0].values.map((v: any[]) => String(v[1]).toUpperCase())
+      : [];
+    if (!cols.includes('TYPE_ORIENTATION')) {
+      db.exec(`ALTER TABLE orientations_specialistes ADD COLUMN type_orientation TEXT NOT NULL DEFAULT 'EXTERNE' CHECK(type_orientation IN ('EXTERNE', 'INTERNE'));`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_orient_type ON orientations_specialistes(type_orientation);`);
+    }
+    if (!cols.includes('MEDECIN_DESTINATAIRE_ID')) {
+      db.exec(`ALTER TABLE orientations_specialistes ADD COLUMN medecin_destinataire_id TEXT REFERENCES users(id);`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_orient_dest_med ON orientations_specialistes(medecin_destinataire_id);`);
+    }
+    if (!cols.includes('VISITE_RETOUR_ID')) {
+      db.exec(`ALTER TABLE orientations_specialistes ADD COLUMN visite_retour_id TEXT REFERENCES visites(id);`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_orient_visite_retour ON orientations_specialistes(visite_retour_id);`);
+    }
+  } catch (err) {
+    console.error('Erreur lors de la migration type_orientation:', err);
+  }
+
   db.exec('PRAGMA foreign_keys = ON;');
   saveDb();
 }

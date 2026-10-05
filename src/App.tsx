@@ -121,38 +121,6 @@ const MainApp: React.FC = () => {
       case 'doctor-consultations':
         return <DoctorDashboardView onNavigate={setCurrentTab} />;
 
-      case 'doctor-lab-orders':
-        return (
-          <Phase2Placeholder
-            moduleName="Prescriptions d'Examens de Laboratoire"
-            roleRequired="MÉDECIN"
-            description="Sélection des analyses biologiques (NFS, Glycémie, Urines, Selles) et émission de facture."
-            workflowSteps={[
-              "Sélection des analyses requises par le médecin traitant.",
-              "Génération automatique de la facture d'analyses transmise à la caisse de Réception.",
-              "Mise en attente du traitement laboratoire jusqu'à validation de paiement.",
-              "Affichage automatique des résultats validés sur l'écran du médecin."
-            ]}
-            onBack={() => setCurrentTab('dashboard')}
-          />
-        );
-
-      case 'doctor-referrals':
-        return (
-          <Phase2Placeholder
-            moduleName="Orientations vers Spécialistes Externes"
-            roleRequired="MÉDECIN"
-            description="Émission de fiche de référence sans compte externe, et réintégration du compte-rendu."
-            workflowSteps={[
-              "Création de la fiche d'orientation : Spécialité, établissement, praticien, motif, urgence.",
-              "Impression du bon de liaison remis au patient.",
-              "Réception ultérieure du compte-rendu papier/externe du spécialiste.",
-              "Enregistrement des conclusions dans le dossier permanent et finalisation de la visite."
-            ]}
-            onBack={() => setCurrentTab('dashboard')}
-          />
-        );
-
       // Menus Laboratoire (Phase 2C-3 Opérationnelle)
       case 'lab-worklist':
         return <LaboratoryQueueView />;
@@ -168,6 +136,22 @@ const MainApp: React.FC = () => {
               "Association possible d'un même échantillon à plusieurs analyses compatibles (ex: NFS + Glycémie).",
               "Attribution d'un code-barres / identifiant unique par tube.",
               "Contrôle de conformité (rejet avec motif en cas d'échantillon non conforme)."
+            ]}
+            onBack={() => setCurrentTab('dashboard')}
+          />
+        );
+
+      case 'doctor-reports':
+        return (
+          <Phase2Placeholder
+            moduleName="Rapports / Historique des Dossiers"
+            roleRequired="MÉDECIN"
+            description="Espace de recherche, de suivi et d'historique des consultations, dossiers, orientations et comptes-rendus."
+            workflowSteps={[
+              "Recherche par patient, date, type de dossier ou statut.",
+              "Consultation des dossiers finalisés et comptes-rendus externes.",
+              "Suivi des orientations en attente et dossiers nécessitant une action.",
+              "Accès rapide à l'activité médicale du médecin."
             ]}
             onBack={() => setCurrentTab('dashboard')}
           />

@@ -4655,3 +4655,1061 @@ export async function markAllNotificationsRead(req: AuthenticatedRequest, res: R
 }
 
 
+
+/**
+ * Créer une orientation (externe ou interne)
+ * POST /api/medical/orientations
+ * Strictement réservé au rôle MÉDECIN.
+ * L'orientation est liée à la consultation en cours.
+ * type_orientation : 'EXTERNE' ou 'INTERNE'
+ */
+export async function createOrientation(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const {
+      consultation_id,
+      patient_id,
+      visite_id,
+      type_orientation,
+      specialite,
+      etablissement_destinataire,
+      praticien_destinataire,
+      medecin_destinataire_id,
+      motif_orientation,
+      donnees_cliniques,
+      niveau_urgence
+    } = req.body;
+
+    // Validation du type d'orientation
+    const orientationType = type_orientation === 'INTERNE' ? 'INTERNE' : 'EXTERNE';
+    if (orientationType !== 'EXTERNE' && orientationType !== 'INTERNE') {
+      res.status(400).json({ error: 'Le type d\'orientation doit être EXTERNE ou INTERNE.' });
+      return;
+    }
+
+    // Validation des champs obligatoires communs
+    if (!consultation_id || typeof consultation_id !== 'string') {
+      res.status(400).json({ error: 'L\'identifiant de consultation (consultation_id) est obligatoire.' });
+      return;
+    }
+    if (!specialite || typeof specialite !== 'string' || specialite.trim().length < 2) {
+      res.status(400).json({ error: 'La spécialité est obligatoire (min. 2 caractères).' });
+      return;
+    }
+    if (!motif_orientation || typeof motif_orientation !== 'string' || motif_orientation.trim().length < 5) {
+      res.status(400).json({ error: 'Le motif de l\'orientation est obligatoire (min. 5 caractères).' });
+      return;
+    }
+    const validUrgence = ['ROUTINE', 'URGENT', 'TRES_URGENT'].includes(niveau_urgence) ? niveau_urgence : 'ROUTINE';
+
+    // 1. Vérifier que la consultation existe
+    const consultation = await queryOne<any>(
+      `SELECT * FROM consultations WHERE id = ? AND actif = 1`,
+      [consultation_id]
+    );
+    if (!consultation) {
+      res.status(404).json({ error: 'Consultation introuvable.' });
+      return;
+    }
+
+    // 2. Vérifier que la consultation appartient bien au médecin connecté
+    if (consultation.medecin_id !== user.id) {
+      await auditLogger.log({
+        userId: user.id,
+        action: 'ACCESS_DENIED',
+        ressourceType: 'ORIENTATION_SPECIALISTE',
+        ressourceId: consultation_id,
+        details: `Dr. ${user.nom_complet} a tenté de créer une orientation pour une consultation d\'un confrère`,
+        ipAddress: req.ip || '127.0.0.1'
+      });
+      res.status(403).json({ error: 'Vous ne pouvez pas créer d\'orientation pour la consultation d\'un confrère.' });
+      return;
+    }
+
+    // 3. Cohérence patient & visite
+    if (patient_id && consultation.patient_id !== patient_id) {
+      res.status(400).json({ error: 'Incohérence entre le patient indiqué et la consultation.' });
+      return;
+    }
+    if (visite_id && consultation.visite_id !== visite_id) {
+      res.status(400).json({ error: 'Incohérence entre la visite indiquée et la consultation.' });
+      return;
+    }
+
+    // 4. Consultation finalisée : refuser
+    if (consultation.statut === 'FINALISEE') {
+      res.status(409).json({
+        error: "Cette consultation est finalisée. Un motif explicite d'amendement est requis pour ajouter une orientation."
+      });
+      return;
+    }
+
+    // 5. Validation spécifique selon le type
+    if (orientationType === 'INTERNE') {
+      if (!medecin_destinataire_id || typeof medecin_destinataire_id !== 'string') {
+        res.status(400).json({ error: 'Le médecin destinataire (medecin_destinataire_id) est obligatoire pour une orientation interne.' });
+        return;
+      }
+      // Vérifier que le médecin destinataire existe et est actif
+      const destinataire = await queryOne<any>(
+        `SELECT id, nom_complet, role FROM users WHERE id = ? AND actif = 1`,
+        [medecin_destinataire_id]
+      );
+      if (!destinataire) {
+        res.status(400).json({ error: 'Le médecin destinataire n\'existe pas ou n\'est pas actif.' });
+        return;
+      }
+      // Le destinataire ne peut pas être le même que le créateur
+      if (destinataire.id === user.id) {
+        res.status(400).json({ error: 'Vous ne pouvez pas vous orienter vous-même.' });
+        return;
+      }
+    } else {
+      // ORIENTATION EXTERNE
+      if (!etablissement_destinataire || typeof etablissement_destinataire !== 'string' || etablissement_destinataire.trim().length < 2) {
+        res.status(400).json({ error: 'L\'établissement / hôpital destinataire est obligatoire pour une orientation externe (min. 2 caractères).' });
+        return;
+      }
+    }
+
+    const now = new Date().toISOString();
+    const id = `orient_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+    const numero_orientation = `OR-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+
+    // Déterminer les valeurs selon le type
+    const destEtablissement = orientationType === 'INTERNE' ? 'Interne — ' + (await queryOne<any>(`SELECT nom_complet FROM users WHERE id = ?`, [medecin_destinataire_id]))?.nom_complet : etablissement_destinataire;
+    const destPraticien = orientationType === 'INTERNE' ? (await queryOne<any>(`SELECT nom_complet FROM users WHERE id = ?`, [medecin_destinataire_id]))?.nom_complet : praticien_destinataire;
+
+    await execute(
+      `INSERT INTO orientations_specialistes (
+        id, numero_orientation, consultation_id, visite_id, patient_id, medecin_id,
+        specialite, etablissement_destinataire, praticien_destinataire, motif_orientation,
+        donnees_cliniques, niveau_urgence, statut, date_orientation, type_orientation, medecin_destinataire_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ENVOYE', ?, ?)`,
+      [
+        id,
+        numero_orientation,
+        consultation_id,
+        consultation.visite_id || null,
+        consultation.patient_id,
+        user.id,
+        specialite.trim(),
+        destEtablissement || '',
+        destPraticien || null,
+        motif_orientation.trim(),
+        donnees_cliniques ? donnees_cliniques.trim() : null,
+        validUrgence,
+        now,
+        orientationType,
+        orientationType === 'INTERNE' ? medecin_destinataire_id : null
+      ]
+    );
+
+    // Récupérer l'orientation créée
+    const created = await queryOne<any>(
+      `SELECT * FROM orientations_specialistes WHERE id = ?`,
+      [id]
+    );
+
+    await auditLogger.log({
+      userId: user.id,
+      action: 'ORIENTATION_SPECIALISTE_CREATE',
+      ressourceType: 'ORIENTATION_SPECIALISTE',
+      ressourceId: id,
+      details: `Orientation ${orientationType} vers ${specialite.trim()} (${destEtablissement}) — Niveau: ${validUrgence}`,
+      ipAddress: req.ip || '127.0.0.1'
+    });
+
+    res.status(201).json({ success: true, orientation: created });
+  } catch (error: any) {
+    console.error('Erreur création orientation:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la création de l\'orientation.' });
+  }
+}
+
+/**
+ * Créer une orientation (externe ou interne)
+ * POST /api/medical/orientations
+ * Strictement réservé au rôle MÉDECIN.
+ * L'orientation est liée à la consultation en cours.
+ * type_orientation : 'EXTERNE' ou 'INTERNE'
+ */
+export async function createOrientation(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const {
+      consultation_id,
+      patient_id,
+      visite_id,
+      type_orientation,
+      specialite,
+      etablissement_destinataire,
+      praticien_destinataire,
+      medecin_destinataire_id,
+      motif_orientation,
+      donnees_cliniques,
+      niveau_urgence
+    } = req.body;
+
+    // Validation du type d'orientation
+    const orientationType = type_orientation === 'INTERNE' ? 'INTERNE' : 'EXTERNE';
+    if (orientationType !== 'EXTERNE' && orientationType !== 'INTERNE') {
+      res.status(400).json({ error: 'Le type d\'orientation doit être EXTERNE ou INTERNE.' });
+      return;
+    }
+
+    // Validation des champs obligatoires communs
+    if (!consultation_id || typeof consultation_id !== 'string') {
+      res.status(400).json({ error: 'L\'identifiant de consultation (consultation_id) est obligatoire.' });
+      return;
+    }
+    if (!specialite || typeof specialite !== 'string' || specialite.trim().length < 2) {
+      res.status(400).json({ error: 'La spécialité est obligatoire (min. 2 caractères).' });
+      return;
+    }
+    if (!motif_orientation || typeof motif_orientation !== 'string' || motif_orientation.trim().length < 5) {
+      res.status(400).json({ error: 'Le motif de l\'orientation est obligatoire (min. 5 caractères).' });
+      return;
+    }
+    const validUrgence = ['ROUTINE', 'URGENT', 'TRES_URGENT'].includes(niveau_urgence) ? niveau_urgence : 'ROUTINE';
+
+    // 1. Vérifier que la consultation existe
+    const consultation = await queryOne<any>(
+      `SELECT * FROM consultations WHERE id = ? AND actif = 1`,
+      [consultation_id]
+    );
+    if (!consultation) {
+      res.status(404).json({ error: 'Consultation introuvable.' });
+      return;
+    }
+
+    // 2. Vérifier que la consultation appartient bien au médecin connecté
+    if (consultation.medecin_id !== user.id) {
+      await auditLogger.log({
+        userId: user.id,
+        action: 'ACCESS_DENIED',
+        ressourceType: 'ORIENTATION_SPECIALISTE',
+        ressourceId: consultation_id,
+        details: `Dr. ${user.nom_complet} a tenté de créer une orientation pour une consultation d\'un confrère`,
+        ipAddress: req.ip || '127.0.0.1'
+      });
+      res.status(403).json({ error: 'Vous ne pouvez pas créer d\'orientation pour la consultation d\'un confrère.' });
+      return;
+    }
+
+    // 3. Cohérence patient & visite
+    if (patient_id && consultation.patient_id !== patient_id) {
+      res.status(400).json({ error: 'Incohérence entre le patient indiqué et la consultation.' });
+      return;
+    }
+    if (visite_id && consultation.visite_id !== visite_id) {
+      res.status(400).json({ error: 'Incohérence entre la visite indiquée et la consultation.' });
+      return;
+    }
+
+    // 4. Consultation finalisée : refuser
+    if (consultation.statut === 'FINALISEE') {
+      res.status(409).json({
+        error: "Cette consultation est finalisée. Un motif explicite d'amendement est requis pour ajouter une orientation."
+      });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const id = `orient_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+    const numero_orientation = `OR-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+
+    // Déterminer les valeurs selon le type
+    const destEtablissement = orientationType === 'INTERNE' ? 'Interne — ' + (await queryOne<any>(`SELECT nom_complet FROM users WHERE id = ?`, [medecin_destinataire_id]))?.nom_complet : etablissement_destinataire;
+    const destPraticien = orientationType === 'INTERNE' ? (await queryOne<any>(`SELECT nom_complet FROM users WHERE id = ?`, [medecin_destinataire_id]))?.nom_complet : praticien_destinataire;
+
+    await execute(
+      `INSERT INTO orientations_specialistes (
+        id, numero_orientation, consultation_id, visite_id, patient_id, medecin_id,
+        specialite, etablissement_destinataire, praticien_destinataire, motif_orientation,
+        donnees_cliniques, niveau_urgence, statut, date_orientation, type_orientation, medecin_destinataire_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ENVOYE', ?, ?)`,
+      [
+        id,
+        numero_orientation,
+        consultation_id,
+        consultation.visite_id || null,
+        consultation.patient_id,
+        user.id,
+        specialite.trim(),
+        destEtablissement || '',
+        destPraticien || null,
+        motif_orientation.trim(),
+        donnees_cliniques ? donnees_cliniques.trim() : null,
+        validUrgence,
+        now,
+        orientationType
+      ]
+    );
+
+    // Récupérer l'orientation créée
+    const created = await queryOne<any>(
+      `SELECT * FROM orientations_specialistes WHERE id = ?`,
+      [id]
+    );
+
+    await auditLogger.log({
+      userId: user.id,
+      action: 'ORIENTATION_SPECIALISTE_CREATE',
+      ressourceType: 'ORIENTATION_SPECIALISTE',
+      ressourceId: id,
+      details: `Orientation ${orientationType} vers ${specialite.trim()} (${destEtablissement}) — Niveau: ${validUrgence}`,
+      ipAddress: req.ip || '127.0.0.1'
+    });
+
+    res.status(201).json({ success: true, orientation: created });
+  } catch (error: any) {
+    console.error('Erreur création orientation:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la création de l\'orientation.' });
+  }
+}
+
+/**
+ * Créer une orientation (externe ou interne)
+ * POST /api/medical/orientations
+ * Strictement réservé au rôle MÉDECIN.
+ * L'orientation est liée à la consultation en cours.
+ * type_orientation : 'EXTERNE' ou 'INTERNE'
+ */
+export async function createOrientation(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const {
+      consultation_id,
+      patient_id,
+      visite_id,
+      type_orientation,
+      specialite,
+      etablissement_destinataire,
+      praticien_destinataire,
+      medecin_destinataire_id,
+      motif_orientation,
+      donnees_cliniques,
+      niveau_urgence
+    } = req.body;
+
+    // Validation du type d'orientation
+    const orientationType = type_orientation === 'INTERNE' ? 'INTERNE' : 'EXTERNE';
+    if (orientationType !== 'EXTERNE' && orientationType !== 'INTERNE') {
+      res.status(400).json({ error: 'Le type d"orientation" doit être EXTERNE ou INTERNE.' });
+      return;
+    }
+
+    // Validation des champs obligatoires communs
+    if (!consultation_id || typeof consultation_id !== 'string') {
+    res.status(400).json({ error: 'L'identifiant de consultation (consultation_id) est obligatoire.' });
+      return;
+    }
+    if (!specialite || typeof specialite !== 'string' || specialite.trim().length < 2) {
+      res.status(400).json({ error: 'La spécialité est obligatoire (min. 2 caractères).' });
+      return;
+    }
+    if (!motif_orientation || typeof motif_orientation !== 'string' || motif_orientation.trim().length < 5) {
+      res.status(400).json({ error: 'Le motif de l'orientation est obligatoire (min. 5 caractères).' });
+      return;
+    }
+    const validUrgence = ['ROUTINE', 'URGENT', 'TRES_URGENT'].includes(niveau_urgence) ? niveau_urgence : 'ROUTINE';
+
+    // 1. Vérifier que la consultation existe
+    const consultation = await queryOne<any>(
+      `SELECT * FROM consultations WHERE id = ? AND actif = 1`,
+      [consultation_id]
+    );
+    if (!consultation) {
+      res.status(404).json({ error: 'Consultation introuvable.' });
+      return;
+    }
+
+    // 2. Vérifier que la consultation appartient bien au médecin connecté
+    if (consultation.medecin_id !== user.id) {
+      await auditLogger.log({
+        userId: user.id,
+        action: 'ACCESS_DENIED',
+        ressourceType: 'ORIENTATION_SPECIALISTE',
+        ressourceId: consultation_id,
+        details: `Dr. ${user.nom_complet} a tenté de créer une orientation pour une consultation d'un confrère`,
+        ipAddress: req.ip || '127.0.0.1'
+      });
+      res.status(403).json({ error: 'Vous ne pouvez pas créer d'orientation pour la consultation d'un confrère.' });
+      return;
+    }
+
+    // 3. Cohérence patient & visite
+    if (patient_id && consultation.patient_id !== patient_id) {
+      res.status(400).json({ error: 'Incohérence entre le patient indiqué et la consultation.' });
+      return;
+    }
+    if (visite_id && consultation.visite_id !== visite_id) {
+      res.status(400).json({ error: 'Incohérence entre la visite indiquée et la consultation.' });
+      return;
+    }
+
+    // 4. Consultation finalisée : refuser
+    if (consultation.statut === 'FINALISEE') {
+      res.status(409).json({
+        error: "Cette consultation est finalisée. Un motif explicite d'amendement est requis pour ajouter une orientation."
+      });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const id = `orient_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+    const numero_orientation = `OR-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+
+    // Déterminer les valeurs selon le type
+    const destEtablissement = orientationType === 'INTERNE' ? 'Interne — ' + (await queryOne<any>(`SELECT nom_complet FROM users WHERE id = ?`, [medecin_destinataire_id]))?.nom_complet : etablissement_destinataire;
+    const destPraticien = orientationType === 'INTERNE' ? (await queryOne<any>(`SELECT nom_complet FROM users WHERE id = ?`, [medecin_destinataire_id]))?.nom_complet : praticien_destinataire;
+
+    await execute(
+      `INSERT INTO orientations_specialistes (
+        id, numero_orientation, consultation_id, visite_id, patient_id, medecin_id,
+        specialite, etablissement_destinataire, praticien_destinataire, motif_orientation,
+        donnees_cliniques, niveau_urgence, statut, date_orientation, type_orientation, medecin_destinataire_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ENVOYE', ?, ?)`,
+      [
+        id,
+        numero_orientation,
+        consultation_id,
+        consultation.visite_id || null,
+        consultation.patient_id,
+        user.id,
+        specialite.trim(),
+        destEtablissement || '',
+        destPraticien || null,
+        motif_orientation.trim(),
+        donnees_cliniques ? donnees_cliniques.trim() : null,
+        validUrgence,
+        now,
+        orientationType
+      ]
+    );
+
+    // Récupérer l'orientation créée
+    const created = await queryOne<any>(
+      `SELECT * FROM orientations_specialistes WHERE id = ?`,
+      [id]
+    );
+
+    await auditLogger.log({
+      userId: user.id,
+      action: 'ORIENTATION_SPECIALISTE_CREATE',
+      ressourceType: 'ORIENTATION_SPECIALISTE',
+      ressourceId: id,
+      details: `Orientation ${orientationType} vers ${specialite.trim()} (${destEtablissement}) — Niveau: ${validUrgence}`,
+      ipAddress: req.ip || '127.0.0.1'
+    });
+
+    res.status(201).json({ success: true, orientation: created });
+  } catch (error: any) {
+    console.error('Erreur création orientation:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la création de l'orientation.' });
+  }
+}
+
+export async function createOrientation(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const {
+      consultation_id,
+      patient_id,
+      visite_id,
+      type_orientation,
+      specialite,
+      etablissement_destinataire,
+      praticien_destinataire,
+      motif_orientation,
+      donnees_cliniques,
+      niveau_urgence
+    } = req.body;
+
+    // Validation du type d'orientation
+    const orientationType = type_orientation === 'INTERNE' ? 'INTERNE' : 'EXTERNE';
+    if (orientationType !== 'EXTERNE' && orientationType !== 'INTERNE') {
+      res.status(400).json({ error: 'Le type d\'orientation doit être EXTERNE ou INTERNE.' });
+      return;
+    }
+
+    // Validation des champs obligatoires communs
+    if (!consultation_id || typeof consultation_id !== 'string') {
+      res.status(400).json({ error: 'L\'identifiant de consultation (consultation_id) est obligatoire.' });
+      return;
+    }
+    if (!specialite || typeof specialite !== 'string' || specialite.trim().length < 2) {
+      res.status(400).json({ error: 'La spécialité est obligatoire (min. 2 caractères).' });
+      return;
+    }
+    if (!motif_orientation || typeof motif_orientation !== 'string' || motif_orientation.trim().length < 5) {
+      res.status(400).json({ error: 'Le motif de l\'orientation est obligatoire (min. 5 caractères).' });
+      return;
+    }
+    const validUrgence = ['ROUTINE', 'URGENT', 'TRES_URGENT'].includes(niveau_urgence) ? niveau_urgence : 'ROUTINE';
+
+    // 1. Vérifier que la consultation existe
+    const consultation = await queryOne<any>(
+      `SELECT * FROM consultations WHERE id = ? AND actif = 1`,
+      [consultation_id]
+    );
+    if (!consultation) {
+      res.status(404).json({ error: 'Consultation introuvable.' });
+      return;
+    }
+
+    // 2. Vérifier que la consultation appartient bien au médecin connecté
+    if (consultation.medecin_id !== user.id) {
+      await auditLogger.log({
+        userId: user.id,
+        action: 'ACCESS_DENIED',
+        ressourceType: 'ORIENTATION_SPECIALISTE',
+        ressourceId: consultation_id,
+        details: `Dr. ${user.nom_complet} a tenté de créer une orientation pour une consultation d\'un confrère`,
+        ipAddress: req.ip || '127.0.0.1'
+      });
+      res.status(403).json({ error: 'Vous ne pouvez pas créer d\'orientation pour la consultation d\'un confrère.' });
+      return;
+    }
+
+    // 3. Cohérence patient & visite
+    if (patient_id && consultation.patient_id !== patient_id) {
+      res.status(400).json({ error: 'Incohérence entre le patient indiqué et la consultation.' });
+      return;
+    }
+    if (visite_id && consultation.visite_id !== visite_id) {
+      res.status(400).json({ error: 'Incohérence entre la visite indiquée et la consultation.' });
+      return;
+    }
+
+    // 4. Consultation finalisée : refuser
+    if (consultation.statut === 'FINALISEE') {
+      res.status(409).json({
+        error: "Cette consultation est finalisée. Un motif explicite d'amendement est requis pour ajouter une orientation."
+      });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const id = `orient_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+    const numero_orientation = `OR-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+
+    await execute(
+      `INSERT INTO orientations_specialistes (
+        id, numero_orientation, consultation_id, visite_id, patient_id, medecin_id,
+        specialite, etablissement_destinataire, praticien_destinataire, motif_orientation,
+        donnees_cliniques, niveau_urgence, statut, date_orientation
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ENVOYE')`,
+      [
+        id,
+        numero_orientation,
+        consultation_id,
+        consultation.visite_id || null,
+        consultation.patient_id,
+        user.id,
+        specialite.trim(),
+        etablissement_destinataire.trim(),
+        praticien_destinataire ? praticien_destinataire.trim() : null,
+        motif_orientation.trim(),
+        donnees_cliniques ? donnees_cliniques.trim() : null,
+        validUrgence
+      ]
+    );
+
+    res.status(201).json({ success: true, message: 'Orientation créée avec succès.' });
+  } catch (error: any) {
+    console.error('Erreur création orientation:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la création de l\'orientation.' });
+  }
+}
+
+export async function createOrientation(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: "Accès strictement réservé au corps médical (MÉDECIN)." });
+      return;
+    }
+
+    const {
+      consultation_id,
+      patient_id,
+      visite_id,
+      type_orientation,
+      specialite,
+      etablissement_destinataire,
+      praticien_destinataire,
+      motif_orientation,
+      donnees_cliniques,
+      niveau_urgence
+    } = req.body;
+
+    // Validation du type d'orientation
+    const orientationType = type_orientation === "INTERNE" ? "INTERNE" : "EXTERNE";
+    if (orientationType !== "EXTERNE" && orientationType !== "INTERNE") {
+      res.status(400).json({ error: "Le type d"orientation" doit être EXTERNE ou INTERNE." });
+      return;
+    }
+
+    // Validation des champs obligatoires communs
+    if (!consultation_id || typeof consultation_id !== "string") {
+    res.status(400).json({ error: 'L'identifiant de consultation (consultation_id) est obligatoire.' });
+      return;
+    }
+    if (!specialite || typeof specialite !== "string" || specialite.trim().length < 2) {
+      res.status(400).json({ error: "La spécialité est obligatoire (min. 2 caractères)." });
+      return;
+    }
+    if (!motif_orientation || typeof motif_orientation !== "string" || motif_orientation.trim().length < 5) {
+      res.status(400).json({ error: "Le motif de l'orientation est obligatoire (min. 5 caractères)." });
+      return;
+    }
+    const validUrgence = ["ROUTINE", "URGENT", "TRES_URGENT"].includes(niveau_urgence) ? niveau_urgence : "ROUTINE";
+
+    // 1. Vérifier que la consultation existe
+    const consultation = await queryOne<any>(
+      `SELECT * FROM consultations WHERE id = ? AND actif = 1`,
+      [consultation_id]
+    );
+    if (!consultation) {
+      res.status(404).json({ error: "Consultation introuvable." });
+      return;
+    }
+
+    // 2. Vérifier que la consultation appartient bien au médecin connecté
+    if (consultation.medecin_id !== user.id) {
+      await auditLogger.log({
+        userId: user.id,
+        action: "ACCESS_DENIED",
+        ressourceType: "ORIENTATION_SPECIALISTE",
+        ressourceId: consultation_id,
+        details: `Dr. ${user.nom_complet} a tenté de créer une orientation pour une consultation d'un confrère`,
+        ipAddress: req.ip || "127.0.0.1"
+      });
+      res.status(403).json({ error: "Vous ne pouvez pas créer d'orientation pour la consultation d'un confrère." });
+      return;
+    }
+
+    // 3. Cohérence patient & visite
+    if (patient_id && consultation.patient_id !== patient_id) {
+      res.status(400).json({ error: "Incohérence entre le patient indiqué et la consultation." });
+      return;
+    }
+    if (visite_id && consultation.visite_id !== visite_id) {
+      res.status(400).json({ error: "Incohérence entre la visite indiquée et la consultation." });
+      return;
+    }
+
+    // 4. Consultation finalisée : refuser
+    if (consultation.statut === "FINALISEE") {
+      res.status(409).json({
+        error: "Cette consultation est finalisée. Un motif explicite d'amendement est requis pour ajouter une orientation."
+      });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const id = `orient_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
+    const numero_orientation = `OR-${Date.now()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
+
+    await execute(
+      `INSERT INTO orientations_specialistes (
+        id, numero_orientation, consultation_id, visite_id, patient_id, medecin_id,
+        specialite, etablissement_destinataire, praticien_destinataire, motif_orientation,
+        donnees_cliniques, niveau_urgence, statut, date_orientation
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "ENVOYE")`,
+      [
+        id,
+        numero_orientation,
+        consultation_id,
+        consultation.visite_id || null,
+        consultation.patient_id,
+        user.id,
+        specialite.trim(),
+        etablissement_destinataire.trim(),
+        praticien_destinataire ? praticien_destinataire.trim() : null,
+        motif_orientation.trim(),
+        donnees_cliniques ? donnees_cliniques.trim() : null,
+        validUrgence
+      ]
+    );
+
+    res.status(201).json({ success: true, message: "Orientation créée avec succès." });
+  } catch (error: any) {
+    console.error("Erreur création orientation:", error);
+    res.status(500).json({ error: "Erreur interne lors de la création de l'orientation." });
+  }
+}
+export async function createOrientation(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: "Accès strictement réservé au corps médical (MÉDECIN)." });
+      return;
+    }
+
+    const {
+      consultation_id,
+      patient_id,
+      visite_id,
+      type_orientation,
+      specialite,
+      etablissement_destinataire,
+      praticien_destinataire,
+      motif_orientation,
+      donnees_cliniques,
+      niveau_urgence
+    } = req.body;
+
+    // Validation du type d'orientation
+    const orientationType = type_orientation === "INTERNE" ? "INTERNE" : "EXTERNE";
+    if (orientationType !== "EXTERNE" && orientationType !== "INTERNE") {
+      res.status(400).json({ error: "Le type d"orientation" doit être EXTERNE ou INTERNE." });
+      return;
+    }
+
+    // Validation des champs obligatoires communs
+    if (!consultation_id || typeof consultation_id !== "string") {
+    res.status(400).json({ error: 'L'identifiant de consultation (consultation_id) est obligatoire.' });
+      return;
+    }
+    if (!specialite || typeof specialite !== "string" || specialite.trim().length < 2) {
+      res.status(400).json({ error: "La spécialité est obligatoire (min. 2 caractères)." });
+      return;
+    }
+    if (!motif_orientation || typeof motif_orientation !== "string" || motif_orientation.trim().length < 5) {
+      res.status(400).json({ error: "Le motif de l'orientation est obligatoire (min. 5 caractères)." });
+      return;
+    }
+    const validUrgence = ["ROUTINE", "URGENT", "TRES_URGENT"].includes(niveau_urgence) ? niveau_urgence : "ROUTINE";
+
+    // 1. Vérifier que la consultation existe
+    const consultation = await queryOne<any>(
+      `SELECT * FROM consultations WHERE id = ? AND actif = 1`,
+      [consultation_id]
+    );
+    if (!consultation) {
+      res.status(404).json({ error: "Consultation introuvable." });
+      return;
+    }
+
+    // 2. Vérifier que la consultation appartient bien au médecin connecté
+    if (consultation.medecin_id !== user.id) {
+      await auditLogger.log({
+        userId: user.id,
+        action: "ACCESS_DENIED",
+        ressourceType: "ORIENTATION_SPECIALISTE",
+        ressourceId: consultation_id,
+        details: `Dr. ${user.nom_complet} a tenté de créer une orientation pour une consultation d'un confrère`,
+        ipAddress: req.ip || "127.0.0.1"
+      });
+      res.status(403).json({ error: "Vous ne pouvez pas créer d'orientation pour la consultation d'un confrère." });
+      return;
+    }
+
+    // 3. Cohérence patient & visite
+    if (patient_id && consultation.patient_id !== patient_id) {
+      res.status(400).json({ error: "Incohérence entre le patient indiqué et la consultation." });
+      return;
+    }
+    if (visite_id && consultation.visite_id !== visite_id) {
+      res.status(400).json({ error: "Incohérence entre la visite indiquée et la consultation." });
+      return;
+    }
+
+    // 4. Consultation finalisée : refuser
+    if (consultation.statut === "FINALISEE") {
+      res.status(409).json({
+        error: "Cette consultation est finalisée. Un motif explicite d'amendement est requis pour ajouter une orientation."
+      });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const id = `orient_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
+    const numero_orientation = `OR-${Date.now()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
+
+    await execute(
+      `INSERT INTO orientations_specialistes (
+        id, numero_orientation, consultation_id, visite_id, patient_id, medecin_id,
+        specialite, etablissement_destinataire, praticien_destinataire, motif_orientation,
+        donnees_cliniques, niveau_urgence, statut, date_orientation
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "ENVOYE")`,
+      [
+        id,
+        numero_orientation,
+        consultation_id,
+        consultation.visite_id || null,
+        consultation.patient_id,
+        user.id,
+        specialite.trim(),
+        etablissement_destinataire.trim(),
+        praticien_destinataire ? praticien_destinataire.trim() : null,
+        motif_orientation.trim(),
+        donnees_cliniques ? donnees_cliniques.trim() : null,
+        validUrgence
+      ]
+    );
+
+    res.status(201).json({ success: true, message: "Orientation créée avec succès." });
+  } catch (error: any) {
+    console.error("Erreur création orientation:", error);
+    res.status(500).json({ error: "Erreur interne lors de la création de l'orientation." });
+  }
+}
+
+export async function createOrientation(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: "Accès strictement réservé au corps médical (MÉDECIN)." });
+      return;
+    }
+
+    const {
+      consultation_id,
+      patient_id,
+      visite_id,
+      type_orientation,
+      specialite,
+      etablissement_destinataire,
+      praticien_destinataire,
+      motif_orientation,
+      donnees_cliniques,
+      niveau_urgence
+    } = req.body;
+
+    // Validation du type d'orientation
+    const orientationType = type_orientation === "INTERNE" ? "INTERNE" : "EXTERNE";
+    if (orientationType !== "EXTERNE" && orientationType !== "INTERNE") {
+      res.status(400).json({ error: "Le type d"orientation" doit être EXTERNE ou INTERNE." });
+      return;
+    }
+
+    // Validation des champs obligatoires communs
+    if (!consultation_id || typeof consultation_id !== "string") {
+    res.status(400).json({ error: 'L'identifiant de consultation (consultation_id) est obligatoire.' });
+      return;
+    }
+    if (!specialite || typeof specialite !== "string" || specialite.trim().length < 2) {
+      res.status(400).json({ error: "La spécialité est obligatoire (min. 2 caractères)." });
+      return;
+    }
+    if (!motif_orientation || typeof motif_orientation !== "string" || motif_orientation.trim().length < 5) {
+      res.status(400).json({ error: "Le motif de l'orientation est obligatoire (min. 5 caractères)." });
+      return;
+    }
+    const validUrgence = ["ROUTINE", "URGENT", "TRES_URGENT"].includes(niveau_urgence) ? niveau_urgence : "ROUTINE";
+
+    // 1. Vérifier que la consultation existe
+    const consultation = await queryOne<any>(
+      `SELECT * FROM consultations WHERE id = ? AND actif = 1`,
+      [consultation_id]
+    );
+    if (!consultation) {
+      res.status(404).json({ error: "Consultation introuvable." });
+      return;
+    }
+
+    // 2. Vérifier que la consultation appartient bien au médecin connecté
+    if (consultation.medecin_id !== user.id) {
+      await auditLogger.log({
+        userId: user.id,
+        action: "ACCESS_DENIED",
+        ressourceType: "ORIENTATION_SPECIALISTE",
+        ressourceId: consultation_id,
+        details: `Dr. ${user.nom_complet} a tenté de créer une orientation pour une consultation d'un confrère`,
+        ipAddress: req.ip || "127.0.0.1"
+      });
+      res.status(403).json({ error: "Vous ne pouvez pas créer d'orientation pour la consultation d'un confrère." });
+      return;
+    }
+
+    // 3. Cohérence patient & visite
+    if (patient_id && consultation.patient_id !== patient_id) {
+      res.status(400).json({ error: "Incohérence entre le patient indiqué et la consultation." });
+      return;
+    }
+    if (visite_id && consultation.visite_id !== visite_id) {
+      res.status(400).json({ error: "Incohérence entre la visite indiquée et la consultation." });
+      return;
+    }
+
+    // 4. Consultation finalisée : refuser
+    if (consultation.statut === "FINALISEE") {
+      res.status(409).json({
+        error: "Cette consultation est finalisée. Un motif explicite d'amendement est requis pour ajouter une orientation."
+      });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const id = `orient_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
+    const numero_orientation = `OR-${Date.now()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
+
+    await execute(
+      `INSERT INTO orientations_specialistes (
+        id, numero_orientation, consultation_id, visite_id, patient_id, medecin_id,
+        specialite, etablissement_destinataire, praticien_destinataire, motif_orientation,
+        donnees_cliniques, niveau_urgence, statut, date_orientation
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "ENVOYE")`,
+      [
+        id,
+        numero_orientation,
+        consultation_id,
+        consultation.visite_id || null,
+        consultation.patient_id,
+        user.id,
+        specialite.trim(),
+        etablissement_destinataire.trim(),
+        praticien_destinataire ? praticien_destinataire.trim() : null,
+        motif_orientation.trim(),
+        donnees_cliniques ? donnees_cliniques.trim() : null,
+        validUrgence
+      ]
+    );
+
+    res.status(201).json({ success: true, message: "Orientation créée avec succès." });
+  } catch (error: any) {
+    console.error("Erreur création orientation:", error);
+    res.status(500).json({ error: "Erreur interne lors de la création de l'orientation." });
+  }
+})
+export async function createOrientation(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: "Accès strictement réservé au corps médical (MÉDECIN)." });
+      return;
+    }
+
+    const {
+      consultation_id,
+      patient_id,
+      visite_id,
+      type_orientation,
+      specialite,
+      etablissement_destinataire,
+      praticien_destinataire,
+      motif_orientation,
+      donnees_cliniques,
+      niveau_urgence
+    } = req.body;
+
+    // Validation du type d'orientation
+    const orientationType = type_orientation === "INTERNE" ? "INTERNE" : "EXTERNE";
+    if (orientationType !== "EXTERNE" && orientationType !== "INTERNE") {
+      res.status(400).json({ error: "Le type d"orientation" doit être EXTERNE ou INTERNE." });
+      return;
+    }
+
+    // Validation des champs obligatoires communs
+    if (!consultation_id || typeof consultation_id !== "string") {
+    res.status(400).json({ error: 'L'identifiant de consultation (consultation_id) est obligatoire.' });
+      return;
+    }
+    if (!specialite || typeof specialite !== "string" || specialite.trim().length < 2) {
+      res.status(400).json({ error: "La spécialité est obligatoire (min. 2 caractères)." });
+      return;
+    }
+    if (!motif_orientation || typeof motif_orientation !== "string" || motif_orientation.trim().length < 5) {
+      res.status(400).json({ error: "Le motif de l'orientation est obligatoire (min. 5 caractères)." });
+      return;
+    }
+    const validUrgence = ["ROUTINE", "URGENT", "TRES_URGENT"].includes(niveau_urgence) ? niveau_urgence : "ROUTINE";
+
+    // 1. Vérifier que la consultation existe
+    const consultation = await queryOne<any>(
+      `SELECT * FROM consultations WHERE id = ? AND actif = 1`,
+      [consultation_id]
+    );
+    if (!consultation) {
+      res.status(404).json({ error: "Consultation introuvable." });
+      return;
+    }
+
+    // 2. Vérifier que la consultation appartient bien au médecin connecté
+    if (consultation.medecin_id !== user.id) {
+      await auditLogger.log({
+        userId: user.id,
+        action: "ACCESS_DENIED",
+        ressourceType: "ORIENTATION_SPECIALISTE",
+        ressourceId: consultation_id,
+        details: `Dr. ${user.nom_complet} a tenté de créer une orientation pour une consultation d'un confrère`,
+        ipAddress: req.ip || "127.0.0.1"
+      });
+      res.status(403).json({ error: "Vous ne pouvez pas créer d'orientation pour la consultation d'un confrère." });
+      return;
+    }
+
+    // 3. Cohérence patient & visite
+    if (patient_id && consultation.patient_id !== patient_id) {
+      res.status(400).json({ error: "Incohérence entre le patient indiqué et la consultation." });
+      return;
+    }
+    if (visite_id && consultation.visite_id !== visite_id) {
+      res.status(400).json({ error: "Incohérence entre la visite indiquée et la consultation." });
+      return;
+    }
+
+    // 4. Consultation finalisée : refuser
+    if (consultation.statut === "FINALISEE") {
+      res.status(409).json({
+        error: "Cette consultation est finalisée. Un motif explicite d'amendement est requis pour ajouter une orientation."
+      });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const id = `orient_${Date.now()}_${crypto.randomBytes(4).toString("hex")}`;
+    const numero_orientation = `OR-${Date.now()}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
+
+    await execute(
+      `INSERT INTO orientations_specialistes (
+        id, numero_orientation, consultation_id, visite_id, patient_id, medecin_id,
+        specialite, etablissement_destinataire, praticien_destinataire, motif_orientation,
+        donnees_cliniques, niveau_urgence, statut, date_orientation
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "ENVOYE")`,
+      [
+        id,
+        numero_orientation,
+        consultation_id,
+        consultation.visite_id || null,
+        consultation.patient_id,
+        user.id,
+        specialite.trim(),
+        etablissement_destinataire.trim(),
+        praticien_destinataire ? praticien_destinataire.trim() : null,
+        motif_orientation.trim(),
+        donnees_cliniques ? donnees_cliniques.trim() : null,
+        validUrgence
+      ]
+    );
+
+    res.status(201).json({ success: true, message: "Orientation créée avec succès." });
+  } catch (error: any) {
+    console.error("Erreur création orientation:", error);
+    res.status(500).json({ error: "Erreur interne lors de la création de l'orientation." });
+  }
+})

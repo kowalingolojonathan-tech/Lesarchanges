@@ -1,18 +1,17 @@
 import React from 'react';
 import { useAuth } from '../../context/AuthContext.js';
-import { 
-  LayoutDashboard, 
-  Users, 
-  FileText, 
-  ShieldAlert, 
-  UserPlus, 
-  HeartPulse, 
-  CreditCard, 
-  Stethoscope, 
-  FlaskConical, 
-  Settings, 
+import {
+  LayoutDashboard,
+  Users,
+  FileText,
+  ShieldAlert,
+  UserPlus,
+  HeartPulse,
+  CreditCard,
+  Stethoscope,
+  FlaskConical,
+  Settings,
   Tag,
-  ExternalLink,
   ShieldCheck,
   ChevronLeft,
   ChevronRight,
@@ -62,7 +61,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Dossiers Patients',
       badge: 'V1 Socle',
       icon: UserPlus,
-      roles: ['RÉCEPTION', 'MÉDECIN', 'ADMINISTRATEUR'],
+      roles: ['RÉCEPTION', 'ADMINISTRATEUR'],
     },
     {
       id: 'reception-vitals',
@@ -87,17 +86,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
       roles: ['MÉDECIN'],
     },
     {
-      id: 'doctor-lab-orders',
-      label: 'Prescriptions d\'Analyses',
-      badge: 'V1 Socle',
-      icon: FlaskConical,
-      roles: ['MÉDECIN'],
-    },
-    {
-      id: 'doctor-referrals',
-      label: 'Orientations Spécialistes',
-      badge: 'V1 Socle',
-      icon: ExternalLink,
+      id: 'doctor-reports',
+      label: 'Rapports / Historique',
+      icon: FileText,
       roles: ['MÉDECIN'],
     },
     // Menus pour LABORATOIRE
@@ -162,7 +153,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
     if (isAdmin && (item.roles.includes('ADMINISTRATEUR') || item.id === 'dashboard' || item.id === 'rbac-tester')) return true;
     if (isDirector && (item.roles.includes('MÉDECIN') || item.id === 'reception-patients' || item.id === 'admin-users' || item.id === 'dashboard')) return true;
-    if (isDoctor && (item.roles.includes('MÉDECIN') || item.id === 'dashboard' || item.id === 'reception-patients')) return true;
+    if (isDoctor && (item.roles.includes('MÉDECIN') || item.id === 'dashboard')) return true;
     if (isReception && (item.roles.includes('RÉCEPTION') || item.id === 'dashboard')) return true;
     if (isLab && (item.roles.includes('LABORATOIRE') || item.id === 'dashboard')) return true;
 

@@ -59,6 +59,12 @@ export const InterpretationVisiteModal: React.FC<InterpretationVisiteModalProps>
   const [selectedDoctorId, setSelectedDoctorId] = useState<string>('');
   const [isLoadingDoctors, setIsLoadingDoctors] = useState(false);
 
+  // Orientation externe — retour d'orientation
+  const [orientationsPatient, setOrientationsPatient] = useState<any[]>([]);
+  const [isLoadingOrientations, setIsLoadingOrientations] = useState(false);
+  const [selectedOrientationId, setSelectedOrientationId] = useState<string | null>(null);
+  const [selectedOrientation, setSelectedOrientation] = useState<any | null>(null);
+
   // Soumission
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -169,7 +175,25 @@ export const InterpretationVisiteModal: React.FC<InterpretationVisiteModalProps>
       }
     };
 
+    const fetchOrientations = async () => {
+      setIsLoadingOrientations(true);
+      setSelectedOrientationId(null);
+      setSelectedOrientation(null);
+      try {
+        const res = await apiFetch(`/api/medical/patients/${selectedPatient.id}/orientations-pending`);
+        if (res.ok) {
+          const data = await res.json();
+          setOrientationsPatient(data.orientations || []);
+        }
+      } catch {
+        // Silently ignore — patient peut n'avoir aucune orientation
+      } finally {
+        setIsLoadingOrientations(false);
+      }
+    };
+
     fetchDossiers();
+    fetchOrientations();
   }, [selectedPatient]);
 
   // Consultation sélectionnée actuelle
@@ -243,7 +267,8 @@ export const InterpretationVisiteModal: React.FC<InterpretationVisiteModalProps>
         montant_paye: typeEncaissement === 'NON_PAYE' ? 0 : montantPayeNum,
         devise: devisePaiement,
         mode_paiement: modePaiement,
-        motif_non_paiement: typeEncaissement === 'NON_PAYE' ? motifNonPaiement.trim() : undefined
+        motif_non_paiement: typeEncaissement === 'NON_PAYE' ? motifNonPaiement.trim() : undefined,
+        orientation_id: selectedOrientationId || undefined
       };
 
       const res = await apiFetch('/api/visites/interpretation', {
@@ -287,11 +312,14 @@ export const InterpretationVisiteModal: React.FC<InterpretationVisiteModalProps>
               <h3 className="text-base font-bold flex items-center space-x-2">
                 <span>Nouvelle Visite : Interprétation des Résultats</span>
                 <span className="text-[10px] bg-purple-500/40 text-purple-100 px-2 py-0.5 rounded-full font-semibold">
-                  Orientation Médecin
+                  {selectedOrientation ? 'Retour d\'orientation' : 'Orientation Médecin'}
                 </span>
               </h3>
               <p className="text-xs text-purple-200">
-                Patient revenant pour avis médical sur des examens de laboratoire déjà prescrits et réalisés.
+                {selectedOrientation
+                  ? `Patient revenant pour interpréter les résultats de l'orientation vers ${selectedOrientation.etablissement_destinataire}.`
+                  : 'Patient revenant pour avis médical sur des examens de laboratoire déjà prescrits et réalisés.'
+                }
               </p>
             </div>
           </div>
@@ -554,6 +582,82 @@ export const InterpretationVisiteModal: React.FC<InterpretationVisiteModalProps>
                   className="w-full px-3 py-1.5 text-xs bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-600 focus:outline-hidden"
                 />
               </div>
+            </div>
+          )}
+
+          {/* ÉTAPE 3.5 : RETOUR D'ORIENTATION EXTERNE (optionnel) */}
+          {selectedPatient && orientationsPatient.length > 0 && (
+            <div className="space-y-2 pt-2 border-t border-slate-200">
+              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center space-x-1.5">
+                <ArrowRight className="w-4 h-4 text-violet-600" />
+                <span>3.5. Retour d'orientation externe (optionnel)</span>
+              </label>
+
+              <p className="text-[11px] text-slate-500 mb-1.5">
+                Si le patient revient pour interpréter les résultats d'une orientation externe déjà créée, sélectionnez-la ci-dessous.
+              </p>
+
+              {isLoadingOrientations ? (
+                <div className="text-xs text-slate-400">Chargement des orientations en attente...</div>
+              ) : (
+                <div className="grid grid-cols-1 gap-2">
+                  {orientationsPatient.map((o: any) => (
+                    <button
+                      key={o.id}
+                      type="button"
+                      onClick={() => {
+                        if (selectedOrientationId === o.id) {
+                          setSelectedOrientationId(null);
+                          setSelectedOrientation(null);
+                        } else {
+                          setSelectedOrientationId(o.id);
+                          setSelectedOrientation(o);
+                        }
+                      }}
+                      className={`text-left p-2.5 rounded-lg border transition-colors ${
+                        selectedOrientationId === o.id
+                          ? 'bg-violet-50 border-violet-300 ring-2 ring-violet-200'
+                          : 'bg-slate-50 border-slate-200 hover:border-violet-200'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2">
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-300">
+                            EXTERNE
+                          </span>
+                          <span className="text-xs font-bold text-slate-900">{o.specialite}</span>
+                        </div>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                          {o.statut === 'ENVOYE' ? 'En attente de CR' : 'CR reçu'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-600 mt-0.5">
+                        <strong className="text-slate-700">Établissement : </strong>{o.etablissement_destinataire}
+                        {o.praticien_destinataire && <span> — Dr. {o.praticien_destinataire}</span>}
+                      </p>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Motif : {o.motif_orientation}
+                      </p>
+                      <div className="flex items-center justify-between mt-1 pt-1 border-t border-slate-200">
+                        <span className="text-[10px] text-slate-400 font-mono">N° {o.numero_orientation}</span>
+                        <span className="text-[10px] text-slate-400">
+                          Créée le {new Date(o.date_orientation).toLocaleDateString('fr-FR')}
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {selectedOrientation && (
+                <div className="p-2.5 bg-violet-50 border border-violet-200 rounded-lg text-xs text-violet-800 flex items-start space-x-2">
+                  <ArrowRight className="w-4 h-4 text-violet-600 shrink-0 mt-0.5" />
+                  <div>
+                    <strong>Retour d'orientation externe sélectionnée.</strong>
+                    <p className="mt-0.5">Cette orientation sera liée à la visite d'interprétation créée. Les informations originales de l'orientation sont conservées.</p>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

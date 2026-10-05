@@ -82,6 +82,7 @@ async function startServer() {
   app.post('/api/visites', requireAuth, requireRole(['RÉCEPTION', 'ADMINISTRATEUR']), visiteCtrl.createVisite);
   app.get('/api/visites/patient/:id/interpretation-dossiers', requireAuth, requireRole(['RÉCEPTION', 'MÉDECIN', 'ADMINISTRATEUR']), visiteCtrl.getPatientDossiersForInterpretation);
   app.post('/api/visites/interpretation', requireAuth, requireRole(['RÉCEPTION', 'ADMINISTRATEUR']), visiteCtrl.createInterpretationVisite);
+  app.get('/api/medical/patients/:id/orientations-pending', requireAuth, requireRole(['RÉCEPTION', 'MÉDECIN', 'ADMINISTRATEUR']), visiteCtrl.getPendingOrientationsForPatient);
   app.post('/api/visites/:id/vitals', requireAuth, requireRole(['RÉCEPTION', 'MÉDECIN', 'ADMINISTRATEUR']), visiteCtrl.recordVitals);
   app.patch('/api/visites/:id/assign-doctor', requireAuth, requireRole(['RÉCEPTION', 'ADMINISTRATEUR']), visiteCtrl.assignDoctor);
   app.patch('/api/visites/:id/status', requireAuth, requireRole(['RÉCEPTION', 'MÉDECIN', 'ADMINISTRATEUR']), visiteCtrl.updateVisiteStatus);
@@ -140,6 +141,7 @@ async function startServer() {
   app.patch('/api/medical/consultations/:id', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.updateConsultation);
   app.post('/api/medical/consultations/:id/finalize', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.finalizeConsultation);
   app.get('/api/medical/patients/:patient_id/history', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.getPatientMedicalHistory);
+  app.get('/api/medical/reports/search', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.searchDoctorReports);
 
   // --- ROUTES API PHASE 2C-1 & ÉTAPE 6 : PRESCRIPTIONS MÉDICALES & WORKFLOW IMPRESSION ---
   app.post('/api/medical/prescriptions', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.createPrescription);
@@ -171,6 +173,11 @@ async function startServer() {
   app.post('/api/laboratory/orders/:id/amend', requireAuth, requireRole(['LABORATOIRE']), medicalCtrl.amendLabResults);
   app.get('/api/medical/lab-orders/:id/bulletin', requireAuth, requireRole(['MÉDECIN', 'LABORATOIRE', 'ADMINISTRATEUR']), medicalCtrl.getLabBulletin);
 app.post('/api/medical/lab-orders/:id/mark-viewed', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.markLabOrderViewed);
+
+  // --- ROUTES ORIENTATIONS SPECIALISTES EXTERNES ---
+  app.post('/api/medical/orientations', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.createOrientation);
+  app.get('/api/medical/consultations/:id/orientations', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.getConsultationOrientations);
+  app.get('/api/medical/orientations/pending', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.getPendingOrientations);
 
   // --- NOTIFICATIONS SYSTÈME ---
   app.get('/api/notifications', requireAuth, medicalCtrl.getUserNotifications);

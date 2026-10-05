@@ -1,16 +1,17 @@
 import React from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { 
-  LayoutDashboard, 
-  UserPlus, 
-  Stethoscope, 
-  CreditCard, 
-  FlaskConical, 
-  Users, 
-  HeartPulse, 
+import {
+  LayoutDashboard,
+  UserPlus,
+  Stethoscope,
+  CreditCard,
+  FlaskConical,
+  Users,
+  HeartPulse,
   Menu,
   Clock,
-  Printer
+  Printer,
+  FileText
 } from 'lucide-react';
 
 interface MobileBottomNavProps {
@@ -38,8 +39,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
     if (isDoctor && !isAdmin && !isDirector) {
       return [
         { id: 'dashboard', label: 'Consultations', icon: Stethoscope },
-        { id: 'reception-patients', label: 'Patients', icon: UserPlus },
-        { id: 'doctor-lab-orders', label: 'Analyses', icon: FlaskConical },
+        { id: 'doctor-reports', label: 'Rapports', icon: FileText },
       ];
     }
     if (isReception) {
