@@ -3348,7 +3348,7 @@ export async function getLaboratoryQueue(req: AuthenticatedRequest, res: Respons
 
     const isCompleted = (statut: string) => ['RESULTATS_VALIDES', 'RESULTAT_VALIDE', 'TERMINEE'].includes(statut);
 
-    const general_orders = enriched.filter((o) => !o.laborantin_id && !isCompleted(o.statut));
+    const general_orders = enriched.filter((o) => !o.laborantin_id && !isCompleted(o.statut) && !o.bloque_caisse);
     const my_orders = enriched.filter((o) => o.laborantin_id === user.id && !isCompleted(o.statut));
     const other_assigned_orders = enriched.filter((o) => o.laborantin_id && o.laborantin_id !== user.id && !isCompleted(o.statut));
     const completed_orders = enriched.filter((o) => isCompleted(o.statut));

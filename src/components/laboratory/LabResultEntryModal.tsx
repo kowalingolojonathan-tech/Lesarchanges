@@ -15,7 +15,7 @@ import {
   Sparkles,
   HelpCircle
 } from 'lucide-react';
-import { LabOrder, LabAnalyse, LabResultAmendment } from '../../types';
+import { LabOrder, LabAnalyse, LabResultAmendment, CatalogueExam } from '../../types';
 import { api } from '../../lib/api';
 
 // Valeurs de référence et unités prédéfinies pour assister le laborantin
@@ -59,6 +59,23 @@ export const LabResultEntryModal: React.FC<LabResultEntryModalProps> = ({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [catalogueExams, setCatalogueExams] = useState<CatalogueExam[]>([]);
+  const [catalogueLoading, setCatalogueLoading] = useState<boolean>(false);
+
+  useEffect(() => {
+    async function loadCatalogue() {
+      try {
+        setCatalogueLoading(true);
+        const res = await api.get<{ exams: CatalogueExam[] }>('/api/lab/catalogue/exams');
+        setCatalogueExams(res.exams || []);
+      } catch (err) {
+        console.error('Erreur chargement catalogue:', err);
+      } finally {
+        setCatalogueLoading(false);
+      }
+    }
+    loadCatalogue();
+  }, []);
 
   // État du prélèvement
   const [prelevementDate, setPrelevementDate] = useState<string>(
@@ -81,6 +98,10 @@ export const LabResultEntryModal: React.FC<LabResultEntryModalProps> = ({
     interpretation: 'NORMAL' | 'ANORMAL' | 'CRITIQUE' | '';
     observation: string;
     commentaire_technique: string;
+    instructions?: string;
+    mode?: 'GLOBAL' | 'PERSONNALISE';
+    examen_id?: string | null;
+    selection_details?: { parametre_id?: string; sous_parametre_id?: string }[] | null;
   }>>(() => {
     return (order.analyses || []).map((an: LabAnalyse) => {
       // Détecter preset si pas encore renseigné
@@ -105,7 +126,11 @@ export const LabResultEntryModal: React.FC<LabResultEntryModalProps> = ({
         valeurs_reference: defaultRef,
         interpretation: (an.interpretation as any) || '',
         observation: an.observation || '',
-        commentaire_technique: an.commentaire_technique || ''
+        commentaire_technique: an.commentaire_technique || '',
+        instructions: an.instructions || undefined,
+        mode: (an.mode as any) || 'GLOBAL',
+        examen_id: an.examen_id || null,
+        selection_details: an.selection_details || null,
       };
     });
   });
@@ -295,33 +320,68 @@ export const LabResultEntryModal: React.FC<LabResultEntryModalProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs overflow-y-auto">
       <div className="relative w-full max-w-5xl rounded-xl bg-white shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[94vh]">
         
-        {/* Entête du modal */}
+        {/* Entête du modal — Détail complet de la prescription */}
         <div className="flex items-center justify-between px-6 py-4 bg-slate-900 text-white border-b border-slate-800">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-emerald-600/30 text-emerald-400 border border-emerald-500/30">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="p-2 rounded-lg bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 shrink-0">
               <FlaskConical className="w-5 h-5" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="font-bold text-base text-white">
-                  Saisie & Validation des Analyses Biologiques
-                </h2>
-                <span className="font-mono text-xs px-2 py-0.5 rounded bg-slate-800 text-emerald-400 border border-slate-700">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="font-bold text-sm text-white">
                   {order.numero_demande || order.id}
-                </span>
+                </h2>
                 {order.urgence === 'URGENTE' && (
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                    URGENT
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30 shrink-0">
+                    URGENTE
+                  </span>
+                )}
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
+                  order.statut === 'PRISE_EN_CHARGE'
+                    ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40'
+                    : order.statut === 'DEMANDE_CREEE'
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                    : order.statut === 'RESULTATS_SAISIS'
+                    ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
+                    : ['RESULTATS_VALIDES', 'RESULTAT_VALIDE'].includes(order.statut)
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                    : 'bg-slate-700 text-slate-300 border border-slate-600'
+                }`}>
+                  {order.statut}
+                </span>
+                {order.laborantin_nom && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 shrink-0">
+                    {order.laborantin_nom}
+                  </span>
+                )}
+                {order.bloque_caisse ? (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40 shrink-0">
+                    PAIEMENT EN ATTENTE
+                  </span>
+                ) : (
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
+                    order.statut_paiement_labo === 'PAYÉ'
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                      : order.statut_paiement_labo === 'PARTIELLEMENT PAYÉ'
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                      : order.statut_paiement_labo?.includes('Dérogation')
+                      ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40'
+                      : 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                  }`}>
+                    {order.statut_paiement_labo || 'NON PAYÉ'}
                   </span>
                 )}
               </div>
-              <p className="text-xs text-slate-300 mt-0.5">
-                Patient : <strong className="text-white uppercase">{order.patient_nom} {order.patient_prenom}</strong> (N° {order.numero_dossier}) — Prescrit par Dr. {order.medecin_nom}
+              <p className="text-xs text-slate-300 mt-0.5 truncate">
+                Patient : <strong className="text-white uppercase">{order.patient_nom} {order.patient_prenom}</strong>
+                {' — '}Dossier N° <strong className="text-white">{order.numero_dossier || '—'}</strong>
+                {' — '}Prescrit par <strong className="text-white">Dr. {order.medecin_nom || 'traitant'}</strong>
+                {order.numero_visite && <span>{' — '}Visite <strong className="text-white">{order.numero_visite}</strong></span>}
               </p>
             </div>
           </div>
-          
-          <div className="flex items-center gap-2">
+
+          <div className="flex items-center gap-2 shrink-0 ml-4">
             <button
               type="button"
               onClick={() => onOpenBulletin(order.id)}
@@ -336,6 +396,35 @@ export const LabResultEntryModal: React.FC<LabResultEntryModalProps> = ({
             >
               <X className="w-5 h-5" />
             </button>
+          </div>
+        </div>
+
+        {/* Résumé prescription — informations cliniques et paramétrage */}
+        <div className="px-6 py-3 bg-slate-50 border-b border-slate-200 flex flex-wrap items-start gap-4 text-xs">
+          {order.indication_clinique && (
+            <div className="flex items-start gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-xl">
+              <ShieldAlert className="w-3.5 h-3.5 text-blue-600 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold text-blue-900 uppercase tracking-wider text-[10px] block">Indication clinique</span>
+                <span className="text-blue-800">{order.indication_clinique}</span>
+              </div>
+            </div>
+          )}
+          {order.commentaire && (
+            <div className="flex items-start gap-2 px-3 py-2 bg-slate-100 border border-slate-200 rounded-xl">
+              <HelpCircle className="w-3.5 h-3.5 text-slate-500 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold text-slate-700 uppercase tracking-wider text-[10px] block">Instructions médecin</span>
+                <span className="text-slate-700">{order.commentaire}</span>
+              </div>
+            </div>
+          )}
+          <div className="flex items-center gap-3 px-3 py-2 bg-indigo-50 border border-indigo-200 rounded-xl">
+            <FlaskConical className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+            <div>
+              <span className="font-bold text-indigo-900 uppercase tracking-wider text-[10px] block">Nombre d'analyses</span>
+              <span className="text-indigo-800 font-bold">{order.analyses?.length || 0} examen(s)</span>
+            </div>
           </div>
         </div>
 
@@ -468,13 +557,14 @@ export const LabResultEntryModal: React.FC<LabResultEntryModalProps> = ({
 
           {/* Bloc 2 : Saisie des analyses demandées */}
           <div className="rounded-lg bg-white border border-slate-200 shadow-2xs overflow-hidden">
-            <div className="px-4 py-3 bg-slate-100 border-b border-slate-200 flex items-center justify-between">
+            <div className="px-4 py-3 bg-slate-100 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
                 <FlaskConical className="w-4 h-4 text-emerald-600" />
-                <span>Analyses prescrites ({analysesData.length})</span>
+                <span>Prescription du médecin — {order.analyses?.length || 0} examen(s)</span>
               </h3>
               <span className="text-[11px] text-slate-500">
-                Renseignez les valeurs mesurées, unités et interprétations
+                {order.analyses?.some(a => a.mode === 'PERSONNALISE') ? 'Mode PERSONNALISÉ' : 'Mode GLOBAL'}
+                {' — '}Renseignez les valeurs mesurées, unités et interprétations
               </span>
             </div>
 
@@ -482,9 +572,13 @@ export const LabResultEntryModal: React.FC<LabResultEntryModalProps> = ({
               {analysesData.map((analyse, index) => {
                 const isAnormal = analyse.interpretation === 'ANORMAL';
                 const isCritique = analyse.interpretation === 'CRITIQUE';
+                const isGlobal = !analyse.mode || analyse.mode === 'GLOBAL';
+                const selectedExam = catalogueExams.find(e => e.id === analyse.examen_id);
+                const hasParams = isGlobal && selectedExam?.parametres && selectedExam.parametres.length > 0;
+                const hasSelection = !isGlobal && (analyse.selection_details || []).length > 0;
 
                 return (
-                  <div 
+                  <div
                     key={analyse.id}
                     className={`p-4 transition ${
                       isCritique ? 'bg-rose-50/40' : isAnormal ? 'bg-amber-50/30' : 'hover:bg-slate-50/50'
@@ -500,6 +594,13 @@ export const LabResultEntryModal: React.FC<LabResultEntryModalProps> = ({
                         </h4>
                         <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">
                           {analyse.type_echantillon}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                          isGlobal
+                            ? 'bg-blue-100 text-blue-800 border-blue-300'
+                            : 'bg-purple-100 text-purple-800 border-purple-300'
+                        }`}>
+                          {isGlobal ? 'GLOBAL' : 'PERSONNALISÉ'}
                         </span>
                       </div>
 
@@ -527,6 +628,72 @@ export const LabResultEntryModal: React.FC<LabResultEntryModalProps> = ({
                         ))}
                       </div>
                     </div>
+
+                    {/* Affichage des paramètres de prescription */}
+                    {(hasParams || hasSelection || analyse.instructions) && (
+                      <div className="mb-3 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs">
+                        {analyse.instructions && (
+                          <div className="mb-1.5 flex items-start gap-1.5">
+                            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider shrink-0 mt-0.5">Instr. :</span>
+                            <span className="text-slate-700 italic">{analyse.instructions}</span>
+                          </div>
+                        )}
+                        {hasParams && (() => {
+                          const ex = selectedExam;
+                          if (!ex || !ex.parametres) return null;
+                          return (
+                            <div className="pt-1.5 border-t border-slate-200">
+                              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+                                Paramètres du catalogue ({ex.nom}) :
+                              </div>
+                              <div className="space-y-0.5">
+                                {ex.parametres.map((param: any) => (
+                                  <div key={param.id} className="flex items-center gap-1.5 text-slate-700">
+                                    <span className="text-[11px] font-medium">• {param.nom}</span>
+                                    {param.unite && <span className="text-slate-400 text-[10px]">({param.unite})</span>}
+                                    {param.sous_parametres && param.sous_parametres.length > 0 && (
+                                      <div className="ml-5 space-y-0.5">
+                                        {param.sous_parametres.map((sub: any) => (
+                                          <div key={sub.id} className="text-[10px] text-slate-500">
+                                            – {sub.nom}{sub.unite && <span> ({sub.unite})</span>}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                        {hasSelection && selectedExam && (
+                          <div className="pt-1.5 border-t border-slate-200">
+                            <div className="text-[10px] font-bold text-purple-700 uppercase tracking-wider mb-1">
+                              Paramètres sélectionnés ({selectedExam.nom}) :
+                            </div>
+                            {(() => {
+                              const examParams = selectedExam.parametres || [];
+                              return (
+                                <div className="space-y-0.5">
+                                  {analyse.selection_details!.map((sel, i) => {
+                                    const param = examParams.find((p: any) => p.id === sel.parametre_id);
+                                    if (!param) return null;
+                                    const sub = param.sous_parametres?.find((s: any) => s.id === sel.sous_parametre_id);
+                                    return (
+                                      <div key={i} className="text-[11px] text-purple-800 font-medium">
+                                        • {sub ? sub.nom : param.nom}
+                                        {sub?.unite && <span className="text-slate-500"> ({sub.unite})</span>}
+                                        {!sub && param.unite && <span className="text-slate-500"> ({param.unite})</span>}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Grille des champs de saisie pour l'analyse */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 text-xs">

@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { apiFetch } from '../../lib/api';
-import { DemandeLaboratoire, LaborantinUser, LaboratoryQueueData } from '../../types';
+import { DemandeLaboratoire, LaborantinUser, LaboratoryQueueData, CatalogueExam } from '../../types';
 import { LabResultEntryModal } from '../laboratory/LabResultEntryModal';
 import { LabReportModal } from './LabReportModal';
 
@@ -42,6 +42,20 @@ export const LaboratoryQueueView: React.FC = () => {
 
   // Preview Modal
   const [previewOrder, setPreviewOrder] = useState<DemandeLaboratoire | null>(null);
+
+  // Catalogue examens (Phase 2C-5)
+  const [catalogueExams, setCatalogueExams] = useState<CatalogueExam[]>([]);
+  const fetchCatalogue = async () => {
+    try {
+      const res = await apiFetch('/api/lab/catalogue/exams');
+      if (res.ok) {
+        const data = await res.json();
+        setCatalogueExams(data.exams || []);
+      }
+    } catch (err) {
+      console.error('Erreur chargement catalogue:', err);
+    }
+  };
 
   // Charger la file de laboratoire
   const fetchQueue = async () => {
@@ -80,6 +94,7 @@ export const LaboratoryQueueView: React.FC = () => {
   useEffect(() => {
     fetchQueue();
     fetchLaborantins();
+    fetchCatalogue();
   }, []);
 
   // Prise en charge atomique (Claim)
@@ -528,23 +543,17 @@ export const LaboratoryQueueView: React.FC = () => {
                   {/* État d'attribution, Statut & Actions */}
                   <div className="flex flex-wrap items-center gap-2">
                     
-                    {/* Badge Statut Paiement (Lecture seule Laboratoire) */}
+                    {/* Badge Statut Paiement (Lecture seule Laboratoire) — utiliser le statut enrichi sans montant */}
                     <span className={`text-xs font-bold px-2.5 py-1 rounded-xl border flex items-center gap-1 ${
-                      order.statut_paiement === 'PAYÉ' 
-                        ? 'bg-emerald-100 text-emerald-800 border-emerald-300' 
-                        : order.statut_paiement === 'PARTIELLEMENT PAYÉ'
+                      order.statut_paiement_labo === 'PAYÉ'
+                        ? 'bg-emerald-100 text-emerald-800 border-emerald-300'
+                        : order.statut_paiement_labo === 'PARTIELLEMENT PAYÉ'
                         ? 'bg-amber-100 text-amber-800 border-amber-300'
-                        : order.has_derogation
+                        : order.statut_paiement_labo?.includes('Dérogation')
                         ? 'bg-blue-100 text-blue-800 border-blue-300'
                         : 'bg-rose-100 text-rose-800 border-rose-300'
                     }`}>
-                      {order.statut_paiement === 'PAYÉ' 
-                        ? 'PAYÉ' 
-                        : order.statut_paiement === 'PARTIELLEMENT PAYÉ' 
-                        ? 'PARTIELLEMENT PAYÉ' 
-                        : order.has_derogation 
-                        ? 'NON PAYÉ (Dérogation Caisse)' 
-                        : 'NON PAYÉ (En attente Caisse)'}
+                      {order.statut_paiement_labo || order.statut_paiement || 'NON PAYÉ'}
                     </span>
 
                     {/* Badge Statut Biologique */}
@@ -562,6 +571,11 @@ export const LaboratoryQueueView: React.FC = () => {
                       <span className="text-xs font-medium px-2.5 py-1 rounded-xl bg-purple-100 text-purple-800 border border-purple-300 flex items-center gap-1.5">
                         <Clock className="w-3.5 h-3.5 text-purple-600" />
                         Prélèvement Effectué
+                      </span>
+                    ) : order.statut === 'PRISE_EN_CHARGE' ? (
+                      <span className="text-xs font-medium px-2.5 py-1 rounded-xl bg-indigo-100 text-indigo-800 border border-indigo-300 flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 text-indigo-600" />
+                        En attente de prélèvement
                       </span>
                     ) : null}
 
@@ -672,34 +686,102 @@ export const LaboratoryQueueView: React.FC = () => {
                     {order.indication_clinique}
                   </div>
                 )}
+                {order.commentaire && (
+                  <div className="mt-1 p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700">
+                    <strong className="text-slate-900">Instructions du médecin : </strong>
+                    {order.commentaire}
+                  </div>
+                )}
 
                 {/* Liste des analyses à faire */}
                 <div className="mt-4 border-t border-slate-100 pt-3">
-                  <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
-                    Analyses demandées ({order.analyses?.length || 0})
+                  <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-2">
+                    <span>Nombre d'analyses à effectuer : {order.analyses?.length || 0}</span>
+                    {order.analyses?.length && order.analyses.some(a => a.mode === 'PERSONNALISE') && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 border border-purple-200">PERSONNALISÉ</span>
+                    )}
+                    {order.analyses?.length && !order.analyses.some(a => a.mode === 'PERSONNALISE') && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200">GLOBAL</span>
+                    )}
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-                    {order.analyses?.map((ana, idx) => (
-                      <div 
-                        key={idx}
-                        className="p-2 bg-slate-50 border border-slate-200 rounded-xl text-xs flex items-center justify-between"
-                      >
-                        <div>
-                          <div className="font-semibold text-slate-900">{ana.nom_analyse}</div>
+                    {order.analyses?.map((ana, idx) => {
+                      const selectedExam = catalogueExams.find(e => e.id === ana.examen_id);
+                      const isGlobal = !ana.mode || ana.mode === 'GLOBAL';
+                      return (
+                        <div key={idx} className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs">
+                          <div className="flex items-start justify-between gap-2 mb-1.5">
+                            <span className="font-semibold text-slate-900 leading-tight flex-1">{ana.nom_analyse}</span>
+                            <div className="flex flex-col items-end gap-1 shrink-0">
+                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
+                                isGlobal ? 'bg-blue-100 text-blue-800 border-blue-300' : 'bg-purple-100 text-purple-800 border-purple-300'
+                              }`}>
+                                {isGlobal ? 'GLOBAL' : 'PERSONNALISÉ'}
+                              </span>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                                ana.type_echantillon === 'SANG' ? 'bg-rose-100 text-rose-800' :
+                                ana.type_echantillon === 'URINE' ? 'bg-amber-100 text-amber-800' :
+                                ana.type_echantillon === 'SELLES' ? 'bg-orange-100 text-orange-800' :
+                                'bg-slate-200 text-slate-700'
+                              }`}>
+                                {ana.type_echantillon}
+                              </span>
+                            </div>
+                          </div>
                           {ana.instructions && (
-                            <div className="text-[10px] text-slate-500 italic">{ana.instructions}</div>
+                            <div className="text-[10px] text-slate-500 italic mt-1 border-t border-slate-100 pt-1">
+                              Instr : {ana.instructions}
+                            </div>
+                          )}
+                          {isGlobal && selectedExam?.parametres && selectedExam.parametres.length > 0 && (
+                            <div className="mt-1.5 pt-1.5 border-t border-slate-100">
+                              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Paramètres du catalogue :</div>
+                              <div className="space-y-0.5">
+                                {selectedExam.parametres.map((param: any) => (
+                                  <div key={param.id} className="text-[10px] text-slate-700 flex items-center gap-1">
+                                    <span className="font-medium">• {param.nom}</span>
+                                    {param.unite && <span className="text-slate-400">({param.unite})</span>}
+                                    {param.sous_parametres && param.sous_parametres.length > 0 && (
+                                      <div className="ml-4 space-y-0.5">
+                                        {param.sous_parametres.map((sub: any) => (
+                                          <div key={sub.id} className="text-[10px] text-slate-500 pl-2">
+                                            - {sub.nom}{sub.unite && <span> ({sub.unite})</span>}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {!isGlobal && (ana.selection_details || []).length > 0 && selectedExam?.parametres && (
+                            <div className="mt-1.5 pt-1.5 border-t border-slate-100">
+                              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Paramètres sélectionnés :</div>
+                              {(() => {
+                                const examParams = selectedExam!.parametres!;
+                                return (
+                                  <div className="space-y-0.5">
+                                    {ana.selection_details!.map((sel, i) => {
+                                      const param = examParams.find((p: any) => p.id === sel.parametre_id);
+                                      if (!param) return null;
+                                      const sub = param.sous_parametres?.find((s: any) => s.id === sel.sous_parametre_id);
+                                      return (
+                                        <div key={i} className="text-[10px] text-purple-700 font-medium">
+                                          {sub ? `• ${sub.nom}` : `• ${param.nom}`}
+                                          {sub?.unite && <span className="text-slate-500"> ({sub.unite})</span>}
+                                          {!sub && param.unite && <span className="text-slate-500"> ({param.unite})</span>}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                );
+                              })()}
+                            </div>
                           )}
                         </div>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
-                          ana.type_echantillon === 'SANG' ? 'bg-rose-100 text-rose-800' :
-                          ana.type_echantillon === 'URINE' ? 'bg-amber-100 text-amber-800' :
-                          ana.type_echantillon === 'SELLES' ? 'bg-orange-100 text-orange-800' :
-                          'bg-slate-200 text-slate-700'
-                        }`}>
-                          {ana.type_echantillon}
-                        </span>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               </div>

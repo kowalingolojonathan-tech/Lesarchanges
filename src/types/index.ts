@@ -502,6 +502,13 @@ export interface AnalyseLaboratoire {
   date_validation?: string | null;
   created_at?: string;
   updated_at?: string;
+  // Phase 2C-5 Catalogue fields
+  examen_id?: string | null;
+  mode?: ModePrescription;
+  parametre_id?: string | null;
+  sous_parametre_id?: string | null;
+  selection_details?: { parametre_id?: string; sous_parametre_id?: string }[] | null;
+  prix_usd?: number | null;
 }
 
 export type LabAnalyse = AnalyseLaboratoire;
