@@ -3817,18 +3817,112 @@ export async function recordLabPrelevement(req: AuthenticatedRequest, res: Respo
 }
 
 /**
- * Enregistrer ou modifier les résultats d'analyses (brouillon ou intermédiaire)
- * POST /api/laboratory/orders/:id/results
- * Rôle strict : LABORATOIRE
- */
+   * Vérification et enregistrement de la conformité de l'échantillon
+   * POST /api/laboratory/orders/:id/conformite
+   * Rôle strict : LABORATOIRE
+   */
+  export async function setEchantillonConformite(req: AuthenticatedRequest, res: Response): Promise<void> {
+    try {
+      const user = req.user;
+      if (!user || user.role !== 'LABORATOIRE') {
+        res.status(403).json({ error: 'Accès strictement réservé au personnel du laboratoire (LABORATOIRE).' });
+        return;
+      }
+
+      const { id } = req.params;
+      const { conforme, motif } = req.body;
+      const now = new Date().toISOString();
+
+      const existing = await queryOne<any>(
+        `SELECT * FROM echantillons_laboratoire WHERE demande_id = ? LIMIT 1`,
+        [id]
+      );
+
+      if (!existing) {
+        res.status(404).json({ error: 'Aucun échantillon trouvé pour cette demande.' });
+        return;
+      }
+
+      // Empêcher un double changement de conformité
+      if (existing.statut === 'ECHANTILLON_RECU' || existing.statut === 'ECHANTILLON_NON_CONFORME') {
+        res.status(400).json({
+          error: 'La conformité de l\'échantillon a déjà été enregistrée.'
+        });
+        return;
+      }
+
+      let newStatut: string;
+      let newMotif: string | null = null;
+
+      if (conforme) {
+        // Si conforme : faire progresser vers ECHANTILLON_RECU
+        newStatut = 'ECHANTILLON_RECU';
+      } else {
+        // Si non conforme : mettre dans NON_CONFORME et exiger un motif
+        if (!motif || motif.trim().length < 2) {
+          res.status(400).json({
+            error: 'Un motif de non-conformité est obligatoire (au moins 2 caractères).'
+          });
+          return;
+        }
+        newStatut = 'ECHANTILLON_NON_CONFORME';
+        newMotif = motif.trim();
+      }
+
+      // Mettre à jour l'échantillon
+      await execute(
+        `UPDATE echantillons_laboratoire SET
+          statut = ?,
+          motif_non_conformite = ?
+         WHERE demande_id = ?`,
+        [newStatut, newMotif, id]
+      );
+
+      // Mettre à jour le statut de la demande associée si nécessaire
+      // La demande passe de PRILEVEMENT_EFFECTUE vers le statut approprié
+      const nouveauStatutDemande = conforme ? 'ECHANTILLON_RECU' : 'ECHANTILLON_NON_CONFORME';
+      await execute(
+        `UPDATE demandes_laboratoire SET
+          statut = ?,
+          updated_at = ?
+         WHERE id = ?`,
+        [nouveauStatutDemande, now, id]
+      );
+
+      await auditLogger.log({
+        userId: user.id,
+        action: 'ECHANTILLON_CONFORMITE',
+        ressourceType: 'DEMANDE_LABORATOIRE',
+        ressourceId: id,
+        details: `Conformité échantillon ${conforme ? 'conforme' : 'non conforme'} par ${user.nom_complet}. Motif: ${newMotif || ''}`,
+        ipAddress: req.ip || '127.0.0.1'
+      });
+
+      res.json({
+        message: conforme ? 'Échantillon marqué comme conforme.' : 'Échantillon marqué comme non conforme.',
+        echantillon: {
+          id: existing.id,
+          statut: newStatut,
+          motif_non_conformite: newMotif
+        }
+      });
+    } catch (error: any) {
+      console.error('Erreur conformité échantillon:', error);
+      res.status(500).json({ error: "Erreur interne lors de l'enregistrement de la conformité." });
+    }
+  }
+
+  /**
+   * Enregistrer ou modifier les résultats d'analyses (brouillon ou intermédiaire)
+   * POST /api/laboratory/orders/:id/results
+   * Rôle strict : LABORATOIRE
+   */
 export async function saveLabResults(req: AuthenticatedRequest, res: Response): Promise<void> {
-  try {
     const user = req.user;
     if (!user || user.role !== 'LABORATOIRE') {
       res.status(403).json({ error: 'Accès strictement réservé au personnel du laboratoire (LABORATOIRE).' });
       return;
     }
-
     const { id } = req.params;
     const {
       results,
@@ -3870,6 +3964,7 @@ export async function saveLabResults(req: AuthenticatedRequest, res: Response): 
 
     const targetStatut = statut && VALID_LAB_STATUSES.includes(statut) ? statut : 'RESULTATS_SAISIS';
 
+    try {
     await transaction(async () => {
       // 1. Mettre à jour chaque analyse individuelle
       for (const resItem of results) {
@@ -3985,7 +4080,7 @@ export async function saveLabResults(req: AuthenticatedRequest, res: Response): 
     });
   } catch (error: any) {
     console.error('Erreur enregistrement résultats laboratoire:', error);
-    res.status(500).json({ error: 'Erreur interne lors de l\'enregistrement des résultats.' });
+    res.status(500).json({ error: "Erreur interne lors de l'enregistrement des résultats." });
   }
 }
 

@@ -173,6 +173,7 @@ async function startServer() {
   // --- ROUTES API PHASE 2C-4 : RÉSULTATS, VALIDATION, NOTIFICATIONS & AMENDEMENTS ---
   app.post('/api/laboratory/orders/:id/prelevement', requireAuth, requireRole(['LABORATOIRE']), medicalCtrl.recordLabPrelevement);
   app.post('/api/laboratory/orders/:id/results', requireAuth, requireRole(['LABORATOIRE']), medicalCtrl.saveLabResults);
+  app.post('/api/laboratory/orders/:id/conformite', requireAuth, requireRole(['LABORATOIRE']), medicalCtrl.setEchantillonConformite);
   app.post('/api/laboratory/orders/:id/validate', requireAuth, requireRole(['LABORATOIRE']), medicalCtrl.validateLabResults);
   app.post('/api/laboratory/orders/:id/amend', requireAuth, requireRole(['LABORATOIRE']), medicalCtrl.amendLabResults);
   app.get('/api/medical/lab-orders/:id/bulletin', requireAuth, requireRole(['MÉDECIN', 'LABORATOIRE', 'ADMINISTRATEUR']), medicalCtrl.getLabBulletin);

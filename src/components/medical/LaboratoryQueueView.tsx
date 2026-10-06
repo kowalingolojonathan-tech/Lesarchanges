@@ -65,7 +65,32 @@ export const LaboratoryQueueView: React.FC = () => {
       const res = await apiFetch('/api/laboratory/queue');
       if (res.ok) {
         const data = await res.json();
-        setQueueData(data);
+        const normalizeOrders = (orders: any[] = []) => orders.map((order: any) => ({
+          ...order,
+          analyses: order.analyses?.map((ana: any) => ({
+            ...ana,
+            selection_details: (() => {
+              try {
+                if (typeof ana.selection_details === 'string') {
+                  const parsed = JSON.parse(ana.selection_details);
+                  return Array.isArray(parsed) ? parsed : [];
+                }
+                return Array.isArray(ana.selection_details) ? ana.selection_details : [];
+              } catch {
+                console.warn('[LaboratoryQueue] Invalid selection_details JSON for analysis:', ana.id);
+                return [];
+              }
+            })()
+          }))
+        }));
+        setQueueData({
+          ...data,
+          my_orders: normalizeOrders(data.my_orders),
+          general_orders: normalizeOrders(data.general_orders),
+          other_assigned_orders: normalizeOrders(data.other_assigned_orders),
+          completed_orders: normalizeOrders(data.completed_orders),
+          all_active_orders: normalizeOrders(data.all_active_orders)
+        });
       } else {
         const err = await res.json();
         setError(err.error || 'Erreur lors du chargement de la file laboratoire.');

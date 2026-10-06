@@ -62,6 +62,7 @@ export const LabResultEntryModal: React.FC<LabResultEntryModalProps> = ({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [catalogueExams, setCatalogueExams] = useState<CatalogueExam[]>([]);
   const [catalogueLoading, setCatalogueLoading] = useState<boolean>(false);
+  const [conformiteModal, setConformiteModal] = useState<{ ouverte: boolean; conforme: boolean } | null>(null);
 
   useEffect(() => {
     async function loadCatalogue() {
@@ -207,6 +208,33 @@ export const LabResultEntryModal: React.FC<LabResultEntryModalProps> = ({
       setError(err.message || 'Erreur lors de l\'enregistrement du prélèvement.');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // Gestion de la conformité de l'échantillon
+  const handleConformite = async (conforme: boolean, motif?: string) => {
+    if (!order.echantillon?.id) {
+      setError('Aucun échantillon identifié pour cette demande.');
+      setConformiteModal(null);
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      const res = await api.post<{ message: string }>(
+        `/api/laboratory/orders/${order.id}/conformite`,
+        { conforme, motif: motif || undefined }
+      );
+      setSuccessMessage(res.message || 'Conformité enregistrée.');
+       setConformiteModal(null);
+       setTimeout(() => setSuccessMessage(null), 3000);
+    } catch (err: any) {
+      setError(err.message || 'Erreur lors de l\'enregistrement de la conformité.');
+    } finally {
+      setSubmitting(false);
+      setConformiteModal(null);
     }
   };
 
@@ -576,6 +604,40 @@ export const LabResultEntryModal: React.FC<LabResultEntryModalProps> = ({
                   <p className="text-[10px] text-slate-500">
                     Ce code identifie l'échantillon de manière unique. À utiliser pour le suivi, l'impression et la traçabilité.
                   </p>
+                </div>
+              )}
+              {isPrelevementDone && order.echantillon && !order.echantillon.statut && (
+                <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-2">
+                  <p className="text-[11px] font-bold text-slate-900 uppercase tracking-wider mb-2">Conformité de l'échantillon</p>
+                  <div className="flex gap-4">
+<button
+                        onClick={() => setConformiteModal({ ouverte: true, conforme: true })}
+                       disabled={order.echantillon?.statut !== undefined}
+                       className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-medium rounded-lg transition cursor-pointer">
+                      <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
+                      Échantillon conforme
+                    </button>
+<button
+                        onClick={() => setConformiteModal({ouverte: true, conforme: false })}
+                       disabled={order.echantillon?.statut !== undefined}
+                       className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white text-xs font-medium rounded-lg transition cursor-pointer">
+                       <AlertCircle className="w-3.5 h-3.5 mr-1" />
+                      Échantillon non conforme
+                    </button>
+                  </div>
+                </div>
+              )}
+              {isPrelevementDone && order.echantillon?.statut && (
+                <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-lg text-[11px] space-y-1">
+                  <p className="font-bold text-slate-900 uppercase tracking-wider mb-1">Statut :</p>
+                  <span className={`text-emerald-600 ${order.echantillon.statut === 'ECHANTILLON_RECU' ? 'font-semibold' : 'font-medium'}`}>
+                    {order.echantillon.statut === 'ECHANTILLON_RECU' ? 'Conforme' : order.echantillon.statut === 'ECHANTILLON_NON_CONFORME' ? 'Non conforme' : order.echantillon.statut}
+                  </span>
+                  {order.echantillon.motif_non_conformite && (
+                    <p className="text-[10px] text-slate-500 small">
+                      Motif : {order.echantillon.motif_non_conformite}
+                    </p>
+                  )}
                 </div>
               )}
             </div>

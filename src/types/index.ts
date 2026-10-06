@@ -582,6 +582,7 @@ export interface DemandeLaboratoire {
     statut: string;
     preleve_par_id: string;
     date_prelevement: string;
+    motif_non_conformite?: string | null;
     created_at: string;
     updated_at: string;
   };
