@@ -3355,7 +3355,11 @@ export async function getLaboratoryQueue(req: AuthenticatedRequest, res: Respons
           amendements,
           bloque_caisse: bloqueCaisse,
           statut_paiement_labo: statutAffichage,
-          has_derogation: Boolean(hasDerogation)
+          has_derogation: Boolean(hasDerogation),
+          echantillon: await queryOne<any>(
+            `SELECT * FROM echantillons_laboratoire WHERE demande_id = ? LIMIT 1`,
+            [o.id]
+          ) || null
         };
       })
     );
@@ -3877,6 +3881,21 @@ export async function recordLabPrelevement(req: AuthenticatedRequest, res: Respo
          WHERE demande_id = ?`,
         [newStatut, newMotif, id]
       );
+
+      // Phase 5.4 : Rattachement des analyses à l'échantillon lors de la conformité
+      if (conforme) {
+        // Rattacher les analyses à l'échantillon
+        // Pour GLOBAL : toutes les analyses de l'examen
+        // Pour PERSONNALISÉ : uniquement les analyses avec paramètres sélectionnés
+        await execute(
+          `UPDATE analyses_laboratoire SET
+            echantillon_id = ?,
+            updated_at = ?
+           WHERE demande_laboratoire_id = ?
+             AND (echantillon_id IS NULL OR echantillon_id != ?)`,
+          [existing.id, now, id, existing.id]
+        );
+      }
 
       // Mettre à jour le statut de la demande associée si nécessaire
       // La demande passe de PRILEVEMENT_EFFECTUE vers le statut approprié
@@ -5381,3 +5400,199 @@ export async function getCatalogueExamDetails(req: AuthenticatedRequest, res: Re
   }
 }
 
+
+/**
+ * Démarrer une analyse en paillasse
+ * POST /api/laboratory/analyses/:id/start
+ * Rôle strict : LABORATOIRE
+ */
+export async function startLabAnalysis(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || user.role !== 'LABORATOIRE') {
+      res.status(403).json({ error: 'Accès strictement réservé au personnel du laboratoire (LABORATOIRE).' });
+      return;
+    }
+
+    const { id } = req.params;
+    const now = new Date().toISOString();
+
+    const analysis = await queryOne<any>(
+      `SELECT a.*, d.statut as demande_statut, d.laborantin_id, e.statut as echantillon_statut
+       FROM analyses_laboratoire a
+       JOIN demandes_laboratoire d ON a.demande_laboratoire_id = d.id
+       LEFT JOIN echantillons_laboratoire e ON a.echantillon_id = e.id
+       WHERE a.id = ?`,
+      [id]
+    );
+
+    if (!analysis) {
+      res.status(404).json({ error: 'Analyse introuvable.' });
+      return;
+    }
+
+    if (analysis.echantillon_id === null) {
+      res.status(400).json({ error: 'Cette analyse n\'est pas rattachée à un échantillon.' });
+      return;
+    }
+
+    if (analysis.echantillon_statut !== 'ECHANTILLON_RECU') {
+      res.status(400).json({ error: 'L\'échantillon de cette analyse n\'est pas encore conforme.' });
+      return;
+    }
+
+    if (analysis.statut === 'EN_ANALYSE') {
+      res.status(400).json({ error: 'Cette analyse est déjà en cours de réalisation.' });
+      return;
+    }
+
+    if (!['DEMANDE_CREEE', 'EN_ATTENTE_PRELEVEMENT', 'PRELEVEMENT_EFFECTUE'].includes(analysis.statut)) {
+      res.status(400).json({ error: 'Cette analyse ne peut pas être démarrée dans son état actuel.' });
+      return;
+    }
+
+    await execute(
+      `UPDATE analyses_laboratoire SET
+        statut = 'EN_ANALYSE',
+        technicien_id = ?,
+        date_analyse = ?,
+        updated_at = ?
+       WHERE id = ?`,
+      [user.id, now, now, id]
+    );
+
+    await auditLogger.log({
+      userId: user.id,
+      action: 'ANALYSE_START',
+      ressourceType: 'ANALYSE_LABORATOIRE',
+      ressourceId: id,
+      details: `Analyse ${analysis.nom_analyse} démarrée par ${user.nom_complet}`,
+      ipAddress: req.ip || '127.0.0.1'
+    });
+
+    res.json({ message: 'Analyse démarrée avec succès.', analysis_id: id });
+  } catch (error: any) {
+    console.error('Erreur démarrage analyse:', error);
+    res.status(500).json({ error: "Erreur interne lors du démarrage de l'analyse." });
+  }
+}
+
+/**
+ * Terminer une analyse en paillasse
+ * POST /api/laboratory/analyses/:id/finish
+ * Rôle strict : LABORATOIRE
+ */
+export async function finishLabAnalysis(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || user.role !== 'LABORATOIRE') {
+      res.status(403).json({ error: 'Accès strictement réservé au personnel du laboratoire (LABORATOIRE).' });
+      return;
+    }
+
+    const { id } = req.params;
+    const now = new Date().toISOString();
+
+    const analysis = await queryOne<any>(
+      `SELECT a.*, d.statut as demande_statut
+       FROM analyses_laboratoire a
+       JOIN demandes_laboratoire d ON a.demande_laboratoire_id = d.id
+       WHERE a.id = ?`,
+      [id]
+    );
+
+    if (!analysis) {
+      res.status(404).json({ error: 'Analyse introuvable.' });
+      return;
+    }
+
+    if (analysis.statut !== 'EN_ANALYSE') {
+      res.status(400).json({ error: 'Seules les analyses en cours peuvent être terminées.' });
+      return;
+    }
+
+    await execute(
+      `UPDATE analyses_laboratoire SET
+        statut = 'RESULTAT_A_VALIDER',
+        updated_at = ?
+       WHERE id = ?`,
+      [now, id]
+    );
+
+    await auditLogger.log({
+      userId: user.id,
+      action: 'ANALYSE_FINISH',
+      ressourceType: 'ANALYSE_LABORATOIRE',
+      ressourceId: id,
+      details: `Analyse ${analysis.nom_analyse} terminée par ${user.nom_complet}`,
+      ipAddress: req.ip || '127.0.0.1'
+    });
+
+    res.json({ message: 'Analyse terminée avec succès.', analysis_id: id });
+  } catch (error: any) {
+    console.error('Erreur terminaison analyse:', error);
+    res.status(500).json({ error: "Erreur interne lors de la terminaison de l'analyse." });
+  }
+}
+
+/**
+ * Récupérer la liste des analyses en paillasse (prêtes à être traitées)
+ * GET /api/laboratory/worklist
+ * Rôle strict : LABORATOIRE
+ */
+export async function getLaboratoryWorklist(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || user.role !== 'LABORATOIRE') {
+      res.status(403).json({ error: 'Accès strictement réservé au personnel du laboratoire (LABORATOIRE).' });
+      return;
+    }
+
+    const worklist = await query<any>(
+      `SELECT 
+        a.id,
+        a.demande_laboratoire_id,
+        a.nom_analyse,
+        a.type_echantillon,
+        a.statut,
+        a.echantillon_id,
+        a.examen_id,
+        a.mode,
+        a.selection_details,
+        a.instructions,
+        a.ordre,
+        a.technicien_id,
+        a.date_analyse,
+        e.code_barre,
+        e.nature_prelevement,
+        e.statut as echantillon_statut,
+        d.numero_demande,
+        d.statut as demande_statut,
+        d.urgence,
+        d.date_demande,
+        pat.nom as patient_nom,
+        pat.prenom as patient_prenom,
+        pat.numero_dossier,
+        u_lab.nom_complet as laborantin_nom,
+        ex.nom as examen_nom
+       FROM analyses_laboratoire a
+       JOIN demandes_laboratoire d ON a.demande_laboratoire_id = d.id
+       JOIN patients pat ON d.patient_id = pat.id
+       LEFT JOIN echantillons_laboratoire e ON a.echantillon_id = e.id
+       LEFT JOIN users u_lab ON d.laborantin_id = u_lab.id
+       LEFT JOIN examens_laboratoire ex ON a.examen_id = ex.id
+       WHERE a.echantillon_id IS NOT NULL
+         AND e.statut = 'ECHANTILLON_RECU'
+         AND a.statut IN ('DEMANDE_CREEE', 'EN_ATTENTE_PRELEVEMENT', 'PRELEVEMENT_EFFECTUE')
+       ORDER BY 
+         CASE WHEN d.urgence = 'URGENTE' THEN 0 ELSE 1 END,
+         d.date_demande ASC,
+         a.ordre ASC`
+    );
+
+    res.json({ worklist });
+  } catch (error: any) {
+    console.error('Erreur récupération paillasse:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la récupération de la paillasse.' });
+  }
+}

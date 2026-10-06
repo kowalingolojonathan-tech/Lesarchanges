@@ -174,6 +174,9 @@ async function startServer() {
   app.post('/api/laboratory/orders/:id/prelevement', requireAuth, requireRole(['LABORATOIRE']), medicalCtrl.recordLabPrelevement);
   app.post('/api/laboratory/orders/:id/results', requireAuth, requireRole(['LABORATOIRE']), medicalCtrl.saveLabResults);
   app.post('/api/laboratory/orders/:id/conformite', requireAuth, requireRole(['LABORATOIRE']), medicalCtrl.setEchantillonConformite);
+  app.post('/api/laboratory/analyses/:id/start', requireAuth, requireRole(['LABORATOIRE']), medicalCtrl.startLabAnalysis);
+  app.post('/api/laboratory/analyses/:id/finish', requireAuth, requireRole(['LABORATOIRE']), medicalCtrl.finishLabAnalysis);
+  app.get('/api/laboratory/worklist', requireAuth, requireRole(['LABORATOIRE']), medicalCtrl.getLaboratoryWorklist);
   app.post('/api/laboratory/orders/:id/validate', requireAuth, requireRole(['LABORATOIRE']), medicalCtrl.validateLabResults);
   app.post('/api/laboratory/orders/:id/amend', requireAuth, requireRole(['LABORATOIRE']), medicalCtrl.amendLabResults);
   app.get('/api/medical/lab-orders/:id/bulletin', requireAuth, requireRole(['MÉDECIN', 'LABORATOIRE', 'ADMINISTRATEUR']), medicalCtrl.getLabBulletin);
