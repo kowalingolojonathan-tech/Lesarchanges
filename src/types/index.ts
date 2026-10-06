@@ -575,6 +575,16 @@ export interface DemandeLaboratoire {
   bloque_caisse?: boolean;
   statut_paiement_labo?: string;
   has_derogation?: boolean;
+  echantillon?: {
+    id: string;
+    code_barre: string;
+    nature_prelevement: string;
+    statut: string;
+    preleve_par_id: string;
+    date_prelevement: string;
+    created_at: string;
+    updated_at: string;
+  };
 }
 
 export type LabOrder = DemandeLaboratoire;

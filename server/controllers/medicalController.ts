@@ -7,6 +7,20 @@ import { createLinkedFactureCore } from './billingController.js';
 import { saveDb } from '../db/database.js';
 
 /**
+ * Génère un code-barres unique et stable pour un échantillon de laboratoire.
+ * Format : LAB-AAAAMMJJ-XXXX (où XXXX est un suffixe alphanumérique unique).
+ * L'unicité est garantie par la contrainte UNIQUE de la table echantillons_laboratoire.
+ */
+function generateUniqueCodeBarre(): string {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const suffix = crypto.randomBytes(2).toString('hex').toUpperCase();
+  return `LAB-${yyyy}${mm}${dd}-${suffix}`;
+}
+
+/**
  * Récupère le tableau de bord et la file d'attente du médecin connecté
  * GET /api/medical/queue
  * Strictement réservé au rôle MÉDECIN.
@@ -3663,7 +3677,73 @@ export async function recordLabPrelevement(req: AuthenticatedRequest, res: Respo
     const targetPreleveurId = preleve_par_id || user.id;
     const targetStatus = statut || 'PRELEVEMENT_EFFECTUE';
 
+    // Déterminer la nature du prélèvement à partir des analyses de la demande
+    let naturePrelevement: string | null = null;
+    const orderAnalyses = await query<any>(
+      `SELECT type_echantillon FROM analyses_laboratoire WHERE demande_laboratoire_id = ? ORDER BY ordre ASC LIMIT 1`,
+      [id]
+    );
+    if (orderAnalyses.length > 0) {
+      naturePrelevement = orderAnalyses[0].type_echantillon;
+    } else {
+      naturePrelevement = 'SANG';
+    }
+
+    // Empêcher un double prélèvement : vérifier qu'aucun échantillon n'existe déjà pour cette demande
+    const existingEchantillon = await queryOne<any>(
+      `SELECT id FROM echantillons_laboratoire WHERE demande_id = ? LIMIT 1`,
+      [id]
+    );
+    if (existingEchantillon) {
+      res.status(400).json({
+        error: 'Un prélèvement a déjà été enregistré pour cette demande. Le prélèvement biologique ne peut être effectué qu\'une seule fois.'
+      });
+      return;
+    }
+
     await transaction(async () => {
+      // 1. Créer l'échantillon biologique lié à la demande avec un code-barres unique
+      const echantillonId = `ech-${crypto.randomUUID().substring(0, 12)}`;
+      let codeBarre: string;
+      let codeBarreAttempts = 0;
+      let existingCode: any;
+      do {
+        codeBarre = generateUniqueCodeBarre();
+        codeBarreAttempts++;
+        if (codeBarreAttempts > 10) {
+          throw new Error('Impossible de générer un code-barres unique après 10 tentatives.');
+        }
+        existingCode = await queryOne<any>(
+          `SELECT id FROM echantillons_laboratoire WHERE code_barre = ? LIMIT 1`,
+          [codeBarre]
+        );
+      } while (existingCode);
+
+      await execute(
+        `INSERT INTO echantillons_laboratoire (
+          id, demande_id, code_barre, nature_prelevement, statut,
+          preleve_par_id, date_prelevement, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          echantillonId,
+          id,
+          codeBarre,
+          naturePrelevement,
+          targetStatus,
+          targetPreleveurId,
+          targetDatePrelevement,
+          now,
+          now
+        ]
+      );
+
+      // 2. Lier les analyses à l'échantillon
+      await execute(
+        `UPDATE analyses_laboratoire SET echantillon_id = ?, updated_at = ? WHERE demande_laboratoire_id = ?`,
+        [echantillonId, now, id]
+      );
+
+      // 3. Mettre à jour la demande
       await execute(
         `UPDATE demandes_laboratoire SET
           date_prelevement = ?,
@@ -3674,6 +3754,7 @@ export async function recordLabPrelevement(req: AuthenticatedRequest, res: Respo
         [targetDatePrelevement, targetPreleveurId, targetStatus, now, id]
       );
 
+      // 4. Mettre à jour le statut des analyses
       await execute(
         `UPDATE analyses_laboratoire SET
           statut = ?,
@@ -3716,16 +3797,22 @@ export async function recordLabPrelevement(req: AuthenticatedRequest, res: Respo
       [id]
     );
 
+    const echantillon = await queryOne<any>(
+      `SELECT * FROM echantillons_laboratoire WHERE demande_id = ? LIMIT 1`,
+      [id]
+    );
+
     res.json({
       message: 'Prélèvement enregistré avec succès.',
       lab_order: {
         ...updated,
         analyses
-      }
+      },
+      echantillon: echantillon || null
     });
   } catch (error: any) {
     console.error('Erreur enregistrement prélèvement:', error);
-    res.status(500).json({ error: 'Erreur interne lors de l\'enregistrement du prélèvement.' });
+    res.status(500).json({ error: 'Erreur interne lors de l\'enregistrement du prélèvement.', details: error.message, stack: error.stack });
   }
 }
 

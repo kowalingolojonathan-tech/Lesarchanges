@@ -13,7 +13,8 @@ import {
   Clock, 
   Syringe, 
   Sparkles,
-  HelpCircle
+  HelpCircle,
+  Barcode
 } from 'lucide-react';
 import { LabOrder, LabAnalyse, LabResultAmendment, CatalogueExam } from '../../types';
 import { api } from '../../lib/api';
@@ -188,17 +189,20 @@ export const LabResultEntryModal: React.FC<LabResultEntryModalProps> = ({
     try {
       setSubmitting(true);
       setError(null);
-      const res = await api.post<{ message: string; lab_order: LabOrder }>(
+      const res = await api.post<{ message: string; lab_order: LabOrder; echantillon?: any }>(
         `/api/laboratory/orders/${order.id}/prelevement`,
         {
           date_prelevement: new Date(prelevementDate).toISOString(),
           statut: 'PRELEVEMENT_EFFECTUE'
         }
       );
+      const echInfo = res.echantillon
+        ? ` — Échantillon ${res.echantillon.nature_prelevement || ''} (id: ${res.echantillon.id})`
+        : '';
       setIsPrelevementDone(true);
-      setSuccessMessage('Prélèvement biologique enregistré avec succès.');
+      setSuccessMessage(`Prélèvement biologique enregistré avec succès. Échantillon créé et lié à la demande.${echInfo}`);
       onOrderUpdated(res.lab_order);
-      setTimeout(() => setSuccessMessage(null), 3000);
+      setTimeout(() => setSuccessMessage(null), 4000);
     } catch (err: any) {
       setError(err.message || 'Erreur lors de l\'enregistrement du prélèvement.');
     } finally {
@@ -548,9 +552,31 @@ export const LabResultEntryModal: React.FC<LabResultEntryModalProps> = ({
                   </button>
                 </div>
               ) : (
-                <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                  Prélèvement Validé
+                <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3 h-3" /> Prélèvement effectué le {new Date(prelevementDate).toLocaleString('fr-FR')}
                 </span>
+              )}
+              {isPrelevementDone && order.date_prelevement && (
+                <div className="mt-2 p-2.5 bg-emerald-50 border border-emerald-200 rounded-lg text-[11px] text-emerald-800 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span><strong>Prélèvement validé</strong> — Statut de la demande : {order.statut}</span>
+                </div>
+              )}
+              {isPrelevementDone && order.echantillon?.code_barre && (
+                <div className="mt-3 p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded bg-indigo-100 text-indigo-700">
+                      <Barcode className="w-4 h-4" />
+                    </div>
+                    <span className="text-xs font-bold text-slate-900 uppercase tracking-wider">Code-barres de l'échantillon</span>
+                  </div>
+                  <div className="font-mono text-sm text-slate-900 bg-white px-3 py-2 rounded border border-slate-200 break-all">
+                    {order.echantillon.code_barre}
+                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    Ce code identifie l'échantillon de manière unique. À utiliser pour le suivi, l'impression et la traçabilité.
+                  </p>
+                </div>
               )}
             </div>
           </div>
