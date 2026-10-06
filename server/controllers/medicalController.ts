@@ -3971,9 +3971,29 @@ export async function saveLabResults(req: AuthenticatedRequest, res: Response): 
     // Protection anti-modification silencieuse après validation définitive
     if (['RESULTATS_VALIDES', 'RESULTAT_VALIDE'].includes(existing.statut)) {
       res.status(400).json({
-        error: 'Cette demande a déjà été validée. Toute rectification de résultats validés doit obligatoirement faire l’objet d’un amendement officiel motivé.'
+        error: "Cette demande a déjà été validée. Toute rectification de résultats validés doit obligatoirement faire l'objet d'un amendement officiel motivé."
       });
       return;
+    }
+
+    // Phase 5.6 : Vérifier que chaque analyse est rattachée à un échantillon conforme
+    const analysesToUpdate = await query<any>(
+      `SELECT a.id, a.statut as analyse_statut, a.echantillon_id, e.statut as echantillon_statut
+       FROM analyses_laboratoire a
+       LEFT JOIN echantillons_laboratoire e ON a.echantillon_id = e.id
+       WHERE a.demande_laboratoire_id = ?`,
+      [id]
+    );
+
+    for (const ana of analysesToUpdate) {
+      if (ana.echantillon_id === null) {
+        res.status(400).json({ error: `L'analyse ${ana.id} n'est pas rattachée à un échantillon.` });
+        return;
+      }
+      if (ana.echantillon_statut !== 'ECHANTILLON_RECU') {
+        res.status(400).json({ error: `L'échantillon de l'analyse ${ana.id} n'est pas encore conforme.` });
+        return;
+      }
     }
 
     if (!results || !Array.isArray(results) || results.length === 0) {

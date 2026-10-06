@@ -876,7 +876,7 @@ export const LaboratoryQueueView: React.FC = () => {
                     )}
 
                     {/* Bouton Saisir / Gérer les résultats */}
-                    {(isAssignedToMe || ['RESULTATS_SAISIS', 'PRELEVEMENT_EFFECTUE', 'EN_ANALYSE', 'PRISE_EN_CHARGE', 'RESULTATS_VALIDES', 'RESULTAT_VALIDE'].includes(order.statut)) && (
+                    {(isAssignedToMe || ['RESULTATS_SAISIS', 'PRELEVEMENT_EFFECTUE', 'EN_ANALYSE', 'PRISE_EN_CHARGE', 'RESULTAT_A_VALIDER', 'RESULTATS_VALIDES', 'RESULTAT_VALIDE'].includes(order.statut)) && (
                       <button
                         onClick={() => {
                           if (order.bloque_caisse) {
