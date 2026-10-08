@@ -154,7 +154,7 @@ export async function runPhase58Tests(): Promise<TestResult[]> {
         id, consultation_id, visite_id, patient_id, medecin_id, laborantin_id,
         numero_demande, date_demande, statut, urgence, indication_clinique, date_prelevement, preleve_par_id, result_entered_by, result_entered_at, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), 'RESULTATS_SAISIS', 'NORMALE', 'Test non validé', datetime('now'), ?, ?, ?, datetime('now'), datetime('now'))`,
-      [orderNonValidId, csl1_id, vis1_id, pat1_id, med1_id, lab1_id, `LAB-NV-${testSuffix}`, lab1_id, lab1_id, now()]
+      [orderNonValidId, csl1_id, vis1_id, pat1_id, med1_id, lab1_id, `LAB-NV-${testSuffix}`, lab1_id, lab1_id, now(), now(), now()]
     );
     await execute(
       `INSERT INTO analyses_laboratoire (id, demande_laboratoire_id, nom_analyse, type_echantillon, statut, ordre, echantillon_id, examen_id, mode, parametre_id, valeur_mesuree, unite, interpretation, created_at, updated_at)
