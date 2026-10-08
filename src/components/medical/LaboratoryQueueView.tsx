@@ -818,6 +818,11 @@ export const LaboratoryQueueView: React.FC = () => {
                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
                         Résultats Validés
                       </span>
+                    ) : order.statut === 'RESULTAT_A_VALIDER' ? (
+                      <span className="text-xs font-bold px-2.5 py-1 rounded-xl bg-amber-100 text-amber-800 border border-amber-300 flex items-center gap-1.5">
+                        <FlaskConical className="w-3.5 h-3.5 text-amber-600" />
+                        Résultats à Saisir
+                      </span>
                     ) : order.statut === 'RESULTATS_SAISIS' ? (
                       <span className="text-xs font-bold px-2.5 py-1 rounded-xl bg-blue-100 text-blue-800 border border-blue-300 flex items-center gap-1.5">
                         <Clock className="w-3.5 h-3.5 text-blue-600" />
@@ -891,9 +896,11 @@ export const LaboratoryQueueView: React.FC = () => {
                             ? 'bg-slate-200 text-slate-400 border border-slate-300 cursor-not-allowed'
                             : ['RESULTATS_VALIDES', 'RESULTAT_VALIDE'].includes(order.statut)
                             ? 'bg-slate-700 hover:bg-slate-800 text-white'
-                            : order.statut === 'RESULTATS_SAISIS'
-                            ? 'bg-blue-600 hover:bg-blue-700 text-white'
-                            : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                             : order.statut === 'RESULTAT_A_VALIDER'
+                             ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                             : order.statut === 'RESULTATS_SAISIS'
+                             ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                             : 'bg-emerald-600 hover:bg-emerald-700 text-white'
                         }`}
                       >
                         {order.bloque_caisse ? (

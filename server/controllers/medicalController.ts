@@ -3977,6 +3977,7 @@ export async function saveLabResults(req: AuthenticatedRequest, res: Response): 
     }
 
     // Phase 5.6 : Vérifier que chaque analyse est rattachée à un échantillon conforme
+    // et que son statut est RESULTAT_A_VALIDER (analyse terminée, en attente de saisie)
     const analysesToUpdate = await query<any>(
       `SELECT a.id, a.statut as analyse_statut, a.echantillon_id, e.statut as echantillon_statut
        FROM analyses_laboratoire a
@@ -3992,6 +3993,10 @@ export async function saveLabResults(req: AuthenticatedRequest, res: Response): 
       }
       if (ana.echantillon_statut !== 'ECHANTILLON_RECU') {
         res.status(400).json({ error: `L'échantillon de l'analyse ${ana.id} n'est pas encore conforme.` });
+        return;
+      }
+      if (ana.analyse_statut !== 'RESULTAT_A_VALIDER') {
+        res.status(400).json({ error: `L'analyse ${ana.id} n'est pas encore terminée (statut: ${ana.analyse_statut}). Veuillez terminer l'analyse depuis la paillasse.` });
         return;
       }
     }
@@ -4027,7 +4032,6 @@ export async function saveLabResults(req: AuthenticatedRequest, res: Response): 
             commentaire_technique = ?,
             technicien_id = ?,
             date_analyse = ?,
-            statut = ?,
             updated_at = ?
            WHERE id = ? AND demande_laboratoire_id = ?`,
           [
@@ -4040,7 +4044,6 @@ export async function saveLabResults(req: AuthenticatedRequest, res: Response): 
             resItem.commentaire_technique?.trim() || null,
             user.id,
             now,
-            targetStatut,
             now,
             resItem.id,
             id
@@ -4159,9 +4162,28 @@ export async function validateLabResults(req: AuthenticatedRequest, res: Respons
       return;
     }
 
-    // Récupérer les analyses
+    // Protection anti-double validation
+    if (['RESULTATS_VALIDES', 'RESULTAT_VALIDE'].includes(existing.statut)) {
+      res.status(400).json({
+        error: "Cette demande a déjà été validée. Les résultats ne peuvent être modifiés que via la procédure d'amendement officiel."
+      });
+      return;
+    }
+
+    // La validation ne peut concerner que les demandes dont les résultats ont été saisis
+    if (existing.statut !== 'RESULTATS_SAISIS') {
+      res.status(400).json({
+        error: `La demande est dans le statut "${existing.statut}" et ne peut pas encore être validée. Veuillez d'abord saisir les résultats.`
+      });
+      return;
+    }
+
+    // Récupérer les analyses avec leurs échantillons
     const analyses = await query<any>(
-      `SELECT * FROM analyses_laboratoire WHERE demande_laboratoire_id = ?`,
+      `SELECT a.*, e.statut as echantillon_statut
+       FROM analyses_laboratoire a
+       LEFT JOIN echantillons_laboratoire e ON a.echantillon_id = e.id
+       WHERE a.demande_laboratoire_id = ?`,
       [id]
     );
 
@@ -4170,13 +4192,32 @@ export async function validateLabResults(req: AuthenticatedRequest, res: Respons
       return;
     }
 
-    // Validation : Vérifier qu'au moins une valeur ou observation ou détail a été renseigné
-    const hasValues = analyses.some((a) => (a.valeur_mesuree && a.valeur_mesuree.trim().length > 0) || (a.observation && a.observation.trim().length > 0) || a.resultats_detailles);
-    if (!hasValues) {
-      res.status(400).json({
-        error: 'Impossible de valider : aucun résultat biologique n\'a été saisi pour les examens demandés.'
-      });
-      return;
+    // Phase 5.7 : Vérifications préalables avant validation
+    for (const ana of analyses) {
+      // Chaque analyse doit avoir un échantillon rattaché
+      if (!ana.echantillon_id) {
+        res.status(400).json({
+          error: `L'analyse ${ana.id} n'est pas rattachée à un échantillon. Impossible de valider.`
+        });
+        return;
+      }
+      // Chaque échantillon doit être conforme
+      if (ana.echantillon_statut !== 'ECHANTILLON_RECU') {
+        res.status(400).json({
+          error: `L'échantillon de l'analyse ${ana.id} n'est pas conforme (statut: ${ana.echantillon_statut}). Impossible de valider.`
+        });
+        return;
+      }
+      // Chaque analyse doit avoir au moins un résultat renseigné
+      const hasValue = (ana.valeur_mesuree && ana.valeur_mesuree.trim().length > 0) ||
+                       (ana.observation && ana.observation.trim().length > 0) ||
+                       ana.resultats_detailles;
+      if (!hasValue) {
+        res.status(400).json({
+          error: `L'analyse "${ana.nom_analyse}" n'a aucun résultat saisi. Veuillez remplir tous les paramètres avant de valider.`
+        });
+        return;
+      }
     }
 
     await transaction(async () => {
@@ -4561,14 +4602,25 @@ export async function getLabBulletin(req: AuthenticatedRequest, res: Response): 
       return;
     }
 
+    // Le bulletin n'est disponible que pour les résultats validés
+    if (!['RESULTATS_VALIDES', 'RESULTAT_VALIDE'].includes(order.statut)) {
+      res.status(403).json({
+        error: 'Ce bulletin n\'est pas encore disponible. Les résultats doivent être validés par le biologiste avant toute transmission ou consultation.'
+      });
+      return;
+    }
+
     // Contrôle d'accès médecin prescripteur
     if (user.role === 'MÉDECIN' && order.medecin_id !== user.id) {
-      res.status(403).json({ error: 'Vous ne pouvez pas consulter le bulletin d’un confrère.' });
+      res.status(403).json({ error: 'Vous ne pouvez pas consulter le bulletin d\'un confrère.' });
       return;
     }
 
     const analyses = await query<any>(
-      `SELECT * FROM analyses_laboratoire WHERE demande_laboratoire_id = ? ORDER BY ordre ASC, created_at ASC`,
+      `SELECT a.*, e.code_barre, e.nature_prelevement as echantillon_nature
+       FROM analyses_laboratoire a
+       LEFT JOIN echantillons_laboratoire e ON a.echantillon_id = e.id
+       WHERE a.demande_laboratoire_id = ? ORDER BY a.ordre ASC, a.created_at ASC`,
       [id]
     );
 
