@@ -43,19 +43,21 @@ export async function runPhase58Tests(): Promise<TestResult[]> {
   await runMigrations();
   await seedDatabase();
 
+  // Utiliser les IDs existants du seedDatabase pour assurer la compatibilité
+  // seedDatabase crée : usr-lab-01, usr-med-01, usr-med-02, usr-recep-01
+  const lab1_id = 'usr-lab-01';
+  const med1_id = 'usr-med-01';
+  const med2_id = 'usr-med-02';
   const testSuffix = Date.now().toString(36);
-
-  const lab1_id = `usr-lab-c58-${testSuffix}`;
-  const med1_id = `usr-med-c58-${testSuffix}`;
-  const med2_id = `usr-med-c58-2-${testSuffix}`;
-  const pat1_id = `pat-c58-${testSuffix}`;
-  const vis1_id = `vis-c58-${testSuffix}`;
-  const csl1_id = `csl-c58-${testSuffix}`;
-  const csl2_id = `csl-c58-2-${testSuffix}`;
-  const orderGlobalId = `lab-ord-c58-glob-${testSuffix}`;
-  const orderPersoId = `lab-ord-c58-pers-${testSuffix}`;
-  const orderNonValidId = `lab-ord-c58-nv-${testSuffix}`;
-  const echId = `ech-c58-${testSuffix}`;
+  
+  // Patient créé par le seedDatabase, on réutilise son ID ou on en créé un qui référence les bons users
+  const pat1_id = `pat-58-${testSuffix}`;
+  const vis1_id = `vis-58-${testSuffix}`;
+  const csl1_id = `csl-58-${testSuffix}`;
+  const orderGlobalId = `lab-ord-58-glob-${testSuffix}`;
+  const orderPersoId = `lab-ord-58-pers-${testSuffix}`;
+  const orderNonValidId = `lab-ord-58-nv-${testSuffix}`;
+  const echId = `ech-58-${testSuffix}`;
   const now = () => new Date().toISOString();
 
   // Setup users
@@ -88,7 +90,7 @@ export async function runPhase58Tests(): Promise<TestResult[]> {
   await execute(
     `INSERT INTO consultations (id, visite_id, patient_id, medecin_id, date_consultation, statut, motif_consultation, examen_physique, diagnostic_principal, notes_confidentielles, created_at, updated_at)
      VALUES (?, ?, ?, ?, datetime('now'), 'EN_COURS', 'Contrôle', 'Normal', 'Suivi', '', datetime('now'), datetime('now'))`,
-    [csl2_id, vis1_id, pat1_id, med2_id]
+    [csl1_id, vis1_id, pat1_id, med1_id]
   );
 
   // Échantillon conforme
@@ -103,9 +105,9 @@ export async function runPhase58Tests(): Promise<TestResult[]> {
     await execute(
       `INSERT INTO demandes_laboratoire (
         id, consultation_id, visite_id, patient_id, medecin_id, laborantin_id,
-        numero_demande, date_demande, statut, urgence, indication_clinique, date_prelevement, preleve_par_id, result_entered_by, validated_by, validated_at, result_entered_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), 'RESULTATS_VALIDES', 'NORMALE', 'Bilan NFS', datetime('now'), ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-      [orderGlobalId, csl1_id, vis1_id, pat1_id, med1_id, lab1_id, `LAB-GLOB-${testSuffix}`, lab1_id, lab1_id, lab1_id, now(), lab1_id, now()]
+        numero_demande, date_demande, statut, urgence, indication_clinique, result_entered_by, validated_by, validated_at, result_entered_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'RESULTATS_VALIDES', 'NORMALE', 'Bilan NFS', ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+      [orderGlobalId, csl1_id, vis1_id, pat1_id, med1_id, lab1_id, `LAB-GLOB-${testSuffix}`, now(), lab1_id, lab1_id, now(), lab1_id]
     );
     await execute(
       `INSERT INTO analyses_laboratoire (id, demande_laboratoire_id, nom_analyse, type_echantillon, statut, ordre, echantillon_id, examen_id, mode, parametre_id, valeur_mesuree, unite, valeurs_reference, interpretation, observation, valide_par_id, date_validation, created_at, updated_at)
@@ -130,9 +132,9 @@ export async function runPhase58Tests(): Promise<TestResult[]> {
     await execute(
       `INSERT INTO demandes_laboratoire (
         id, consultation_id, visite_id, patient_id, medecin_id, laborantin_id,
-        numero_demande, date_demande, statut, urgence, indication_clinique, date_prelevement, preleve_par_id, result_entered_by, validated_by, validated_at, result_entered_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), 'RESULTATS_VALIDES', 'NORMALE', 'Glycémie', datetime('now'), ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-      [orderPersoId, csl1_id, vis1_id, pat1_id, med1_id, lab1_id, `LAB-PERS-${testSuffix}`, lab1_id, lab1_id, lab1_id, now(), lab1_id, now()]
+        numero_demande, date_demande, statut, urgence, indication_clinique, result_entered_by, validated_by, validated_at, result_entered_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'RESULTATS_VALIDES', 'NORMALE', 'Glycémie', ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+      [orderPersoId, csl1_id, vis1_id, pat1_id, med1_id, lab1_id, `LAB-PERS-${testSuffix}`, now(), lab1_id, lab1_id, now(), lab1_id]
     );
     await execute(
       `INSERT INTO analyses_laboratoire (id, demande_laboratoire_id, nom_analyse, type_echantillon, statut, ordre, echantillon_id, examen_id, mode, parametre_id, sous_parametre_id, selection_details, valeur_mesuree, unite, valeurs_reference, interpretation, valide_par_id, date_validation, created_at, updated_at)
@@ -152,9 +154,9 @@ export async function runPhase58Tests(): Promise<TestResult[]> {
     await execute(
       `INSERT INTO demandes_laboratoire (
         id, consultation_id, visite_id, patient_id, medecin_id, laborantin_id,
-        numero_demande, date_demande, statut, urgence, indication_clinique, date_prelevement, preleve_par_id, result_entered_by, result_entered_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), 'RESULTATS_SAISIS', 'NORMALE', 'Test non validé', datetime('now'), ?, ?, ?, datetime('now'), datetime('now'))`,
-      [orderNonValidId, csl1_id, vis1_id, pat1_id, med1_id, lab1_id, `LAB-NV-${testSuffix}`, lab1_id, lab1_id, now(), now(), now()]
+        numero_demande, date_demande, statut, urgence, indication_clinique, result_entered_by, result_entered_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'RESULTATS_SAISIS', 'NORMALE', 'Test non validé', ?, ?, datetime('now'), datetime('now'))`,
+      [orderNonValidId, csl1_id, vis1_id, pat1_id, med1_id, lab1_id, `LAB-NV-${testSuffix}`, now(), lab1_id, now()]
     );
     await execute(
       `INSERT INTO analyses_laboratoire (id, demande_laboratoire_id, nom_analyse, type_echantillon, statut, ordre, echantillon_id, examen_id, mode, parametre_id, valeur_mesuree, unite, interpretation, created_at, updated_at)
