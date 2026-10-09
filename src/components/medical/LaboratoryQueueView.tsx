@@ -788,7 +788,7 @@ export const LaboratoryQueueView: React.FC = () => {
                       <span>{new Date(order.date_demande || order.created_at).toLocaleString('fr-FR')}</span>
                     </div>
 
-                    {order.bloque_caisse && (
+{order.bloque_caisse && (
                       <div className="mt-2 p-2 bg-rose-50 border border-rose-200 rounded-lg flex items-center space-x-2 text-rose-800 text-[11px] font-medium">
                         <Lock className="w-3.5 h-3.5 text-rose-600 shrink-0" />
                         <span>En attente de paiement à la réception (Caisse) : Le patient doit régler ou obtenir dérogation au guichet d'accueil avant le démarrage.</span>

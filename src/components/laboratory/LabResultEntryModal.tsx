@@ -193,9 +193,9 @@ export const LabResultEntryModal: React.FC<LabResultEntryModalProps> = ({
                   updated.interpretation = 'NORMAL';
                 }
                 // Mise à jour de l'indicateur BAS/NORMAL/ÉLEVÉ
-                if (valNum < preset.normalMin) {
+                if (preset.normalMin !== undefined && valNum < preset.normalMin) {
                   updated.indicateur = 'BAS';
-                } else if (valNum > preset.normalMax) {
+                } else if (preset.normalMax !== undefined && valNum > preset.normalMax) {
                   updated.indicateur = 'ÉLEVÉ';
                 } else {
                   updated.indicateur = 'NORMAL';

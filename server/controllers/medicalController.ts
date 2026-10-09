@@ -3393,6 +3393,7 @@ export async function getLaboratoryQueue(req: AuthenticatedRequest, res: Respons
           bloque_caisse: bloqueCaisse,
           statut_paiement_labo: statutAffichage,
           has_derogation: Boolean(hasDerogation),
+          facture: finLab,
           echantillon: await queryOne<any>(
             `SELECT * FROM echantillons_laboratoire WHERE demande_id = ? LIMIT 1`,
             [o.id]

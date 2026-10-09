@@ -542,6 +542,7 @@ export interface DemandeLaboratoire {
   commentaire?: string | null;
   amendement_motif?: string | null;
   facture_id?: string | null;
+  facture_montant_usd?: number | null;
   result_entered_by?: string | null;
   result_entered_at?: string | null;
   validated_by?: string | null;
@@ -731,7 +732,6 @@ export interface RendezVous {
   patient_prenom_temp?: string | null;
   patient_telephone_temp?: string | null;
   facture_id?: string | null;
-  numero_facture?: string | null;
   facture_montant_usd?: number | null;
   statut_paiement?: string | null;
 }
