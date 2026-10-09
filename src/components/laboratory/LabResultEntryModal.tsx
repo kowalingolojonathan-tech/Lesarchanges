@@ -63,6 +63,7 @@ export const LabResultEntryModal: React.FC<LabResultEntryModalProps> = ({
   const [catalogueExams, setCatalogueExams] = useState<CatalogueExam[]>([]);
   const [catalogueLoading, setCatalogueLoading] = useState<boolean>(false);
   const [conformiteModal, setConformiteModal] = useState<{ ouverte: boolean; conforme: boolean } | null>(null);
+  const [indicators, setIndicators] = useState<string[]>([]); // Tableau d'indicateurs BAS/NORMAL/ÉLEVÉ par analyse
 
   useEffect(() => {
     async function loadCatalogue() {
@@ -104,17 +105,32 @@ export const LabResultEntryModal: React.FC<LabResultEntryModalProps> = ({
     mode?: 'GLOBAL' | 'PERSONNALISE';
     examen_id?: string | null;
     selection_details?: { parametre_id?: string; sous_parametre_id?: string }[] | null;
+    indicateur: 'BAS' | 'NORMAL' | 'ÉLEVÉ' | '';
   }>>(() => {
     return (order.analyses || []).map((an: LabAnalyse) => {
       // Détecter preset si pas encore renseigné
       const upperNom = (an.nom_analyse || '').toUpperCase();
       let defaultUnite = an.unite || '';
       let defaultRef = an.valeurs_reference || '';
+      let indicateur: 'BAS' | 'NORMAL' | 'ÉLEVÉ' | '' = '';
 
       for (const [key, preset] of Object.entries(BIOLOGY_PRESETS)) {
         if (upperNom.includes(key)) {
           if (!defaultUnite) defaultUnite = preset.unite;
           if (!defaultRef) defaultRef = preset.ref;
+          // Calculer l'indicateur si une valeur est saisie
+          if (an.valeur_mesuree) {
+            const valNum = parseFloat(an.valeur_mesuree.replace(',', '.'));
+            if (!isNaN(valNum)) {
+              if (preset.normalMin !== undefined && valNum < preset.normalMin) {
+                indicateur = 'BAS';
+              } else if (preset.normalMax !== undefined && valNum > preset.normalMax) {
+                indicateur = 'ÉLEVÉ';
+              } else {
+                indicateur = 'NORMAL';
+              }
+            }
+          }
           break;
         }
       }
@@ -125,7 +141,7 @@ export const LabResultEntryModal: React.FC<LabResultEntryModalProps> = ({
         type_echantillon: an.type_echantillon,
         valeur_mesuree: an.valeur_mesuree || '',
         unite: defaultUnite,
-        valeurs_reference: defaultRef,
+        valeurs_reference: defaultRef || 'Valeur de référence non configurée',
         interpretation: (an.interpretation as any) || '',
         observation: an.observation || '',
         commentaire_technique: an.commentaire_technique || '',
@@ -133,6 +149,7 @@ export const LabResultEntryModal: React.FC<LabResultEntryModalProps> = ({
         mode: (an.mode as any) || 'GLOBAL',
         examen_id: an.examen_id || null,
         selection_details: an.selection_details || null,
+        indicateur: indicateur,
       };
     });
   });
@@ -155,13 +172,14 @@ export const LabResultEntryModal: React.FC<LabResultEntryModalProps> = ({
         if (item.id !== id) return item;
         const updated = { ...item, [field]: value };
 
-        // Aide automatique au calcul d'interprétation
+        // Aide automatique au calcul d'interprétation et d'indicateur
         if (field === 'valeur_mesuree') {
           const valNum = parseFloat(value.replace(',', '.'));
           if (!isNaN(valNum)) {
             const upperNom = item.nom_analyse.toUpperCase();
             for (const [key, preset] of Object.entries(BIOLOGY_PRESETS)) {
               if (upperNom.includes(key)) {
+                // Mise à jour de l'interprétation existante
                 if (preset.normalMin !== undefined && valNum < preset.normalMin) {
                   updated.interpretation = 'ANORMAL';
                 } else if (preset.normalMax !== undefined && valNum > preset.normalMax) {
@@ -173,6 +191,14 @@ export const LabResultEntryModal: React.FC<LabResultEntryModalProps> = ({
                   }
                 } else if (preset.normalMin !== undefined || preset.normalMax !== undefined) {
                   updated.interpretation = 'NORMAL';
+                }
+                // Mise à jour de l'indicateur BAS/NORMAL/ÉLEVÉ
+                if (valNum < preset.normalMin) {
+                  updated.indicateur = 'BAS';
+                } else if (valNum > preset.normalMax) {
+                  updated.indicateur = 'ÉLEVÉ';
+                } else {
+                  updated.indicateur = 'NORMAL';
                 }
                 break;
               }
@@ -825,6 +851,16 @@ export const LabResultEntryModal: React.FC<LabResultEntryModalProps> = ({
                           placeholder="Ex: 0.70 - 1.10"
                           className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono text-slate-800 focus:ring-1 focus:ring-emerald-500 bg-white"
                         />
+                        {analyse.indicateur && (
+                          <span className="mt-2 text-sm font-medium">
+                            {analyse.indicateur === 'BAS'
+                              ? 'BAS'
+                              : analyse.indicateur === 'ÉLEVÉ'
+                                ? 'ÉLEVÉ'
+                                : 'NORMAL'
+                            }<span className="text-xs text-slate-500"> (réf: {analyse.valeurs_reference || 'Non configurée'})</span>
+                          </span>
+                        )}
                       </div>
 
                       <div>

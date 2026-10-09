@@ -2621,31 +2621,68 @@ export async function createLabOrder(req: AuthenticatedRequest, res: Response): 
         }
       } else if (modeVal === 'PERSONNALISE') {
         // MODE PERSONNALISE : somme des prix des paramètres/sous-paramètres sélectionnés
-        const selectedIds: string[] = [];
-        if (an.parametre_id) selectedIds.push(an.parametre_id);
-        if (an.sous_parametre_id) selectedIds.push(an.sous_parametre_id);
+        // Ne pas utiliser an.parametre_id ou an.sous_parametre_id (non définis par le frontend)
+        // Utiliser uniquement selection_details
+        const selectedItems: { parametre_id: string; sous_parametre_id?: string }[] = [];
         if (an.selection_details && Array.isArray(an.selection_details)) {
           for (const sel of an.selection_details) {
-            if (sel.parametre_id) selectedIds.push(sel.parametre_id);
-            if (sel.sous_parametre_id) selectedIds.push(sel.sous_parametre_id);
+            if (sel.parametre_id) {
+              selectedItems.push({ parametre_id: sel.parametre_id, sous_parametre_id: sel.sous_parametre_id });
+            }
           }
         }
-        if (selectedIds.length > 0) {
-          const placeholders = selectedIds.map(() => '?').join(',');
+        if (selectedItems.length > 0) {
+          // Rechercher les prix des paramètres parent
+          const paramIds = selectedItems.map(s => s.parametre_id);
+          const placeholders = paramIds.map(() => '?').join(',');
           const priceRows = await query<any>(
-            `SELECT prix_usd FROM parametres_laboratoire WHERE id IN (${placeholders}) AND actif = 1`,
-            selectedIds
+            `SELECT id, prix_usd FROM parametres_laboratoire WHERE id IN (${placeholders}) AND actif = 1`,
+            paramIds
           );
-          const sousIds = selectedIds.filter(id => id.startsWith('sp-'));
-          if (sousIds.length > 0) {
-            const sousPlaceholders = sousIds.map(() => '?').join(',');
-            const sousPriceRows = await query<any>(
-              `SELECT prix_usd FROM sous_parametres_laboratoire WHERE id IN (${sousPlaceholders}) AND actif = 1`,
-              sousIds
-            );
-            priceRows.push(...sousPriceRows);
+          
+          // Regrouper par parametre_id pour éviter le double-comptage
+          // Si un sous-paramètre est sélectionné, ne pas compter le paramètre parent
+          const paramPrices: Record<string, number> = {};
+          for (const row of priceRows) {
+            paramPrices[row.id] = parseFloat(row.prix_usd) || 0;
           }
-          itemPrice = priceRows.reduce((sum: number, r: any) => sum + (parseFloat(r.prix_usd) || 0), 0);
+          
+          // Vérifier si des sous-paramètres sont sélectionnés
+          const sousParamIds = selectedItems
+            .filter(s => s.sous_parametre_id)
+            .map(s => s.sous_parametre_id!);
+          
+          if (sousParamIds.length > 0) {
+            // Rechercher les prix des sous-paramètres dans la table dédiée
+            const sousPlaceholders = sousParamIds.map(() => '?').join(',');
+            const sousPriceRows = await query<any>(
+              `SELECT id, prix_usd, parametre_id FROM sous_parametres_laboratoire WHERE id IN (${sousPlaceholders}) AND actif = 1`,
+              sousParamIds
+            );
+            
+            // Additionner uniquement les prix des sous-paramètres sélectionnés
+            // Les paramètres parents avec sous-paramètres sélectionnés ne sont pas comptés séparément
+            for (const row of sousPriceRows) {
+              itemPrice += parseFloat(row.prix_usd) || 0;
+            }
+            
+            // Pour les paramètres parents qui ont des sous-paramètres mais dont aucun n'est sélectionné
+            // (cas où on sélectionne le parent seul sans sous-paramètres)
+            const parentWithSelectedSubs = new Set(
+              selectedItems.filter(s => s.sous_parametre_id).map(s => s.parametre_id)
+            );
+            for (const [parentId, parentPrice] of Object.entries(paramPrices)) {
+              if (parentPrice > 0 && !parentWithSelectedSubs.has(parentId)) {
+                // Le paramètre parent est sélectionné sans sous-paramètres, ou n'a pas de sous-paramètres
+                itemPrice += parentPrice;
+              }
+            }
+          } else {
+            // Pas de sous-paramètre sélectionné, ajouter les prix des paramètres parent
+            for (const row of priceRows) {
+              itemPrice += parseFloat(row.prix_usd) || 0;
+            }
+          }
         }
         if (itemPrice === 0) {
           const fallbackTarif = await queryOne<any>(

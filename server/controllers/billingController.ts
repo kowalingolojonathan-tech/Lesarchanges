@@ -470,7 +470,9 @@ export async function createLinkedFactureCore(params: CreateLinkedFactureParams)
   }
 
   // 1. Protection anti-doublon : Vérifier si une facture existe déjà pour cette visite et ces prestations
-  if (visite_id) {
+  // Pour les commandes de laboratoire, chaque demande doit avoir sa propre facture
+  // On exclut les factures de laboratoire de la vérification anti-doublon
+  if (visite_id && type_prestation !== 'LABORATOIRE') {
     const firstItem = items[0];
     const existingFacture = await queryOne<any>(
       `SELECT f.id FROM factures f 

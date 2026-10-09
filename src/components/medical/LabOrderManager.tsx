@@ -287,11 +287,36 @@ export const LabOrderManager: React.FC<LabOrderManagerProps> = ({
   const handleChangeMode = (index: number, mode: ModePrescription) => {
     setAnalyses(prev => {
       const updated = [...prev];
-      updated[index] = {
-        ...updated[index],
-        mode,
-        selection_details: mode === 'PERSONNALISE' ? [] : null,
-      };
+      const row = { ...updated[index] };
+      if (mode === 'PERSONNALISE') {
+        // Pré-sélectionner tous les paramètres et sous-paramètres par défaut
+        const exam = catalogueExams.find(e => e.id === row.examen_id);
+        const defaultSelection: { parametre_id: string; sous_parametre_id?: string }[] = [];
+        if (exam && exam.parametres) {
+          for (const param of exam.parametres) {
+            if (param.sous_parametres && param.sous_parametres.length > 0) {
+              // Si le paramètre a des sous-paramètres, sélectionner tous les sous-paramètres
+              for (const sub of param.sous_parametres) {
+                defaultSelection.push({ parametre_id: param.id, sous_parametre_id: sub.id });
+              }
+            } else {
+              // Sinon sélectionner le paramètre parent
+              defaultSelection.push({ parametre_id: param.id });
+            }
+          }
+        }
+        updated[index] = {
+          ...row,
+          mode,
+          selection_details: defaultSelection.length > 0 ? defaultSelection : [],
+        };
+      } else {
+        updated[index] = {
+          ...row,
+          mode,
+          selection_details: null,
+        };
+      }
       return updated;
     });
   };
