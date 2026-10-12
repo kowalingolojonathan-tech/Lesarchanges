@@ -102,6 +102,13 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
     medecin_destinataire_id: '',
   });
 
+  // Observation médicale — state (Phase 6.2)
+  const [showObservationModal, setShowObservationModal] = useState<boolean>(false);
+  const [observationLoading, setObservationLoading] = useState<boolean>(false);
+  const [observationError, setObservationError] = useState<string | null>(null);
+  const [observationSuccess, setObservationSuccess] = useState<string | null>(null);
+  const [hasActiveObservation, setHasActiveObservation] = useState<boolean>(false);
+
   const fetchConsultation = async (preserveFormFields = false) => {
     setLoading(true);
     setError(null);
@@ -117,6 +124,15 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
       const c: Consultation = data.consultation;
       setConsultation(c);
       setAllergies(c.allergies || '');
+
+      // Vérifier s'il existe une observation active pour cette consultation (Phase 6.2)
+      apiFetch(`/api/medical/observations`)
+        .then(r => r.json())
+        .then(obsData => {
+          const hasObs = (obsData.observations || []).some((o: any) => o.consultation_id === consultationId && o.statut === 'EN_OBSERVATION');
+          setHasActiveObservation(hasObs);
+        })
+        .catch(() => {});
 
       // Statut de paiement en lecture seule pour le médecin
       if (c.visite_id) {
@@ -233,6 +249,32 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
   useEffect(() => {
     fetchConsultation();
   }, [consultationId]);
+
+  // Observation médicale — handler (Phase 6.2)
+  const handlePutInObservation = async () => {
+    setObservationLoading(true);
+    setObservationError(null);
+    setObservationSuccess(null);
+    try {
+      const res = await apiFetch('/api/medical/observations/put-in-observation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ consultation_id: consultationId, note_initiale: '' })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erreur lors de la mise en observation');
+      setObservationSuccess('Patient mis en observation avec succès.');
+      setHasActiveObservation(true);
+      setTimeout(() => {
+        setShowObservationModal(false);
+        setObservationSuccess(null);
+      }, 2000);
+    } catch (err: any) {
+      setObservationError(err.message || 'Impossible de mettre en observation.');
+    } finally {
+      setObservationLoading(false);
+    }
+  };
 
   const fetchOrientations = async () => {
     try {
@@ -670,15 +712,25 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
              <span className="hidden sm:inline">Historique</span>
            </button>
 
-           {!isFinalized && (
-             <button
-               onClick={openRelaisModal}
-               className="inline-flex items-center px-3 py-1.5 bg-cyan-50 hover:bg-cyan-100 text-cyan-700 border border-cyan-200 text-xs font-semibold rounded-lg transition-colors min-h-[38px]"
-             >
-               <RefreshCw className="w-4 h-4 mr-1" />
-               <span className="hidden sm:inline">Créer un relais</span>
-             </button>
-           )}
+            {!isFinalized && (
+              <button
+                onClick={openRelaisModal}
+                className="inline-flex items-center px-3 py-1.5 bg-cyan-50 hover:bg-cyan-100 text-cyan-700 border border-cyan-200 text-xs font-semibold rounded-lg transition-colors min-h-[38px]"
+              >
+                <RefreshCw className="w-4 h-4 mr-1" />
+                <span className="hidden sm:inline">Créer un relais</span>
+              </button>
+            )}
+
+            {!isFinalized && !hasActiveObservation && (
+              <button
+                onClick={() => setShowObservationModal(true)}
+                className="inline-flex items-center px-3 py-1.5 bg-orange-50 hover:bg-orange-100 text-orange-700 border border-orange-200 text-xs font-semibold rounded-lg transition-colors min-h-[38px]"
+              >
+                <HeartPulse className="w-4 h-4 mr-1" />
+                <span className="hidden sm:inline">Mettre en observation</span>
+              </button>
+            )}
 
           {!isFinalized && (
             <div className="hidden sm:flex items-center space-x-2">
@@ -3054,6 +3106,59 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
               >
                 {relaisLoading ? <Loader className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
                 Créer le relais
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Mettre en observation (Phase 6.2) */}
+      {showObservationModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setShowObservationModal(false)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full max-h-[85vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-orange-50">
+              <div className="flex items-center gap-2">
+                <HeartPulse className="w-5 h-5 text-orange-700" />
+                <h2 className="text-sm font-bold text-slate-900">Mettre en observation</h2>
+              </div>
+              <button onClick={() => setShowObservationModal(false)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+            </div>
+            <div className="p-4 space-y-4 overflow-y-auto flex-1">
+              <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600">
+                <strong>Consultation en cours :</strong> {consultation?.patient_nom} {consultation?.patient_prenom} — N°{consultation?.numero_dossier}
+              </div>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Le patient sera placée en observation médicale. Cette action reste rattachée à la consultation et visite en cours. 
+                <strong className="text-orange-700"> Aucune notification n'est envoyée aux autres médecins.</strong>
+                Le transfert vers un autre médecin ne peut se faire que par <strong>Relais médical</strong>.
+              </p>
+              {observationError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700 flex items-center gap-2">
+                  <AlertCircleIcon className="w-4 h-4 flex-shrink-0" />
+                  {observationError}
+                </div>
+              )}
+              {observationSuccess && (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-xs text-emerald-700 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                  {observationSuccess}
+                </div>
+              )}
+            </div>
+            <div className="p-4 border-t border-slate-200 flex gap-2 bg-slate-50">
+              <button
+                onClick={() => setShowObservationModal(false)}
+                className="flex-1 px-4 py-2 text-sm font-semibold text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={handlePutInObservation}
+                disabled={observationLoading}
+                className="flex-1 px-4 py-2 text-sm font-semibold text-white bg-orange-600 rounded-lg hover:bg-orange-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+              >
+                {observationLoading ? <Loader className="w-4 h-4 animate-spin" /> : <HeartPulse className="w-4 h-4" />}
+                Placer en observation
               </button>
             </div>
           </div>

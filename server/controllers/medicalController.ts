@@ -297,6 +297,26 @@ export async function getDoctorQueue(req: AuthenticatedRequest, res: Response): 
     );
     const relaisEnAttenteCount = relaisEnAttente.length;
 
+    // 6k. Observations actives pour le médecin connecté (Phase 6.2)
+    const observationsActives = await query<any>(
+      `SELECT o.id, o.consultation_id, o.visite_id, o.patient_id, o.medecin_id,
+              o.statut, o.note_clinique, o.duree_debut_observation,
+              o.created_at, o.updated_at,
+              p.numero_dossier, p.nom as patient_nom, p.prenom as patient_prenom,
+              p.sexe as patient_sexe,
+              v.numero_visite, v.date_arrivee,
+              c.statut as consultation_statut, c.motif_consultation as consultation_motif,
+              c.diagnostic_principal as consultation_diagnostic
+       FROM observations o
+       INNER JOIN patients p ON o.patient_id = p.id
+       INNER JOIN visites v ON o.visite_id = v.id
+       INNER JOIN consultations c ON o.consultation_id = c.id
+       WHERE o.medecin_id = ? AND o.statut = 'EN_OBSERVATION' AND o.actif = 1
+       ORDER BY o.created_at DESC`,
+      [doctorId]
+    );
+    const observationsCount = observationsActives.length;
+
     await auditLogger.log({
       userId: user.id,
       action: 'DOCTOR_QUEUE_ACCESSED',
@@ -329,7 +349,8 @@ export async function getDoctorQueue(req: AuthenticatedRequest, res: Response): 
         arriveesJour: arriveesJour ? Number(arriveesJour.count) : 0,
         demandesLabo: demandesLaboCount,
         orientations: orientationsEnAttenteCount,
-        relais: relaisEnAttenteCount
+        relais: relaisEnAttenteCount,
+        observations: observationsCount
       },
       quickAccessLists: {
         patientsReçusAujourdhui: patientsReçusAujourdhui,
@@ -340,7 +361,8 @@ export async function getDoctorQueue(req: AuthenticatedRequest, res: Response): 
         bulletinsDispo,
         demandesLaboNonTraitees,
         orientationsEnAttente,
-        relaisEnAttente
+        relaisEnAttente,
+        observationsActives
       },
       queue: {
         attente,
@@ -6390,5 +6412,604 @@ export async function getRelaisPatientHistory(req: AuthenticatedRequest, res: Re
   } catch (error: any) {
     console.error('Erreur récupération historique relais patient:', error);
     res.status(500).json({ error: 'Erreur interne lors de la récupération de l\'historique.' });
+  }
+}
+
+// ============================================================================
+// PHASE 6.2 : OBSERVATION MÉDICALE (Suivi clinique par le médecin responsable)
+// ============================================================================
+
+/**
+ * Mettre en observation un patient depuis sa consultation
+ * POST /api/medical/observations/put-in-observation
+ * Rôle strict : MÉDECIN — Seul le médecin responsable peut placer son patient en observation.
+ * L'observation reste rattachée à sa consultation et sa visite d'origine.
+ * Aucune notification n'est envoyée aux autres médecins.
+ */
+export async function putPatientInObservation(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const { consultation_id, note_initiale } = req.body;
+    if (!consultation_id) {
+      res.status(400).json({ error: 'L\'identifiant de consultation (consultation_id) est obligatoire.' });
+      return;
+    }
+
+    const consultation = await queryOne<any>(
+      `SELECT * FROM consultations WHERE id = ? AND actif = 1`,
+      [consultation_id]
+    );
+
+    if (!consultation) {
+      res.status(404).json({ error: 'Consultation introuvable.' });
+      return;
+    }
+
+    if (consultation.medecin_id !== user.id) {
+      await auditLogger.log({
+        userId: user.id,
+        action: 'ACCESS_DENIED_OBSERVATION',
+        ressourceType: 'CONSULTATION',
+        ressourceId: consultation_id,
+        details: `Dr. ${user.nom_complet} a tenté de mettre en observation la consultation d'un confrère`,
+        ipAddress: req.ip || '127.0.0.1'
+      });
+      res.status(403).json({ error: 'Vous ne pouvez pas mettre en observation la consultation d’un confrère.' });
+      return;
+    }
+
+    if (consultation.statut === 'FINALISEE') {
+      res.status(400).json({ error: 'Impossible de mettre en observation une consultation déjà finalisée.' });
+      return;
+    }
+
+    // Vérifier qu'une observation active n'existe pas déjà
+    const existingObs = await queryOne<any>(
+      `SELECT * FROM observations WHERE consultation_id = ? AND statut = 'EN_OBSERVATION' AND actif = 1`,
+      [consultation_id]
+    );
+
+    if (existingObs) {
+      res.status(409).json({ error: 'Ce patient est déjà en observation active.', observation: existingObs });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const observationId = `obs-${crypto.randomUUID().substring(0, 12)}`;
+
+    await transaction(async () => {
+      // Créer l'observation
+      await execute(
+        `INSERT INTO observations (
+          id, consultation_id, visite_id, patient_id, medecin_id,
+          statut, note_clinique, duree_debut_observation, created_at, updated_at, actif
+        ) VALUES (?, ?, ?, ?, ?, 'EN_OBSERVATION', ?, ?, ?, ?, 1)`,
+        [
+          observationId,
+          consultation.id,
+          consultation.visite_id,
+          consultation.patient_id,
+          user.id,
+          note_initiale?.trim() || null,
+          now,
+          now,
+          now
+        ]
+      );
+
+      // Mettre à jour le statut de la consultation pour refléter l'observation
+      await execute(
+        `UPDATE consultations SET statut = 'SUSPENDUE_EXAMENS', updated_at = ? WHERE id = ?`,
+        [now, consultation_id]
+      );
+    });
+
+    const observation = await queryOne<any>(
+      `SELECT o.*,
+              p.numero_dossier, p.nom as patient_nom, p.prenom as patient_prenom, p.date_naissance as patient_date_naissance, p.sexe as patient_sexe,
+              v.numero_visite, v.date_arrivee,
+              c.statut as consultation_statut, c.motif_consultation as consultation_motif, c.diagnostic_principal as consultation_diagnostic,
+              u.nom_complet as medecin_nom
+       FROM observations o
+       INNER JOIN patients p ON o.patient_id = p.id
+       INNER JOIN visites v ON o.visite_id = v.id
+       INNER JOIN consultations c ON o.consultation_id = c.id
+       INNER JOIN users u ON o.medecin_id = u.id
+       WHERE o.id = ?`,
+      [observationId]
+    );
+
+    await auditLogger.log({
+      userId: user.id,
+      action: 'OBSERVATION_CREATE',
+      ressourceType: 'OBSERVATION',
+      ressourceId: observationId,
+      details: `Patient ${observation?.patient_nom} ${observation?.patient_prenom} (N°${observation?.numero_dossier}) mis en observation par Dr. ${user.nom_complet}`,
+      ipAddress: req.ip || '127.0.0.1'
+    });
+
+    res.status(201).json({
+      message: 'Patient mis en observation avec succès.',
+      observation
+    });
+  } catch (error: any) {
+    console.error('Erreur mise en observation:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la mise en observation.' });
+  }
+}
+
+/**
+ * Récupérer les observations actives d'un médecin pour son dashboard
+ * GET /api/medical/observations
+ * Rôle strict : MÉDECIN — Chaque médecin ne voit que SES observations.
+ */
+export async function getDoctorObservations(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const doctorId = user.id;
+
+    const observations = await query<any>(
+      `SELECT o.id, o.consultation_id, o.visite_id, o.patient_id, o.medecin_id,
+              o.statut, o.note_clinique, o.constantes_observation,
+              o.duree_debut_observation, o.duree_fin_observation,
+              o.created_at, o.updated_at,
+              p.numero_dossier, p.nom as patient_nom, p.prenom as patient_prenom,
+              p.date_naissance as patient_date_naissance, p.sexe as patient_sexe,
+              v.numero_visite, v.date_arrivee, v.statut as visite_statut,
+              c.statut as consultation_statut, c.motif_consultation as consultation_motif,
+              c.diagnostic_principal as consultation_diagnostic,
+              u.nom_complet as medecin_nom
+       FROM observations o
+       INNER JOIN patients p ON o.patient_id = p.id
+       INNER JOIN visites v ON o.visite_id = v.id
+       INNER JOIN consultations c ON o.consultation_id = c.id
+       INNER JOIN users u ON o.medecin_id = u.id
+       WHERE o.medecin_id = ? AND o.statut = 'EN_OBSERVATION' AND o.actif = 1
+       ORDER BY o.created_at DESC`,
+      [doctorId]
+    );
+
+    // Calculer la durée pour chaque observation
+    const enrichedObservations = observations.map((obs: any) => {
+      let dureeTotalMinutes = 0;
+      if (obs.duree_debut_observation) {
+        const start = new Date(obs.duree_debut_observation).getTime();
+        const end = obs.duree_fin_observation
+          ? new Date(obs.duree_fin_observation).getTime()
+          : Date.now();
+        dureeTotalMinutes = Math.max(0, Math.floor((end - start) / 60000));
+      }
+      const hours = Math.floor(dureeTotalMinutes / 60);
+      const mins = dureeTotalMinutes % 60;
+      const days = Math.floor(hours / 24);
+      const remainingHours = hours % 24;
+      let formatee = `${dureeTotalMinutes} min`;
+      if (days > 0) formatee = `${days}j ${remainingHours}h ${mins}min`;
+      else if (hours > 0) formatee = `${hours}h ${mins}min`;
+      else formatee = `${mins} min`;
+
+      return {
+        ...obs,
+        duree_total_minutes: dureeTotalMinutes,
+        duree_formatee: formatee
+      };
+    });
+
+    res.json({ observations: enrichedObservations, total: enrichedObservations.length });
+  } catch (error: any) {
+    console.error('Erreur récupération observations:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la récupération des observations.' });
+  }
+}
+
+/**
+ * Récupérer le détail complet d'une observation (notes, constantes horodatées)
+ * GET /api/medical/observations/:id
+ * Rôle strict : MÉDECIN responsable de l'observation.
+ */
+export async function getObservationDetails(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const { id } = req.params;
+
+    const observation = await queryOne<any>(
+      `SELECT o.*,
+              p.numero_dossier, p.nom as patient_nom, p.prenom as patient_prenom,
+              p.date_naissance as patient_date_naissance, p.sexe as patient_sexe,
+              v.numero_visite, v.date_arrivee,
+              c.statut as consultation_statut, c.motif_consultation as consultation_motif,
+              c.diagnostic_principal as consultation_diagnostic,
+              u.nom_complet as medecin_nom
+       FROM observations o
+       INNER JOIN patients p ON o.patient_id = p.id
+       INNER JOIN visites v ON o.visite_id = v.id
+       INNER JOIN consultations c ON o.consultation_id = c.id
+       INNER JOIN users u ON o.medecin_id = u.id
+       WHERE o.id = ? AND o.actif = 1`,
+      [id]
+    );
+
+    if (!observation) {
+      res.status(404).json({ error: 'Observation introuvable.' });
+      return;
+    }
+
+    if (observation.medecin_id !== user.id) {
+      res.status(403).json({ error: 'Vous ne pouvez pas consulter l\'observation d’un confrère.' });
+      return;
+    }
+
+    // Récupérer les notes horodatées
+    const notes = await query<any>(
+      `SELECT * FROM observation_notes WHERE observation_id = ? ORDER BY created_at ASC`,
+      [id]
+    );
+
+    // Calcul durée
+    let dureeTotalMinutes = 0;
+    if (observation.duree_debut_observation) {
+      const start = new Date(observation.duree_debut_observation).getTime();
+      const end = observation.duree_fin_observation
+        ? new Date(observation.duree_fin_observation).getTime()
+        : Date.now();
+      dureeTotalMinutes = Math.max(0, Math.floor((end - start) / 60000));
+    }
+    const hours = Math.floor(dureeTotalMinutes / 60);
+    const mins = dureeTotalMinutes % 60;
+    const days = Math.floor(hours / 24);
+    const remainingHours = hours % 24;
+    let formatee = `${dureeTotalMinutes} min`;
+    if (days > 0) formatee = `${days}j ${remainingHours}h ${mins}min`;
+    else if (hours > 0) formatee = `${hours}h ${mins}min`;
+    else formatee = `${mins} min`;
+
+    res.json({
+      observation: {
+        ...observation,
+        duree_total_minutes: dureeTotalMinutes,
+        duree_formatee: formatee,
+        notes
+      }
+    });
+  } catch (error: any) {
+    console.error('Erreur récupération détail observation:', error);
+    res.status(500).json({ error: 'Erreur interne lors du chargement de l\'observation.' });
+  }
+}
+
+/**
+ * Ajouter une note clinique et/ou des constantes horodatées à une observation
+ * POST /api/medical/observations/:id/note
+ * Rôle strict : MÉDECIN responsable de l'observation.
+ */
+export async function addObservationNote(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const { id } = req.params;
+    const { note_texte, constantes } = req.body;
+
+    if (!note_texte || typeof note_texte !== 'string' || note_texte.trim().length < 1) {
+      res.status(400).json({ error: 'Le texte de la note est obligatoire.' });
+      return;
+    }
+
+    const observation = await queryOne<any>(
+      `SELECT * FROM observations WHERE id = ? AND actif = 1`,
+      [id]
+    );
+
+    if (!observation) {
+      res.status(404).json({ error: 'Observation introuvable.' });
+      return;
+    }
+
+    if (observation.medecin_id !== user.id) {
+      res.status(403).json({ error: 'Vous ne pouvez pas modifier l\'observation d’un confrère.' });
+      return;
+    }
+
+    if (observation.statut === 'CLÔTURÉE') {
+      res.status(400).json({ error: 'Cette observation est clôturée. Aucune note ne peut être ajoutée.' });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const noteId = `obsn-${crypto.randomUUID().substring(0, 12)}`;
+    const constantesJson = constantes ? JSON.stringify(constantes) : null;
+
+    await transaction(async () => {
+      // Créer la note horodatée
+      await execute(
+        `INSERT INTO observation_notes (id, observation_id, note_texte, constantes_json, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        [noteId, id, note_texte.trim(), constantesJson, now]
+      );
+
+      // Mettre à jour la note_clinique globale de l'observation (cumul)
+      const currentNote = observation.note_clinique || '';
+      const newNoteEntry = `[${new Date(now).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}] ${note_texte.trim()}`;
+      const updatedNote = currentNote
+        ? currentNote + '\n\n' + newNoteEntry
+        : newNoteEntry;
+      await execute(
+        `UPDATE observations SET note_clinique = ?, updated_at = ? WHERE id = ?`,
+        [updatedNote, now, id]
+      );
+    });
+
+    await auditLogger.log({
+      userId: user.id,
+      action: 'OBSERVATION_NOTE_ADDED',
+      ressourceType: 'OBSERVATION',
+      ressourceId: id,
+      details: `Note ajoutée à l'observation ${id} par Dr. ${user.nom_complet}`,
+      ipAddress: req.ip || '127.0.0.1'
+    });
+
+    res.json({ message: 'Note ajoutée avec succès.', note_id: noteId });
+  } catch (error: any) {
+    console.error('Erreur ajout note observation:', error);
+    res.status(500).json({ error: 'Erreur interne lors de l\'ajout de la note.' });
+  }
+}
+
+/**
+ * Clôturer une observation médicale
+ * POST /api/medical/observations/:id/close
+ * Rôle strict : MÉDECIN responsable. L'historique est conservé.
+ * Aucun transfert automatique vers d'autres médecins — seul le Relais médical permet le transfert.
+ */
+export async function closeObservation(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const { id } = req.params;
+
+    const observation = await queryOne<any>(
+      `SELECT * FROM observations WHERE id = ? AND actif = 1`,
+      [id]
+    );
+
+    if (!observation) {
+      res.status(404).json({ error: 'Observation introuvable.' });
+      return;
+    }
+
+    if (observation.medecin_id !== user.id) {
+      res.status(403).json({ error: 'Vous ne pouvez pas clôturer l\'observation d’un confrère.' });
+      return;
+    }
+
+    if (observation.statut === 'CLÔTURÉE') {
+      res.status(400).json({ error: 'Cette observation est déjà clôturée.' });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const dureeFin = now;
+    let dureeTotalMinutes = 0;
+    if (observation.duree_debut_observation) {
+      const start = new Date(observation.duree_debut_observation).getTime();
+      dureeTotalMinutes = Math.max(0, Math.floor((new Date(dureeFin).getTime() - start) / 60000));
+    }
+
+    await transaction(async () => {
+      await execute(
+        `UPDATE observations SET
+           statut = 'CLÔTURÉE',
+           duree_fin_observation = ?,
+           updated_at = ?
+         WHERE id = ?`,
+        [dureeFin, now, id]
+      );
+    });
+
+    const closedObservation = await queryOne<any>(
+      `SELECT o.*,
+              p.numero_dossier, p.nom as patient_nom, p.prenom as patient_prenom,
+              v.numero_visite,
+              c.statut as consultation_statut,
+              u.nom_complet as medecin_nom
+       FROM observations o
+       INNER JOIN patients p ON o.patient_id = p.id
+       INNER JOIN visites v ON o.visite_id = v.id
+       INNER JOIN consultations c ON o.consultation_id = c.id
+       INNER JOIN users u ON o.medecin_id = u.id
+       WHERE o.id = ?`,
+      [id]
+    );
+
+    await auditLogger.log({
+      userId: user.id,
+      action: 'OBSERVATION_CLOSE',
+      ressourceType: 'OBSERVATION',
+      ressourceId: id,
+      details: `Observation clôturée par Dr. ${user.nom_complet}. Durée totale: ${dureeTotalMinutes} min. Patient: ${closedObservation?.patient_nom} ${closedObservation?.patient_prenom}`,
+      ipAddress: req.ip || '127.0.0.1'
+    });
+
+    res.json({
+      message: 'Observation clôturée avec succès. L\'historique est conservé.',
+      observation: { ...closedObservation, duree_total_minutes: dureeTotalMinutes }
+    });
+  } catch (error: any) {
+    console.error('Erreur clôture observation:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la clôture de l\'observation.' });
+  }
+}
+
+/**
+ * Historique des observations d'un patient (consulté par le médecin responsable)
+ * GET /api/medical/observations/history/:patient_id
+ * Rôle strict : MÉDECIN — Retourne uniquement les observations du médecin connecté pour ce patient.
+ */
+export async function getObservationHistory(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const { patient_id } = req.params;
+
+    // Vérifier que le patient existe
+    const patient = await queryOne<any>(
+      `SELECT id, nom, prenom, numero_dossier FROM patients WHERE id = ? AND actif = 1`,
+      [patient_id]
+    );
+
+    if (!patient) {
+      res.status(404).json({ error: 'Patient introuvable.' });
+      return;
+    }
+
+    const observations = await query<any>(
+      `SELECT o.id, o.consultation_id, o.visite_id, o.patient_id, o.medecin_id,
+              o.statut, o.note_clinique, o.constantes_observation,
+              o.duree_debut_observation, o.duree_fin_observation,
+              o.created_at, o.updated_at,
+              p.numero_dossier, p.nom as patient_nom, p.prenom as patient_prenom,
+              v.numero_visite, v.date_arrivee,
+              c.statut as consultation_statut, c.motif_consultation as consultation_motif,
+              c.diagnostic_principal as consultation_diagnostic,
+              u.nom_complet as medecin_nom
+       FROM observations o
+       INNER JOIN patients p ON o.patient_id = p.id
+       INNER JOIN visites v ON o.visite_id = v.id
+       INNER JOIN consultations c ON o.consultation_id = c.id
+       INNER JOIN users u ON o.medecin_id = u.id
+       WHERE o.patient_id = ? AND o.medecin_id = ? AND o.actif = 1
+       ORDER BY o.created_at DESC`,
+      [patient_id, user.id]
+    );
+
+    // Récupérer les notes pour chaque observation
+    const enrichedObservations = await Promise.all(
+      observations.map(async (obs: any) => {
+        const notes = await query<any>(
+          `SELECT * FROM observation_notes WHERE observation_id = ? ORDER BY created_at ASC`,
+          [obs.id]
+        );
+        let dureeTotalMinutes = 0;
+        if (obs.duree_debut_observation) {
+          const start = new Date(obs.duree_debut_observation).getTime();
+          const end = obs.duree_fin_observation
+            ? new Date(obs.duree_fin_observation).getTime()
+            : Date.now();
+          dureeTotalMinutes = Math.max(0, Math.floor((end - start) / 60000));
+        }
+        const hours = Math.floor(dureeTotalMinutes / 60);
+        const mins = dureeTotalMinutes % 60;
+        const days = Math.floor(hours / 24);
+        const remainingHours = hours % 24;
+        let formatee = `${dureeTotalMinutes} min`;
+        if (days > 0) formatee = `${days}j ${remainingHours}h ${mins}min`;
+        else if (hours > 0) formatee = `${hours}h ${mins}min`;
+        return {
+          ...obs,
+          duree_total_minutes: dureeTotalMinutes,
+          duree_formatee: formatee,
+          notes
+        };
+      })
+    );
+
+    res.json({ patient, observations: enrichedObservations, total: enrichedObservations.length });
+  } catch (error: any) {
+    console.error('Erreur récupération historique observations:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la récupération de l\'historique.' });
+  }
+}
+
+/**
+ * Mettre à jour la note clinique globale d'une observation
+ * PATCH /api/medical/observations/:id
+ * Rôle strict : MÉDECIN responsable.
+ */
+export async function updateObservation(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const { id } = req.params;
+    const { note_clinique, constantes } = req.body;
+
+    const observation = await queryOne<any>(
+      `SELECT * FROM observations WHERE id = ? AND actif = 1`,
+      [id]
+    );
+
+    if (!observation) {
+      res.status(404).json({ error: 'Observation introuvable.' });
+      return;
+    }
+
+    if (observation.medecin_id !== user.id) {
+      res.status(403).json({ error: 'Vous ne pouvez pas modifier l\'observation d’un confrère.' });
+      return;
+    }
+
+    if (observation.statut === 'CLÔTURÉE') {
+      res.status(400).json({ error: 'Cette observation est clôturée et ne peut être modifiée.' });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const updateFields: string[] = ['updated_at = ?'];
+    const updateParams: any[] = [now];
+
+    if (note_clinique !== undefined) {
+      updateFields.push('note_clinique = ?');
+      updateParams.push(note_clinique?.trim() || null);
+    }
+    if (constantes !== undefined) {
+      updateFields.push('constantes_observation = ?');
+      updateParams.push(constantes ? JSON.stringify(constantes) : null);
+    }
+
+    updateParams.push(id);
+
+    await execute(
+      `UPDATE observations SET ${updateFields.join(', ')} WHERE id = ?`,
+      updateParams
+    );
+
+    const updated = await queryOne<any>(
+      `SELECT * FROM observations WHERE id = ?`,
+      [id]
+    );
+
+    res.json({ message: 'Observation mise à jour.', observation: updated });
+  } catch (error: any) {
+    console.error('Erreur mise à jour observation:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la mise à jour de l\'observation.' });
   }
 }

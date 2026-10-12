@@ -198,6 +198,15 @@ app.post('/api/medical/lab-orders/:id/mark-viewed', requireAuth, requireRole(['M
   app.get('/api/medical/relais/patients-in-progress', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.getRelaisPatientsInProgress);
   app.get('/api/medical/relais/patient/:patientId', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.getRelaisPatientHistory);
 
+  // --- OBSERVATION MÉDICALE (Phase 6.2) ---
+  app.post('/api/medical/observations/put-in-observation', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.putPatientInObservation);
+  app.get('/api/medical/observations', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.getDoctorObservations);
+  app.get('/api/medical/observations/:id', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.getObservationDetails);
+  app.post('/api/medical/observations/:id/note', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.addObservationNote);
+  app.post('/api/medical/observations/:id/close', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.closeObservation);
+  app.get('/api/medical/observations/history/:patient_id', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.getObservationHistory);
+  app.patch('/api/medical/observations/:id', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.updateObservation);
+
   // --- NOTIFICATIONS SYSTÈME ---
   app.get('/api/notifications', requireAuth, medicalCtrl.getUserNotifications);
   app.patch('/api/notifications/:id/read', requireAuth, medicalCtrl.markNotificationRead);

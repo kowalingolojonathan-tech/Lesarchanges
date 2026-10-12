@@ -1708,6 +1708,57 @@ export async function runMigrations(): Promise<void> {
     console.error('Erreur lors de la migration relais médical (Phase 6.1):', err);
   }
 
+  // Migration Phase 6.2 — Observations médicales (suivi clinique du patient par son médecin responsable)
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS observations (
+        id TEXT PRIMARY KEY,
+        consultation_id TEXT NOT NULL,
+        visite_id TEXT NOT NULL,
+        patient_id TEXT NOT NULL,
+        medecin_id TEXT NOT NULL,
+        statut TEXT NOT NULL DEFAULT 'EN_OBSERVATION' CHECK(statut IN ('EN_OBSERVATION', 'CLÔTURÉE')),
+        note_clinique TEXT,
+        constantes_observation TEXT,
+        duree_debut_observation TEXT,
+        duree_fin_observation TEXT,
+        actif INTEGER NOT NULL DEFAULT 1 CHECK(actif IN (0, 1)),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (consultation_id) REFERENCES consultations(id) ON DELETE RESTRICT,
+        FOREIGN KEY (visite_id) REFERENCES visites(id) ON DELETE RESTRICT,
+        FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE RESTRICT,
+        FOREIGN KEY (medecin_id) REFERENCES users(id) ON DELETE RESTRICT
+      );
+      CREATE INDEX IF NOT EXISTS idx_observations_consultation ON observations(consultation_id);
+      CREATE INDEX IF NOT EXISTS idx_observations_patient ON observations(patient_id);
+      CREATE INDEX IF NOT EXISTS idx_observations_medecin ON observations(medecin_id);
+      CREATE INDEX IF NOT EXISTS idx_observations_statut ON observations(statut);
+
+      CREATE TABLE IF NOT EXISTS observation_notes (
+        id TEXT PRIMARY KEY,
+        observation_id TEXT NOT NULL,
+        note_texte TEXT NOT NULL,
+        constantes_json TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (observation_id) REFERENCES observations(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_obs_notes_observation ON observation_notes(observation_id);
+      CREATE INDEX IF NOT EXISTS idx_obs_notes_created ON observation_notes(created_at);
+    `);
+
+    // Migration pour tables existantes : ajouter colonne actif si manquante
+    const obsColsRes = db.exec("PRAGMA table_info(observations);");
+    if (obsColsRes.length > 0 && obsColsRes[0].values.length > 0) {
+      const obsCols = obsColsRes[0].values.map((v: any[]) => String(v[1]).toUpperCase());
+      if (!obsCols.includes('ACTIF')) {
+        db.exec("ALTER TABLE observations ADD COLUMN actif INTEGER NOT NULL DEFAULT 1 CHECK(actif IN (0, 1));");
+      }
+    }
+  } catch (err) {
+    console.error('Erreur lors de la migration observations (Phase 6.2):', err);
+  }
+
   db.exec('PRAGMA foreign_keys = ON;');
   saveDb();
 }

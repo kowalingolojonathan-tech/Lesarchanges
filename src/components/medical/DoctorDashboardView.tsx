@@ -28,6 +28,9 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
   const [currentTime, setCurrentTime] = useState<number>(Date.now());
   const [activeModal, setActiveModal] = useState<string | null>(null);
   const [viewedNotificationIds, setViewedNotificationIds] = useState<Set<string>>(new Set());
+  const [activeObservationId, setActiveObservationId] = useState<string | null>(null);
+  const [activeObservation, setActiveObservation] = useState<any>(null);
+  const [showObservationDetail, setShowObservationDetail] = useState<boolean>(false);
 
   // Rendez-vous planifiés state
   const [showRdvCreateModal, setShowRdvCreateModal] = useState<boolean>(false);
@@ -294,9 +297,9 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
   };
 
   // Compteurs dérivés pour les accès rapides — toujours à jour depuis data
-  const q = data?.quickAccess ?? { patients: 0, rdv: 0, rdvPlanifies: 0, ordonnances: 0, labResults: 0, bulletins: 0, arriveesJour: 0, demandesLabo: 0, orientations: 0, relais: 0 };
+  const q = data?.quickAccess ?? { patients: 0, rdv: 0, rdvPlanifies: 0, ordonnances: 0, labResults: 0, bulletins: 0, arriveesJour: 0, demandesLabo: 0, orientations: 0, relais: 0, observations: 0 };
   const s = data?.stats ?? { attente: 0, en_cours: 0, a_finaliser: 0, terminees_jour: 0 };
-  const qa = data?.quickAccessLists ?? { patientsReçusAujourdhui: [], rdvAujourdhui: [], rdvPlanifiesFuturs: [], ordonnancesList: [], labResultsNonLus: [], bulletinsDispo: [], demandesLaboNonTraitees: [], orientationsEnAttente: [], relaisEnAttente: [] };
+  const qa = data?.quickAccessLists ?? { patientsReçusAujourdhui: [], rdvAujourdhui: [], rdvPlanifiesFuturs: [], ordonnancesList: [], labResultsNonLus: [], bulletinsDispo: [], demandesLaboNonTraitees: [], orientationsEnAttente: [], relaisEnAttente: [], observationsActives: [] };
 
   // Données utilisées par chaque modale — toujours cohérentes avec les compteurs
   // Si quickAccessLists est manquant (ancien serveur), les listes seront vides
@@ -317,6 +320,7 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
     'demandes-labo': { count: q.demandesLabo, items: qa.demandesLaboNonTraitees || [] },
     finalisation: { count: s.a_finaliser, items: (data?.queue?.a_finaliser) || [] },
     orientations: { count: q.orientations, items: qa.orientationsEnAttente || [] },
+    observations: { count: q.observations, items: qa.observationsActives || [] },
   };
 
   return (
@@ -511,6 +515,24 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
             </div>
             <span className="text-xs font-bold text-cyan-900">Relais médical</span>
             <span className="text-[9px] text-cyan-600 font-semibold">en attente</span>
+          </button>
+
+          {/* Observations actives (Phase 6.2) */}
+          <button
+            type="button"
+            onClick={() => setActiveModal('observations')}
+            className="p-2.5 bg-orange-50/60 hover:bg-orange-100/80 border border-orange-200 rounded-xl flex flex-col items-center justify-center text-center transition-all min-h-[56px] group relative"
+          >
+            <div className="relative">
+              <HeartPulse className="w-5 h-5 text-orange-700 mb-1" />
+              {(q?.observations ?? 0) > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                  {q.observations}
+                </span>
+              )}
+            </div>
+            <span className="text-xs font-bold text-orange-900">Observations</span>
+            <span className="text-[9px] text-orange-600 font-semibold">en cours</span>
           </button>
 
           {/* Finalisation */}
@@ -2056,6 +2078,294 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
         </div>
       )}
 
+      {/* Modal: Observations actives (Phase 6.2) */}
+      {activeModal === 'observations' && (() => {
+        const items = modalData.observations.items;
+        return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setActiveModal(null)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-orange-50">
+              <div className="flex items-center gap-2">
+                <HeartPulse className="w-5 h-5 text-orange-700" />
+                <h2 className="text-sm font-bold text-slate-900">Observations en cours ({modalData.observations.count})</h2>
+              </div>
+              <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+            </div>
+            <div className="overflow-y-auto flex-1 p-4">
+              {items.length > 0 ? (
+                <div className="space-y-3">
+                  {items.map((obs: any) => {
+                    const elapsedMin = obs.duree_debut_observation
+                      ? Math.max(0, Math.floor((Date.now() - new Date(obs.duree_debut_observation).getTime()) / 60000))
+                      : 0;
+                    const hours = Math.floor(elapsedMin / 60);
+                    const mins = elapsedMin % 60;
+                    const days = Math.floor(hours / 24);
+                    const remainingHours = hours % 24;
+                    let durForm = `${elapsedMin} min`;
+                    if (days > 0) durForm = `${days}j ${remainingHours}h ${mins}min`;
+                    else if (hours > 0) durForm = `${hours}h ${mins}min`;
+
+                    return (
+                      <div key={obs.id} className="p-3 bg-orange-50 rounded-lg border border-orange-200">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-xs font-bold text-slate-800">{obs.patient_nom} {obs.patient_prenom}</span>
+                              <span className="text-[10px] text-slate-500 font-mono">{obs.numero_dossier}</span>
+                              <span className="text-[10px] text-slate-400 font-mono">Visite N°{obs.numero_visite}</span>
+                            </div>
+                            {obs.consultation_motif && (
+                              <div className="text-[11px] text-slate-500 mt-0.5 truncate">{obs.consultation_motif}</div>
+                            )}
+                            {obs.consultation_diagnostic && (
+                              <div className="text-[11px] text-emerald-700 mt-0.5 font-semibold">Diagnostic: {obs.consultation_diagnostic}</div>
+                            )}
+                            <div className="text-[10px] text-orange-600 mt-1 font-semibold">
+                              <Clock className="w-3 h-3 inline mr-0.5" />
+                              Durée observation: {durForm}
+                            </div>
+                          </div>
+                          <div className="flex gap-1.5 shrink-0">
+                            <button
+                              onClick={async () => {
+                                try {
+                                  const res = await apiFetch(`/api/medical/observations/${obs.id}`);
+                                  if (res.ok) {
+                                    const data = await res.json();
+                                    setActiveObservation(data.observation);
+                                    setShowObservationDetail(true);
+                                    setActiveModal(null);
+                                  }
+                                } catch {}
+                              }}
+                              className="px-2.5 py-1.5 bg-orange-600 hover:bg-orange-700 text-white text-[10px] font-bold rounded-lg transition-colors"
+                            >
+                              Suivre
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="py-8 text-center text-slate-400 text-sm">
+                  <HeartPulse className="w-8 h-8 mx-auto text-slate-300 mb-2" />
+                  Aucune observation en cours pour le moment.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* Modal: Détail d'une observation (suivi clinique) */}
+      {showObservationDetail && activeObservation && (
+        <ObservationDetailView
+          observation={activeObservation}
+          onBack={() => { setShowObservationDetail(false); fetchDoctorQueue(); }}
+          onUpdate={() => { fetchDoctorQueue(); }}
+        />
+      )}
+
+    </div>
+  );
+};
+
+// ============================================================================
+// COMPONENT: ObservationDetailView (Phase 6.2)
+// ============================================================================
+interface ObservationDetailViewProps {
+  observation: any;
+  onBack: () => void;
+  onUpdate: () => void;
+}
+
+export const ObservationDetailView: React.FC<ObservationDetailViewProps> = ({ observation, onBack, onUpdate }) => {
+  const [noteText, setNoteText] = useState<string>('');
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [observationData, setObservationData] = useState<any>(observation);
+
+  const fetchObservation = async () => {
+    try {
+      const res = await apiFetch(`/api/medical/observations/${observationData.id}`);
+      if (res.ok) {
+        const data = await res.json();
+        setObservationData(data.observation);
+      }
+    } catch {}
+  };
+
+  const handleAddNote = async () => {
+    if (!noteText.trim()) return;
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const res = await apiFetch(`/api/medical/observations/${observationData.id}/note`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note_texte: noteText.trim() })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erreur lors de l\'ajout de la note');
+      setNoteText('');
+      setSuccess('Note ajoutée avec succès.');
+      await fetchObservation();
+      onUpdate();
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err: any) {
+      setError(err.message || 'Impossible d\'ajouter la note.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCloseObservation = async () => {
+    if (!window.confirm('Êtes-vous sûr de vouloir clôturer cette observation ? L\'historique sera conservé.')) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await apiFetch(`/api/medical/observations/${observationData.id}/close`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erreur lors de la clôture');
+      setSuccess('Observation clôturée avec succès.');
+      setTimeout(() => {
+        onBack();
+      }, 1500);
+    } catch (err: any) {
+      setError(err.message || 'Impossible de clôturer l\'observation.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const elapsedMin = observationData?.duree_debut_observation
+    ? Math.max(0, Math.floor((Date.now() - new Date(observationData.duree_debut_observation).getTime()) / 60000))
+    : 0;
+  const hours = Math.floor(elapsedMin / 60);
+  const mins = elapsedMin % 60;
+  const days = Math.floor(hours / 24);
+  const remainingHours = hours % 24;
+  let durForm = `${elapsedMin} min`;
+  if (days > 0) durForm = `${days}j ${remainingHours}h ${mins}min`;
+  else if (hours > 0) durForm = `${hours}h ${mins}min`;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={onBack}>
+      <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-orange-50">
+          <div className="flex items-center gap-2">
+            <HeartPulse className="w-5 h-5 text-orange-700" />
+            <div>
+              <h2 className="text-sm font-bold text-slate-900">Suivi d'observation</h2>
+              <p className="text-[10px] text-slate-500">
+                {observationData?.patient_nom} {observationData?.patient_prenom} — N°{observationData?.numero_dossier}
+                {observationData?.duree_formatee && <span className="ml-2 text-orange-700 font-semibold">Durée: {observationData.duree_formatee}</span>}
+              </p>
+            </div>
+          </div>
+          <button onClick={onBack} className="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {error && (
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-700">{error}</div>
+          )}
+          {success && (
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-700">{success}</div>
+          )}
+
+          {/* Informations générales */}
+          <div className="bg-slate-50 rounded-lg p-3 text-xs space-y-1">
+            <div className="flex gap-4 flex-wrap">
+              <span><strong>Visite:</strong> N°{observationData?.numero_visite}</span>
+              <span><strong>Statut consultation:</strong> {observationData?.consultation_statut}</span>
+              {observationData?.consultation_motif && (
+                <span><strong>Motif:</strong> {observationData.consultation_motif}</span>
+              )}
+              {observationData?.consultation_diagnostic && (
+                <span className="text-emerald-700 font-semibold"><strong>Diagnostic:</strong> {observationData.consultation_diagnostic}</span>
+              )}
+            </div>
+          </div>
+
+          {/* Notes cliniques */}
+          <div>
+            <h3 className="text-xs font-bold text-slate-700 mb-2 flex items-center gap-1">
+              <Activity className="w-3.5 h-3.5 text-orange-600" />
+              Notes cliniques & constantes horodatées
+            </h3>
+            <div className="bg-slate-50 rounded-lg border border-slate-200 p-3 min-h-[80px] max-h-[200px] overflow-y-auto text-xs space-y-2">
+              {observationData?.notes && observationData.notes.length > 0 ? (
+                observationData.notes.map((note: any) => (
+                  <div key={note.id} className="border-l-2 border-orange-300 pl-3 py-1">
+                    <div className="text-[10px] text-slate-400 font-mono">
+                      {new Date(note.created_at).toLocaleString('fr-FR')}
+                    </div>
+                    <div className="text-slate-700 mt-0.5">{note.note_texte}</div>
+                    {note.constantes_json && (
+                      <div className="text-[10px] text-orange-600 mt-0.5 italic">
+                        [Constantes enregistrées]
+                      </div>
+                    )}
+                  </div>
+                ))
+              ) : (
+                <div className="text-slate-400 italic">Aucune note enregistrée.</div>
+              )}
+            </div>
+          </div>
+
+          {/* Formulaire d'ajout de note */}
+          <div className="bg-white rounded-lg border border-slate-200 p-3 space-y-2">
+            <label className="block text-xs font-semibold text-slate-700">Ajouter une note clinique</label>
+            <textarea
+              value={noteText}
+              onChange={(e) => setNoteText(e.target.value)}
+              placeholder="Décrivez l'évolution clinique du patient, les constantes observées..."
+              rows={3}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={handleAddNote}
+                disabled={loading || !noteText.trim()}
+                className="px-4 py-1.5 bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold rounded-lg transition-colors disabled:opacity-50"
+              >
+                {loading ? 'Enregistrement...' : 'Ajouter la note'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer actions */}
+        <div className="shrink-0 bg-slate-50 px-4 py-3 border-t border-slate-200 flex justify-end gap-2">
+          <button
+            onClick={onBack}
+            className="px-4 py-2 text-xs font-semibold text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
+          >
+            Retour
+          </button>
+          <button
+            onClick={handleCloseObservation}
+            disabled={loading}
+            className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1.5"
+          >
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            Clôturer l'observation
+          </button>
+        </div>
+      </div>
     </div>
   );
 };

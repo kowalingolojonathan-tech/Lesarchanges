@@ -336,6 +336,7 @@ export interface DoctorQueueData {
     demandesLabo: number;
     orientations: number;
     relais: number;
+    observations: number;
   };
   quickAccessLists?: {
     patientsReçusAujourdhui: any[];
@@ -347,6 +348,7 @@ export interface DoctorQueueData {
     demandesLaboNonTraitees: any[];
     orientationsEnAttente: any[];
     relaisEnAttente: any[];
+    observationsActives: Observation[];
   };
   queue: {
     attente: Visite[];
@@ -858,6 +860,43 @@ export interface BillingReportsData {
 // ==========================================
 
 export type RelaisStatut = 'EN_ATTENTE' | 'ACCEPTÉ' | 'REFUSÉ' | 'ANNULÉ';
+
+export interface ObservationNote {
+  id: string;
+  observation_id: string;
+  note_texte: string;
+  constantes_json?: string | null;
+  created_at: string;
+  note_date?: string;
+}
+
+export interface Observation {
+  id: string;
+  consultation_id: string;
+  visite_id: string;
+  patient_id: string;
+  medecin_id: string;
+  statut: 'EN_OBSERVATION' | 'CLÔTURÉE';
+  note_clinique?: string | null;
+  constantes_observation?: string | null;
+  duree_debut_observation?: string | null;
+  duree_fin_observation?: string | null;
+  created_at: string;
+  updated_at: string;
+  // Données jointes
+  patient_nom?: string;
+  patient_prenom?: string;
+  numero_dossier?: string;
+  numero_visite?: string;
+  date_arrivee?: string;
+  consultation_statut?: string;
+  consultation_motif?: string;
+  consultation_diagnostic?: string;
+  medecin_nom?: string;
+  notes?: ObservationNote[];
+  duree_total_minutes?: number;
+  duree_formatee?: string;
+}
 
 export interface RelaisMedical {
   id: string;
