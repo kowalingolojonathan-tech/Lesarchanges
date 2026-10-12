@@ -56,6 +56,10 @@ export async function runPhase61Tests(): Promise<TestResult[]> {
   const csl1_id = `csl-61-${testSuffix}`;
   const vis2_id = `vis-61-2-${testSuffix}`;
   const csl2_id = `csl-61-2-${testSuffix}`;
+  const vis3_id = `vis-61-3-${testSuffix}`;
+  const csl3_id = `csl-61-3-${testSuffix}`;
+  const vis4_id = `vis-61-4-${testSuffix}`;
+  const csl4_id = `csl-61-4-${testSuffix}`;
   let relaisWithDestId = '';
   let relaisNoDestId = '';
   const now = () => new Date().toISOString();
@@ -69,6 +73,27 @@ export async function runPhase61Tests(): Promise<TestResult[]> {
     `INSERT INTO consultations (id, visite_id, patient_id, medecin_id, date_consultation, statut, motif_consultation, diagnostic_principal, finalisee_le, created_at, updated_at, actif)
      VALUES (?, ?, ?, ?, datetime('now'), 'FINALISEE', 'Suivi 2', 'Diabète', ?, datetime('now'), datetime('now'), 1)`,
     [csl2_id, vis2_id, pat1_id, med1_id, now()]
+  );
+  // Setup pour tests F, I, J (consultations séparées pour éviter conflits)
+  await execute(
+    `INSERT INTO visites (id, numero_visite, patient_id, medecin_id, date_arrivee, statut, motif_venue, type_visite, actif, created_at)
+     VALUES (?, ?, ?, ?, datetime('now'), 'CLOTUREE', 'Suivi 3', 'STANDARD', 1, datetime('now'))`,
+    [vis3_id, `VIS-61-3-${testSuffix}`, pat1_id, med1_id]
+  );
+  await execute(
+    `INSERT INTO consultations (id, visite_id, patient_id, medecin_id, date_consultation, statut, motif_consultation, diagnostic_principal, finalisee_le, created_at, updated_at, actif)
+     VALUES (?, ?, ?, ?, datetime('now'), 'FINALISEE', 'Suivi 3', 'Diabète', ?, datetime('now'), datetime('now'), 1)`,
+    [csl3_id, vis3_id, pat1_id, med1_id, now()]
+  );
+  await execute(
+    `INSERT INTO visites (id, numero_visite, patient_id, medecin_id, date_arrivee, statut, motif_venue, type_visite, actif, created_at)
+     VALUES (?, ?, ?, ?, datetime('now'), 'CLOTUREE', 'Suivi 4', 'STANDARD', 1, datetime('now'))`,
+    [vis4_id, `VIS-61-4-${testSuffix}`, pat1_id, med1_id]
+  );
+  await execute(
+    `INSERT INTO consultations (id, visite_id, patient_id, medecin_id, date_consultation, statut, motif_consultation, diagnostic_principal, finalisee_le, created_at, updated_at, actif)
+     VALUES (?, ?, ?, ?, datetime('now'), 'FINALISEE', 'Suivi 4', 'Hypertension', ?, datetime('now'), datetime('now'), 1)`,
+    [csl4_id, vis4_id, pat1_id, med1_id, now()]
   );
 
   // Setup patient
@@ -288,7 +313,7 @@ export async function runPhase61Tests(): Promise<TestResult[]> {
   try {
     // Créer un nouveau relais avec destinataire désigné pour tester le refus
     const resCreate = await callCreate({
-      consultation_id: csl2_id,
+      consultation_id: csl3_id,
       motif: 'Test non autorisé',
       medecin_destinataire_id: med2_id,
     });
@@ -355,7 +380,7 @@ export async function runPhase61Tests(): Promise<TestResult[]> {
   try {
     // Créer un nouveau relais pour ce test (le précédent a déjà été accepté)
     const resCreate = await callCreate({
-      consultation_id: csl2_id,
+      consultation_id: csl3_id,
       motif: 'Test reprise — création frais',
       medecin_destinataire_id: med2_id,
     });
@@ -383,7 +408,7 @@ export async function runPhase61Tests(): Promise<TestResult[]> {
   try {
     // Créer un nouveau relais pour tester le refus
     const resCreate = await callCreate({
-      consultation_id: csl1_id,
+      consultation_id: csl4_id,
       motif: 'Test refus',
       medecin_destinataire_id: med2_id,
     });

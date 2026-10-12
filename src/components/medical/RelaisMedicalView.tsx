@@ -46,6 +46,7 @@ export const RelaisMedicalView: React.FC<RelaisMedicalViewProps> = ({ userRole, 
   const [pending, setPending] = useState<RelaisItem[]>([]);
   const [reprise, setReprise] = useState<RelaisItem[]>([]);
   const [history, setHistory] = useState<RelaisItem[]>([]);
+  const [inProgress, setInProgress] = useState<RelaisItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -59,6 +60,7 @@ export const RelaisMedicalView: React.FC<RelaisMedicalViewProps> = ({ userRole, 
   const [destinataires, setDestinataires] = useState<any[]>([]);
   const [consultations, setConsultations] = useState<any[]>([]);
   const [startingId, setStartingId] = useState<string | null>(null);
+  const [patientRelaisHistory, setPatientRelaisHistory] = useState<Record<string, RelaisItem[]>>({});
   const currentUserId = userId || '';
 
   useEffect(() => {
@@ -69,12 +71,13 @@ export const RelaisMedicalView: React.FC<RelaisMedicalViewProps> = ({ userRole, 
     setLoading(true);
     setError(null);
     try {
-      const [pendRes, repRes, histRes, docRes, queueRes] = await Promise.all([
+      const [pendRes, repRes, histRes, docRes, queueRes, progRes] = await Promise.all([
         api.get<{ relais: any[] }>('/api/medical/relais/pending'),
         api.get<{ relais: any[] }>('/api/medical/relais/patients-to-reprise'),
         api.get<{ relais: any[] }>('/api/medical/relais/history'),
         api.get<any>('/api/doctors'),
         api.get<any>('/api/medical/queue'),
+        api.get<{ relais: any[] }>('/api/medical/relais/patients-in-progress'),
       ]);
       setPending(
         (pendRes.relais || []).map((r) => ({
@@ -97,6 +100,13 @@ export const RelaisMedicalView: React.FC<RelaisMedicalViewProps> = ({ userRole, 
           is_originator: r.medecin_origine_id === currentUserId,
         }))
       );
+      setInProgress(
+        (progRes.relais || []).map((r) => ({
+          ...r,
+          can_act: false,
+          is_originator: r.medecin_origine_id === currentUserId,
+        }))
+      );
       setDestinataires(docRes?.doctors || []);
       if (queueRes.queue && queueRes.queue.dernieres_consultations) {
         setConsultations(queueRes.queue.dernieres_consultations);
@@ -105,6 +115,22 @@ export const RelaisMedicalView: React.FC<RelaisMedicalViewProps> = ({ userRole, 
       setError(e.message || 'Erreur de chargement');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadPatientHistory = async (patientId: string) => {
+    try {
+      const res = await api.get<{ relais: any[] }>(`/api/medical/relais/patient/${patientId}`);
+      setPatientRelaisHistory((prev) => ({
+        ...prev,
+        [patientId]: (res.relais || []).map((r) => ({
+          ...r,
+          can_act: false,
+          is_originator: r.medecin_origine_id === currentUserId,
+        })),
+      }));
+    } catch {
+      // silent fail
     }
   };
 
@@ -177,6 +203,7 @@ export const RelaisMedicalView: React.FC<RelaisMedicalViewProps> = ({ userRole, 
       ACCEPTÉ: { bg: 'bg-emerald-100', text: 'text-emerald-800', label: 'Accepté' },
       REFUSÉ: { bg: 'bg-red-100', text: 'text-red-800', label: 'Refusé' },
       ANNULÉ: { bg: 'bg-slate-100', text: 'text-slate-600', label: 'Annulé' },
+      EN_COURS: { bg: 'bg-blue-100', text: 'text-blue-800', label: 'En cours' },
     };
     const s = map[statut] || map['EN_ATTENTE'];
     return <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${s.bg} ${s.text}`}>{s.label}</span>;
@@ -185,6 +212,18 @@ export const RelaisMedicalView: React.FC<RelaisMedicalViewProps> = ({ userRole, 
   const formatDateTime = (dt: string | null | undefined) => {
     if (!dt) return '-';
     return new Date(dt).toLocaleString('fr-FR', { hour12: false });
+  };
+
+  const getActiveConsultation = (patientId: string) => {
+    const item = inProgress.find((r) => r.patient_id === patientId && r.active_consultation_id);
+    if (item && item.active_medecin_nom) {
+      return { id: item.active_consultation_id, nom: item.active_medecin_nom, date: item.active_date };
+    }
+    return null;
+  };
+
+  const getPatientHistory = (patientId: string): RelaisItem[] => {
+    return patientRelaisHistory[patientId] || [];
   };
 
   const renderPending = () => {
@@ -197,66 +236,104 @@ export const RelaisMedicalView: React.FC<RelaisMedicalViewProps> = ({ userRole, 
             <p className="text-sm">Aucun relais médical en attente</p>
           </div>
         ) : (
-          items.map((r) => (
-            <div key={r.id} className="bg-white rounded-xl border border-slate-200 p-4 hover:shadow-md transition-shadow">
-              <div className="flex items-start justify-between">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-2 flex-wrap">
-                    {getStatutLabel(r.statut)}
-                    <span className="text-xs text-slate-500 font-mono">{r.numero_dossier || r.patient_id}</span>
-                  </div>
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="font-bold text-slate-800">{r.patient_nom} {r.patient_prenom}</span>
-                    {r.patient_sexe && (
-                      <span className="text-xs text-slate-500">{r.patient_sexe === 'M' ? 'Homme' : 'Femme'}</span>
-                    )}
-                  </div>
-                  <div className="text-xs text-slate-500 mb-2 flex items-center gap-3 flex-wrap">
-                    <span className="flex items-center gap-1"><Users className="w-3 h-3" />Médecin origine: {r.medecin_origine_nom || r.medecin_origine_id}</span>
-                    {r.medecin_destinataire_id && (
-                      <span className="flex items-center gap-1"><ArrowRight className="w-3 h-3" />Destinataire: {r.medecin_destinataire_nom || r.medecin_destinataire_id}</span>
-                    )}
-                  </div>
-                  <div className="text-xs text-slate-500 mb-1 flex items-center gap-1">
-                    <Clock className="w-3 h-3" />Visite N°{r.numero_visite || r.visite_id}
-                  </div>
-                  <div className="bg-slate-50 rounded-lg p-3 mb-2">
-                    <div className="text-xs text-slate-500 mb-1">Motif du relais</div>
-                    <div className="text-sm text-slate-800">{r.motif}</div>
-                  </div>
-                  {r.actions_realisees && (
-                    <div className="text-xs text-slate-500 flex items-center gap-1">
-                      <FileText className="w-3 h-3" />Actions: {r.actions_realisees}
+          items.map((r) => {
+            const active = getActiveConsultation(r.patient_id);
+            const history = getPatientHistory(r.patient_id);
+            const showHistory = history.length > 0;
+            return (
+              <div key={r.id} className="bg-white rounded-xl border border-slate-200 p-4 hover:shadow-md transition-shadow">
+                <div className="flex items-start justify-between">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                      {getStatutLabel(r.statut)}
+                      <span className="text-xs text-slate-500 font-mono">{r.numero_dossier || r.patient_id}</span>
                     </div>
-                  )}
-                  <div className="text-xs text-slate-400 mt-2 flex items-center gap-1">
-                    <Clock className="w-3 h-3" />Créé le {formatDateTime(r.created_at)}
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-bold text-slate-800">{r.patient_nom} {r.patient_prenom}</span>
+                      {r.patient_sexe && (
+                        <span className="text-xs text-slate-500">{r.patient_sexe === 'M' ? 'Homme' : 'Femme'}</span>
+                      )}
+                    </div>
+                    <div className="text-xs text-slate-500 mb-2 flex items-center gap-3 flex-wrap">
+                      <span className="flex items-center gap-1"><Users className="w-3 h-3" />Médecin origine: {r.medecin_origine_nom || r.medecin_origine_id}</span>
+                      {r.medecin_destinataire_id && (
+                        <span className="flex items-center gap-1"><ArrowRight className="w-3 h-3" />Destinataire: {r.medecin_destinataire_nom || r.medecin_destinataire_id}</span>
+                      )}
+                    </div>
+                    <div className="text-xs text-slate-500 mb-1 flex items-center gap-1">
+                      <Clock className="w-3 h-3" />Visite N°{r.numero_visite || r.visite_id}
+                    </div>
+                    <div className="bg-slate-50 rounded-lg p-3 mb-2">
+                      <div className="text-xs text-slate-500 mb-1">Motif du relais</div>
+                      <div className="text-sm text-slate-800">{r.motif}</div>
+                    </div>
+                    {active && (
+                      <div className="bg-rose-50 border border-rose-200 rounded-lg p-2 mb-2 flex items-center gap-2">
+                        <AlertOctagon className="w-4 h-4 text-rose-600 shrink-0" />
+                        <div>
+                          <span className="text-xs text-rose-700 font-semibold">Dossier actuellement en cours de prise en charge par :</span>
+                          <span className="text-xs text-rose-900 font-bold ml-1">{active.nom}</span>
+                          <span className="text-xs text-rose-500 ml-1">· consultation {active.id}</span>
+                        </div>
+                      </div>
+                    )}
+                    {r.actions_realisees && (
+                      <div className="text-xs text-slate-500 flex items-center gap-1">
+                        <FileText className="w-3 h-3" />Actions: {r.actions_realisees}
+                      </div>
+                    )}
+                    <div className="text-xs text-slate-400 mt-2 flex items-center gap-1">
+                      <Clock className="w-3 h-3" />Créé le {formatDateTime(r.created_at)}
+                    </div>
+                    {showHistory && (
+                      <details className="mt-2 text-xs">
+                        <summary className="cursor-pointer text-slate-500 hover:text-slate-700 font-semibold flex items-center gap-1">
+                          <History className="w-3 h-3" />Parcours du patient ({history.length} relais)
+                        </summary>
+                        <div className="mt-2 space-y-1 border-l-2 border-slate-200 pl-3">
+                          {history.map((h: RelaisItem) => (
+                            <div key={h.id} className="flex items-center gap-2 text-slate-600">
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                                h.statut === 'ACCEPTÉ' ? 'bg-emerald-100 text-emerald-800' :
+                                h.statut === 'EN_ATTENTE' ? 'bg-amber-100 text-amber-800' :
+                                h.statut === 'REFUSÉ' ? 'bg-red-100 text-red-800' :
+                                'bg-slate-100 text-slate-600'
+                              }`}>{h.statut}</span>
+                              <span>Dr. {h.medecin_origine_nom || h.medecin_origine_id}</span>
+                              {h.medecin_destinataire_id && <span>→ Dr. {h.medecin_destinataire_nom || h.medecin_destinataire_id}</span>}
+                              {h.accepte_par_id && <span className="text-emerald-600">accepté par Dr. {h.accepte_par_nom || h.accepte_par_id}</span>}
+                              {h.accepte_le && <span className="text-slate-400 ml-auto">{formatDateTime(h.accepte_le)}</span>}
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
                   </div>
-                </div>
-                <div className="flex flex-col gap-2 ml-4 shrink-0">
-                  {r.can_act && (
-                    <>
-                      <button
-                        onClick={() => handleAccept(r.id)}
-                        className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg transition-colors"
-                      >
-                        <UserCheck className="w-3.5 h-3.5" />Accepter
-                      </button>
-                      <button
-                        onClick={() => handleRefuse(r.id)}
-                        className="flex items-center gap-1 px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-semibold rounded-lg transition-colors"
-                      >
-                        <UserX className="w-3.5 h-3.5" />Refuser
-                      </button>
-                    </>
-                  )}
-                  {!r.can_act && r.is_originator && (
-                    <span className="text-xs text-slate-400 text-center">En attente d\'acceptation</span>
-                  )}
+                  <div className="flex flex-col gap-2 ml-4 shrink-0">
+                    {r.can_act && (
+                      <>
+                        <button
+                          onClick={() => handleAccept(r.id)}
+                          className="flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg transition-colors"
+                        >
+                          <UserCheck className="w-3.5 h-3.5" />Accepter
+                        </button>
+                        <button
+                          onClick={() => handleRefuse(r.id)}
+                          className="flex items-center gap-1 px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-semibold rounded-lg transition-colors"
+                        >
+                          <UserX className="w-3.5 h-3.5" />Refuser
+                        </button>
+                      </>
+                    )}
+                    {!r.can_act && r.is_originator && (
+                      <span className="text-xs text-slate-400 text-center">En attente d'acceptation</span>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     );
@@ -272,59 +349,96 @@ export const RelaisMedicalView: React.FC<RelaisMedicalViewProps> = ({ userRole, 
             <p className="text-sm">Aucun patient à reprendre pour le moment</p>
           </div>
         ) : (
-          items.map((r) => (
-            <div key={r.id} className="bg-white rounded-xl border border-slate-200 p-4 hover:shadow-md transition-shadow">
-              <div className="flex items-start justify-between">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-2 flex-wrap">
-                    <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">Accepté</span>
-                    <span className="text-xs text-slate-500 font-mono">{r.numero_dossier || r.patient_id}</span>
-                  </div>
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="font-bold text-slate-800">{r.patient_nom} {r.patient_prenom}</span>
-                    {r.patient_sexe && (
-                      <span className="text-xs text-slate-500">{r.patient_sexe === 'M' ? 'Homme' : 'Femme'}</span>
+          items.map((r) => {
+            const active = getActiveConsultation(r.patient_id);
+            const history = getPatientHistory(r.patient_id);
+            const showHistory = history.length > 0;
+            return (
+              <div key={r.id} className="bg-white rounded-xl border border-slate-200 p-4 hover:shadow-md transition-shadow">
+                <div className="flex items-start justify-between">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                      <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">Accepté</span>
+                      <span className="text-xs text-slate-500 font-mono">{r.numero_dossier || r.patient_id}</span>
+                    </div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-bold text-slate-800">{r.patient_nom} {r.patient_prenom}</span>
+                      {r.patient_sexe && (
+                        <span className="text-xs text-slate-500">{r.patient_sexe === 'M' ? 'Homme' : 'Femme'}</span>
+                      )}
+                    </div>
+                    <div className="text-xs text-slate-500 mb-2 flex items-center gap-3 flex-wrap">
+                      <span className="flex items-center gap-1"><Users className="w-3 h-3" />Médecin origine: {r.medecin_origine_nom || r.medecin_origine_id}</span>
+                      <span className="flex items-center gap-1"><ArrowRight className="w-3 h-3" />Visite: {r.numero_visite || r.visite_id}</span>
+                    </div>
+                    <div className="bg-emerald-50 rounded-lg p-3 mb-2">
+                      <div className="text-xs text-emerald-700 font-semibold mb-1">Motif du relais</div>
+                      <div className="text-sm text-emerald-900">{r.motif}</div>
+                    </div>
+                    {active && (
+                      <div className="bg-rose-50 border border-rose-200 rounded-lg p-2 mb-2 flex items-center gap-2">
+                        <AlertOctagon className="w-4 h-4 text-rose-600 shrink-0" />
+                        <div>
+                          <span className="text-xs text-rose-700 font-semibold">En cours actuellement par :</span>
+                          <span className="text-xs text-rose-900 font-bold ml-1">{active.nom}</span>
+                        </div>
+                      </div>
+                    )}
+                    {r.actions_realisees && (
+                      <div className="text-xs text-slate-500 flex items-center gap-1">
+                        <FileText className="w-3 h-3" />Actions: {r.actions_realisees}
+                      </div>
+                    )}
+                    {r.diagnostic_principal && (
+                      <div className="text-xs text-slate-600 mt-1">
+                        Diag. original: <strong className="text-slate-800">{r.diagnostic_principal}</strong>
+                      </div>
+                    )}
+                    <div className="text-xs text-slate-400 mt-2 flex items-center gap-1">
+                      <Clock className="w-3 h-3" />Accepté le {formatDateTime(r.accepte_le)}
+                    </div>
+                    {showHistory && (
+                      <details className="mt-2 text-xs">
+                        <summary className="cursor-pointer text-slate-500 hover:text-slate-700 font-semibold flex items-center gap-1">
+                          <History className="w-3 h-3" />Parcours du patient ({history.length} relais)
+                        </summary>
+                        <div className="mt-2 space-y-1 border-l-2 border-slate-200 pl-3">
+                          {history.map((h: RelaisItem) => (
+                            <div key={h.id} className="flex items-center gap-2 text-slate-600">
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                                h.statut === 'ACCEPTÉ' ? 'bg-emerald-100 text-emerald-800' :
+                                h.statut === 'EN_ATTENTE' ? 'bg-amber-100 text-amber-800' :
+                                h.statut === 'REFUSÉ' ? 'bg-red-100 text-red-800' :
+                                'bg-slate-100 text-slate-600'
+                              }`}>{h.statut}</span>
+                              <span>Dr. {h.medecin_origine_nom || h.medecin_origine_id}</span>
+                              {h.medecin_destinataire_id && <span>→ Dr. {h.medecin_destinataire_nom || h.medecin_destinataire_id}</span>}
+                              {h.accepte_par_id && <span className="text-emerald-600">accepté par Dr. {h.accepte_par_nom || h.accepte_par_id}</span>}
+                              {h.accepte_le && <span className="text-slate-400 ml-auto">{formatDateTime(h.accepte_le)}</span>}
+                            </div>
+                          ))}
+                        </div>
+                      </details>
                     )}
                   </div>
-                  <div className="text-xs text-slate-500 mb-2 flex items-center gap-3 flex-wrap">
-                    <span className="flex items-center gap-1"><Users className="w-3 h-3" />Médecin origine: {r.medecin_origine_nom || r.medecin_origine_id}</span>
-                    <span className="flex items-center gap-1"><ArrowRight className="w-3 h-3" />Visite: {r.numero_visite || r.visite_id}</span>
+                  <div className="flex flex-col gap-2 ml-4 shrink-0">
+                    <button
+                      onClick={() => handleStartConsultation(r.id, r.visite_id)}
+                      disabled={startingId === r.id}
+                      className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-400 text-white text-xs font-semibold rounded-lg transition-colors"
+                    >
+                      {startingId === r.id ? (
+                        <Loader className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Stethoscope className="w-3.5 h-3.5" />
+                      )}
+                       {startingId === r.id ? 'Ouverture...' : 'Ouvrir le dossier'}
+                    </button>
                   </div>
-                  <div className="bg-emerald-50 rounded-lg p-3 mb-2">
-                    <div className="text-xs text-emerald-700 font-semibold mb-1">Motif du relais</div>
-                    <div className="text-sm text-emerald-900">{r.motif}</div>
-                  </div>
-                  {r.actions_realisees && (
-                    <div className="text-xs text-slate-500 flex items-center gap-1">
-                      <FileText className="w-3 h-3" />Actions: {r.actions_realisees}
-                    </div>
-                  )}
-                  {r.diagnostic_principal && (
-                    <div className="text-xs text-slate-600 mt-1">
-                      Diag. original: <strong className="text-slate-800">{r.diagnostic_principal}</strong>
-                    </div>
-                  )}
-                  <div className="text-xs text-slate-400 mt-2 flex items-center gap-1">
-                    <Clock className="w-3 h-3" />Accepté le {formatDateTime(r.accepte_le)}
-                  </div>
-                </div>
-                <div className="flex flex-col gap-2 ml-4 shrink-0">
-                  <button
-                    onClick={() => handleStartConsultation(r.id, r.visite_id)}
-                    disabled={startingId === r.id}
-                    className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-400 text-white text-xs font-semibold rounded-lg transition-colors"
-                  >
-                    {startingId === r.id ? (
-                      <Loader className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Stethoscope className="w-3.5 h-3.5" />
-                    )}
-                    {startingId === r.id ? 'Ouverture...' : 'Ouvrir le dossier'}
-                  </button>
                 </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     );
@@ -339,41 +453,78 @@ export const RelaisMedicalView: React.FC<RelaisMedicalViewProps> = ({ userRole, 
             <p className="text-sm">Aucun historique de relais médical</p>
           </div>
         ) : (
-          history.map((r) => (
-            <div key={r.id} className="bg-white rounded-xl border border-slate-200 p-4 opacity-80">
-              <div className="flex items-start justify-between">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-2 flex-wrap">
-                    {getStatutLabel(r.statut)}
-                    <span className="text-xs text-slate-500 font-mono">{r.numero_dossier || r.patient_id}</span>
-                  </div>
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="font-bold text-slate-800">{r.patient_nom} {r.patient_prenom}</span>
-                  </div>
-                  <div className="text-xs text-slate-500 mb-2">
-                    Médecin origine: {r.medecin_origine_nom || r.medecin_origine_id}
-                    {r.medecin_destinataire_id && (
-                      <span className="ml-2">→ Destinataire: {r.medecin_destinataire_nom || r.medecin_destinataire_id}</span>
-                    )}
-                    {r.accepte_par_id && (
-                      <span className="ml-2 text-emerald-700">• Accepté par: {r.accepte_par_nom || r.accepte_par_id}</span>
-                    )}
-                  </div>
-                  <div className="bg-slate-50 rounded-lg p-2 mb-2">
-                    <div className="text-xs text-slate-600">{r.motif}</div>
-                  </div>
-                  {r.actions_realisees && (
-                    <div className="text-xs text-slate-500 flex items-center gap-1">
-                      <FileText className="w-3 h-3" />{r.actions_realisees}
+          history.map((r) => {
+            const active = getActiveConsultation(r.patient_id);
+            const his = getPatientHistory(r.patient_id);
+            const showHis = his.length > 0;
+            return (
+              <div key={r.id} className="bg-white rounded-xl border border-slate-200 p-4 opacity-80">
+                <div className="flex items-start justify-between">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                      {getStatutLabel(r.statut)}
+                      <span className="text-xs text-slate-500 font-mono">{r.numero_dossier || r.patient_id}</span>
                     </div>
-                  )}
-                  <div className="text-xs text-slate-400 mt-1 flex items-center gap-1">
-                    <Clock className="w-3 h-3" />Créé le {formatDateTime(r.created_at)}
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-bold text-slate-800">{r.patient_nom} {r.patient_prenom}</span>
+                    </div>
+                    <div className="text-xs text-slate-500 mb-2">
+                      Médecin origine: {r.medecin_origine_nom || r.medecin_origine_id}
+                      {r.medecin_destinataire_id && (
+                        <span className="ml-2">→ Destinataire: {r.medecin_destinataire_nom || r.medecin_destinataire_id}</span>
+                      )}
+                      {r.accepte_par_id && (
+                        <span className="ml-2 text-emerald-700">• Accepté par: {r.accepte_par_nom || r.accepte_par_id}</span>
+                      )}
+                    </div>
+                    <div className="bg-slate-50 rounded-lg p-2 mb-2">
+                      <div className="text-xs text-slate-600">{r.motif}</div>
+                    </div>
+                    {active && (
+                      <div className="bg-rose-50 border border-rose-200 rounded-lg p-2 mb-2 flex items-center gap-2">
+                        <AlertOctagon className="w-4 h-4 text-rose-600 shrink-0" />
+                        <div>
+                          <span className="text-xs text-rose-700 font-semibold">En cours par :</span>
+                          <span className="text-xs text-rose-900 font-bold ml-1">{active.nom}</span>
+                        </div>
+                      </div>
+                    )}
+                    {r.actions_realisees && (
+                      <div className="text-xs text-slate-500 flex items-center gap-1">
+                        <FileText className="w-3 h-3" />{r.actions_realisees}
+                      </div>
+                    )}
+                    <div className="text-xs text-slate-400 mt-1 flex items-center gap-1">
+                      <Clock className="w-3 h-3" />Créé le {formatDateTime(r.created_at)}
+                    </div>
+                    {showHis && (
+                      <details className="mt-2 text-xs">
+                        <summary className="cursor-pointer text-slate-500 hover:text-slate-700 font-semibold flex items-center gap-1">
+                          <History className="w-3 h-3" />Parcours complet du patient ({his.length} relais)
+                        </summary>
+                        <div className="mt-2 space-y-1 border-l-2 border-slate-200 pl-3">
+                          {his.map((h: RelaisItem) => (
+                            <div key={h.id} className="flex items-center gap-2 text-slate-600">
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
+                                h.statut === 'ACCEPTÉ' ? 'bg-emerald-100 text-emerald-800' :
+                                h.statut === 'EN_ATTENTE' ? 'bg-amber-100 text-amber-800' :
+                                h.statut === 'REFUSÉ' ? 'bg-red-100 text-red-800' :
+                                'bg-slate-100 text-slate-600'
+                              }`}>{h.statut}</span>
+                              <span>Dr. {h.medecin_origine_nom || h.medecin_origine_id}</span>
+                              {h.medecin_destinataire_id && <span>→ Dr. {h.medecin_destinataire_nom || h.medecin_destinataire_id}</span>}
+                              {h.accepte_par_id && <span className="text-emerald-600">accepté par Dr. {h.accepte_par_nom || h.accepte_par_id}</span>}
+                              {h.accepte_le && <span className="text-slate-400 ml-auto">{formatDateTime(h.accepte_le)}</span>}
+                            </div>
+                          ))}
+                        </div>
+                      </details>
+                    )}
                   </div>
                 </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     );
