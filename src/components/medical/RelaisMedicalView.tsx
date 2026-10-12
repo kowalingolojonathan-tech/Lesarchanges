@@ -15,7 +15,7 @@ import {
   X,
   UserPlus,
   Eye,
-  AlertOctagon,
+  AlertTriangle,
 } from 'lucide-react';
 import { api } from '../../lib/api.js';
 import { RelaisMedical } from '../../types/index.js';
@@ -39,9 +39,10 @@ interface RelaisMedicalViewProps {
   userId?: string;
   userName?: string;
   onNavigate?: (tab: string) => void;
+  onStartConsultation?: (consultationId: string) => void;
 }
 
-export const RelaisMedicalView: React.FC<RelaisMedicalViewProps> = ({ userRole, userId, userName, onNavigate }) => {
+export const RelaisMedicalView: React.FC<RelaisMedicalViewProps> = ({ userRole, userId, userName, onNavigate, onStartConsultation }) => {
   const [activeTab, setActiveTab] = useState<'pending' | 'reprise' | 'history'>('pending');
   const [pending, setPending] = useState<RelaisItem[]>([]);
   const [reprise, setReprise] = useState<RelaisItem[]>([]);
@@ -159,8 +160,12 @@ export const RelaisMedicalView: React.FC<RelaisMedicalViewProps> = ({ userRole, 
       const res: any = await api.post(`/api/medical/relais/${relaisId}/start-consultation`, {
         visite_id: visiteId,
       });
-      if (res.consultation_id && onNavigate) {
-        onNavigate('doctor-consultations');
+      if (res.consultation_id) {
+        if (onStartConsultation) {
+          onStartConsultation(res.consultation_id);
+        } else if (onNavigate) {
+          onNavigate('doctor-consultations');
+        }
       }
       await loadAll();
     } catch (e: any) {
@@ -269,7 +274,7 @@ export const RelaisMedicalView: React.FC<RelaisMedicalViewProps> = ({ userRole, 
                     </div>
                     {active && (
                       <div className="bg-rose-50 border border-rose-200 rounded-lg p-2 mb-2 flex items-center gap-2">
-                        <AlertOctagon className="w-4 h-4 text-rose-600 shrink-0" />
+                        <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
                         <div>
                           <span className="text-xs text-rose-700 font-semibold">Dossier actuellement en cours de prise en charge par :</span>
                           <span className="text-xs text-rose-900 font-bold ml-1">{active.nom}</span>
@@ -377,7 +382,7 @@ export const RelaisMedicalView: React.FC<RelaisMedicalViewProps> = ({ userRole, 
                     </div>
                     {active && (
                       <div className="bg-rose-50 border border-rose-200 rounded-lg p-2 mb-2 flex items-center gap-2">
-                        <AlertOctagon className="w-4 h-4 text-rose-600 shrink-0" />
+                        <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
                         <div>
                           <span className="text-xs text-rose-700 font-semibold">En cours actuellement par :</span>
                           <span className="text-xs text-rose-900 font-bold ml-1">{active.nom}</span>
@@ -482,7 +487,7 @@ export const RelaisMedicalView: React.FC<RelaisMedicalViewProps> = ({ userRole, 
                     </div>
                     {active && (
                       <div className="bg-rose-50 border border-rose-200 rounded-lg p-2 mb-2 flex items-center gap-2">
-                        <AlertOctagon className="w-4 h-4 text-rose-600 shrink-0" />
+                        <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
                         <div>
                           <span className="text-xs text-rose-700 font-semibold">En cours par :</span>
                           <span className="text-xs text-rose-900 font-bold ml-1">{active.nom}</span>

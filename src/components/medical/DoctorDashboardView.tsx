@@ -2046,6 +2046,10 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
                 userId={user?.id || ''}
                 userName={user?.nom_complet || ''}
                 onNavigate={onNavigate}
+                onStartConsultation={(consultationId) => {
+                  setActiveConsultationId(consultationId);
+                  setActiveModal(null);
+                }}
               />
             </div>
           </div>

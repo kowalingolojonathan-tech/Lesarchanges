@@ -147,7 +147,7 @@ const MainApp: React.FC = () => {
         return <DoctorReportsView onBack={() => setCurrentTab('dashboard')} />;
 
       case 'doctor-relais':
-        return <RelaisMedicalView />;
+        return <RelaisMedicalView onNavigate={setCurrentTab} />;
 
       default:
         return <RoleDashboard onNavigate={setCurrentTab} />;

@@ -6167,13 +6167,22 @@ export async function getRelaisPatientsToReprise(req: AuthenticatedRequest, res:
               p.date_naissance as patient_date_naissance, p.sexe as patient_sexe,
               v.numero_visite, v.date_arrivee,
               u_origine.nom_complet as medecin_origine_nom,
-              u_destinataire.nom_complet as medecin_destinataire_nom
+              u_destinataire.nom_complet as medecin_destinataire_nom,
+              c_active.id as active_consultation_id,
+              c_active.medecin_id as active_medecin_id,
+              c_active.statut as active_statut,
+              c_active.date_consultation as active_date,
+              c_active.motif_consultation as active_motif,
+              u_active.nom_complet as active_medecin_nom
        FROM relais_medicaux r
        INNER JOIN consultations c ON r.consultation_id = c.id
        INNER JOIN patients p ON r.patient_id = p.id
        INNER JOIN visites v ON r.visite_id = v.id
        INNER JOIN users u_origine ON r.medecin_origine_id = u_origine.id
        LEFT JOIN users u_destinataire ON r.medecin_destinataire_id = u_destinataire.id
+       LEFT JOIN consultations c_active ON c_active.visite_id = r.visite_id 
+         AND c_active.statut = 'EN_COURS' AND c_active.actif = 1
+       LEFT JOIN users u_active ON u_active.id = c_active.medecin_id
        WHERE r.statut = 'ACCEPTÉ' AND r.accepte_par_id = ?
        ORDER BY r.accepte_le DESC
        LIMIT 50`,
@@ -6213,12 +6222,25 @@ export async function startConsultationFromRelais(req: AuthenticatedRequest, res
     }
 
     // Vérifier qu'une consultation n'a pas déjà été créée pour ce relais
+    // ou que la visite n'est pas déjà en cours par un autre médecin
     const existingConsultation = await queryOne<any>(
-      `SELECT id FROM consultations WHERE visite_id = ? AND medecin_id = ? AND statut = 'EN_COURS' AND actif = 1`,
-      [relais.visite_id, user.id]
+      `SELECT id, medecin_id FROM consultations WHERE visite_id = ? AND statut = 'EN_COURS' AND actif = 1`,
+      [relais.visite_id]
     );
     if (existingConsultation) {
-      res.status(409).json({ error: 'Une consultation est déjà en cours pour cette visite.', consultation_id: existingConsultation.id });
+      if (existingConsultation.medecin_id === user.id) {
+        res.status(409).json({ error: 'Une consultation est déjà en cours pour cette visite.', consultation_id: existingConsultation.id });
+        return;
+      }
+      const otherDoctor = await queryOne<any>(
+        `SELECT nom_complet FROM users WHERE id = ?`,
+        [existingConsultation.medecin_id]
+      );
+      res.status(409).json({
+        error: `Ce dossier est actuellement en cours de consultation par le Dr. ${otherDoctor?.nom_complet || 'un confrère'}.`,
+        active_consultation_id: existingConsultation.id,
+        active_doctor_nom: otherDoctor?.nom_complet,
+      });
       return;
     }
 

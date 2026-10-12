@@ -4,7 +4,8 @@ import {
   HeartPulse, Heart, User, ShieldAlert, History, Plus, X, Stethoscope, 
   FileText, Activity, AlertTriangle, Clock, Pill, FlaskConical, ExternalLink,
   Wind, Ruler, Lightbulb, HelpCircle, ArrowRight, Check, Trash2, Tag, AlertOctagon, Printer,
-  RefreshCw, Loader, AlertCircle as AlertCircleIcon
+  RefreshCw, Loader, AlertCircle as AlertCircleIcon,
+  ShieldCheck, Thermometer, Scale, Sparkles, FileSearch, Microscope
 } from 'lucide-react';
 import { 
   Consultation, Patient, SignesVitaux, Visite,
