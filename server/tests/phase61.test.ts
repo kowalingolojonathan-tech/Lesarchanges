@@ -60,6 +60,8 @@ export async function runPhase61Tests(): Promise<TestResult[]> {
   const csl3_id = `csl-61-3-${testSuffix}`;
   const vis4_id = `vis-61-4-${testSuffix}`;
   const csl4_id = `csl-61-4-${testSuffix}`;
+  const vis5_id = `vis-61-5-${testSuffix}`;
+  const csl5_id = `csl-61-5-${testSuffix}`;
   let relaisWithDestId = '';
   let relaisNoDestId = '';
   const now = () => new Date().toISOString();
@@ -94,6 +96,16 @@ export async function runPhase61Tests(): Promise<TestResult[]> {
     `INSERT INTO consultations (id, visite_id, patient_id, medecin_id, date_consultation, statut, motif_consultation, diagnostic_principal, finalisee_le, created_at, updated_at, actif)
      VALUES (?, ?, ?, ?, datetime('now'), 'FINALISEE', 'Suivi 4', 'Hypertension', ?, datetime('now'), datetime('now'), 1)`,
     [csl4_id, vis4_id, pat1_id, med1_id, now()]
+  );
+  await execute(
+    `INSERT INTO visites (id, numero_visite, patient_id, medecin_id, date_arrivee, statut, motif_venue, type_visite, actif, created_at)
+     VALUES (?, ?, ?, ?, datetime('now'), 'CLOTUREE', 'Suivi 5', 'STANDARD', 1, datetime('now'))`,
+    [vis5_id, `VIS-61-5-${testSuffix}`, pat1_id, med1_id]
+  );
+  await execute(
+    `INSERT INTO consultations (id, visite_id, patient_id, medecin_id, date_consultation, statut, motif_consultation, diagnostic_principal, finalisee_le, created_at, updated_at, actif)
+     VALUES (?, ?, ?, ?, datetime('now'), 'FINALISEE', 'Suivi 5', 'Diabète', ?, datetime('now'), datetime('now'), 1)`,
+    [csl5_id, vis5_id, pat1_id, med1_id, now()]
   );
 
   // Setup patient
@@ -380,7 +392,7 @@ export async function runPhase61Tests(): Promise<TestResult[]> {
   try {
     // Créer un nouveau relais pour ce test (le précédent a déjà été accepté)
     const resCreate = await callCreate({
-      consultation_id: csl3_id,
+      consultation_id: csl4_id,
       motif: 'Test reprise — création frais',
       medecin_destinataire_id: med2_id,
     });
@@ -408,7 +420,7 @@ export async function runPhase61Tests(): Promise<TestResult[]> {
   try {
     // Créer un nouveau relais pour tester le refus
     const resCreate = await callCreate({
-      consultation_id: csl4_id,
+      consultation_id: csl5_id,
       motif: 'Test refus',
       medecin_destinataire_id: med2_id,
     });
