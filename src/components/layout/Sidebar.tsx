@@ -17,7 +17,8 @@ import {
   ChevronRight,
   PanelLeftClose,
   PanelLeftOpen,
-  X
+  X,
+  RefreshCw,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -89,6 +90,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'doctor-reports',
       label: 'Rapports / Historique',
       icon: FileText,
+      roles: ['MÉDECIN'],
+    },
+    {
+      id: 'doctor-relais',
+      label: 'Relais Médical',
+      badge: '6.1',
+      icon: RefreshCw,
       roles: ['MÉDECIN'],
     },
     // Menus pour LABORATOIRE

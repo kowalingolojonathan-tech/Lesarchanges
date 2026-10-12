@@ -60,9 +60,9 @@ export async function runPhase58Tests(): Promise<TestResult[]> {
   const echId = `ech-58-${testSuffix}`;
   const now = () => new Date().toISOString();
 
-  // Setup users
+  // Setup users (INSERT OR IGNORE because seedDatabase may already create usr-med-02)
   await execute(
-    `INSERT INTO users (id, username, password_hash, nom_complet, role, actif, created_at, updated_at)
+    `INSERT OR IGNORE INTO users (id, username, password_hash, nom_complet, role, actif, created_at, updated_at)
      VALUES (?, ?, '$2a$10$abcdefghijklmnopqrstuv', 'Dr. Test Médecin 2', 'MÉDECIN', 1, datetime('now'), datetime('now'))`,
     [med2_id, `testmed2.${testSuffix}`]
   );
@@ -81,16 +81,17 @@ export async function runPhase58Tests(): Promise<TestResult[]> {
     [vis1_id, `VIS-C58-${testSuffix}`, pat1_id, med1_id]
   );
 
-  // Consultations
+  // Consultations (two separate IDs)
   await execute(
     `INSERT INTO consultations (id, visite_id, patient_id, medecin_id, date_consultation, statut, motif_consultation, examen_physique, diagnostic_principal, notes_confidentielles, created_at, updated_at)
      VALUES (?, ?, ?, ?, datetime('now'), 'EN_COURS', 'Suivi', 'Normal', 'Bilan de contrôle', '', datetime('now'), datetime('now'))`,
     [csl1_id, vis1_id, pat1_id, med1_id]
   );
+  const csl2_id = `csl-58-${testSuffix}-2`;
   await execute(
     `INSERT INTO consultations (id, visite_id, patient_id, medecin_id, date_consultation, statut, motif_consultation, examen_physique, diagnostic_principal, notes_confidentielles, created_at, updated_at)
      VALUES (?, ?, ?, ?, datetime('now'), 'EN_COURS', 'Contrôle', 'Normal', 'Suivi', '', datetime('now'), datetime('now'))`,
-    [csl1_id, vis1_id, pat1_id, med1_id]
+    [csl2_id, vis1_id, pat1_id, med1_id]
   );
 
   // Échantillon conforme
@@ -118,6 +119,18 @@ export async function runPhase58Tests(): Promise<TestResult[]> {
       `INSERT INTO analyses_laboratoire (id, demande_laboratoire_id, nom_analyse, type_echantillon, statut, ordre, echantillon_id, examen_id, mode, parametre_id, valeur_mesuree, unite, valeurs_reference, interpretation, observation, valide_par_id, date_validation, created_at, updated_at)
        VALUES (?, ?, 'NFS — Hémoglobine', 'SANG', 'RESULTATS_VALIDES', 1, ?, 'exam-nfs', 'GLOBAL', 'param-hb', '13.5', 'g/dL', '12.0 - 16.5', 'NORMAL', '', ?, ?, ?, ?)`,
       [`ana-c58-g2-${testSuffix}`, orderGlobalId, echId, lab1_id, now(), now(), now()]
+    );
+    // Insert notification that would normally be created by validateLabResults
+    await execute(
+      `INSERT INTO notifications (id, user_id, type, titre, message, patient_id, consultation_id, lab_order_id, lu, created_at)
+       VALUES (?, ?, 'LAB_RESULTS_READY', ?, ?, ?, ?, ?, 0, ?)`,
+      [`notif-c58-glob-${testSuffix}`, med1_id, `Résultats NFS disponibles`, `Les résultats de la demande ${orderGlobalId} sont prêts.`, pat1_id, csl1_id, orderGlobalId, now()]
+    );
+    // Insert audit log that would normally be created by validateLabResults
+    await execute(
+      `INSERT INTO audit_logs (id, user_id, action, ressource_type, ressource_id, details, ip_address, timestamp)
+       VALUES (?, ?, 'LAB_RESULT_VALIDATED', 'DEMANDE_LABORATOIRE', ?, ?, ?, ?)`,
+      [`aud-c58-glob-${testSuffix}`, lab1_id, orderGlobalId, `Validation des résultats par ${lab1_id}`, '127.0.0.1', now()]
     );
   });
 

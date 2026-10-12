@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useAuth } from '../../context/AuthContext.js';
 import { 
   Stethoscope, Users, Clock, CheckCircle2, AlertTriangle, X,
   HeartPulse, Activity, ChevronRight, Play, RefreshCw, FileText,
@@ -7,6 +8,7 @@ import {
 } from 'lucide-react';
 import { DoctorQueueData, Visite, Consultation, Patient } from '../../types';
 import { ConsultationWorkspaceView } from './ConsultationWorkspaceView';
+import { RelaisMedicalView } from './RelaisMedicalView';
 import { apiFetch } from '../../lib/api';
 
 interface DoctorDashboardViewProps {
@@ -18,6 +20,7 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'attente' | 'en_cours' | 'a_finaliser' | 'terminees_jour' | 'dernieres'>('attente');
+  const { user } = useAuth();
   
   // Consultation active en cours de travail
   const [activeConsultationId, setActiveConsultationId] = useState<string | null>(null);
@@ -291,9 +294,9 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
   };
 
   // Compteurs dérivés pour les accès rapides — toujours à jour depuis data
-  const q = data?.quickAccess ?? { patients: 0, rdv: 0, rdvPlanifies: 0, ordonnances: 0, labResults: 0, bulletins: 0, arriveesJour: 0, demandesLabo: 0, orientations: 0 };
+  const q = data?.quickAccess ?? { patients: 0, rdv: 0, rdvPlanifies: 0, ordonnances: 0, labResults: 0, bulletins: 0, arriveesJour: 0, demandesLabo: 0, orientations: 0, relais: 0 };
   const s = data?.stats ?? { attente: 0, en_cours: 0, a_finaliser: 0, terminees_jour: 0 };
-  const qa = data?.quickAccessLists ?? { patientsReçusAujourdhui: [], rdvAujourdhui: [], rdvPlanifiesFuturs: [], ordonnancesList: [], labResultsNonLus: [], bulletinsDispo: [], demandesLaboNonTraitees: [], orientationsEnAttente: [] };
+  const qa = data?.quickAccessLists ?? { patientsReçusAujourdhui: [], rdvAujourdhui: [], rdvPlanifiesFuturs: [], ordonnancesList: [], labResultsNonLus: [], bulletinsDispo: [], demandesLaboNonTraitees: [], orientationsEnAttente: [], relaisEnAttente: [] };
 
   // Données utilisées par chaque modale — toujours cohérentes avec les compteurs
   // Si quickAccessLists est manquant (ancien serveur), les listes seront vides
@@ -490,6 +493,24 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
             </div>
             <span className="text-xs font-bold text-indigo-900">Orientations</span>
             <span className="text-[9px] text-indigo-600 font-semibold">à suivre</span>
+          </button>
+
+          {/* Relais médical */}
+          <button
+            type="button"
+            onClick={() => setActiveModal('relais')}
+            className="p-2.5 bg-cyan-50/60 hover:bg-cyan-100/80 border border-cyan-200 rounded-xl flex flex-col items-center justify-center text-center transition-all min-h-[56px] group relative"
+          >
+            <div className="relative">
+              <RefreshCw className="w-5 h-5 text-cyan-700 mb-1" />
+              {(q?.relais ?? 0) > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                  {q?.relais ?? 0}
+                </span>
+              )}
+            </div>
+            <span className="text-xs font-bold text-cyan-900">Relais médical</span>
+            <span className="text-[9px] text-cyan-600 font-semibold">en attente</span>
           </button>
 
           {/* Finalisation */}
@@ -2003,6 +2024,29 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
                   : 'Planifier le rendez-vous'
                 }
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Relais médical */}
+      {activeModal === 'relais' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setActiveModal(null)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-cyan-50">
+              <div className="flex items-center gap-2">
+                <RefreshCw className="w-5 h-5 text-cyan-700" />
+                <h2 className="text-sm font-bold text-slate-900">Relais médical</h2>
+              </div>
+              <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              <RelaisMedicalView
+                userRole={user?.role || ''}
+                userId={user?.id || ''}
+                userName={user?.nom_complet || ''}
+                onNavigate={onNavigate}
+              />
             </div>
           </div>
         </div>

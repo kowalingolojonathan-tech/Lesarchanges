@@ -3,8 +3,8 @@ import {
   ArrowLeft, Save, CheckCircle2, Lock, Unlock, AlertCircle, 
   HeartPulse, Heart, User, ShieldAlert, History, Plus, X, Stethoscope, 
   FileText, Activity, AlertTriangle, Clock, Pill, FlaskConical, ExternalLink,
-  FileSearch, Microscope, Scale, Thermometer, ShieldCheck, CheckSquare, Sparkles,
-  Wind, Ruler, Lightbulb, HelpCircle, ArrowRight, Check, Trash2, Tag, AlertOctagon, Printer
+  Wind, Ruler, Lightbulb, HelpCircle, ArrowRight, Check, Trash2, Tag, AlertOctagon, Printer,
+  RefreshCw, Loader, AlertCircle as AlertCircleIcon
 } from 'lucide-react';
 import { 
   Consultation, Patient, SignesVitaux, Visite,
@@ -88,6 +88,17 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
     motif_orientation: '',
     donnees_cliniques: '',
     niveau_urgence: 'ROUTINE' as 'ROUTINE' | 'URGENT' | 'TRES_URGENT'
+  });
+
+  // Relais médical — state & modale
+  const [showRelaisModal, setShowRelaisModal] = useState<boolean>(false);
+  const [relaisLoading, setRelaisLoading] = useState<boolean>(false);
+  const [relaisCreateError, setRelaisCreateError] = useState<string | null>(null);
+  const [relaisSuccess, setRelaisSuccess] = useState<string | null>(null);
+  const [relaisDestinataires, setRelaisDestinataires] = useState<any[]>([]);
+  const [relaisForm, setRelaisForm] = useState({
+    motif: '',
+    medecin_destinataire_id: '',
   });
 
   const fetchConsultation = async (preserveFormFields = false) => {
@@ -253,6 +264,52 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
   useEffect(() => {
     fetchDoctors();
   }, []);
+
+  const openRelaisModal = () => {
+    setRelaisCreateError(null);
+    setRelaisSuccess(null);
+    setRelaisForm({ motif: '', medecin_destinataire_id: '' });
+    setShowRelaisModal(true);
+  };
+
+  const handleCreateRelais = async () => {
+    if (!relaisForm.motif.trim()) {
+      setRelaisCreateError('Veuillez saisir un motif pour le relais médical.');
+      return;
+    }
+    if (relaisForm.motif.trim().length < 5) {
+      setRelaisCreateError('Le motif doit contenir au moins 5 caractères.');
+      return;
+    }
+    setRelaisLoading(true);
+    setRelaisCreateError(null);
+    setRelaisSuccess(null);
+    try {
+      const res = await apiFetch('/api/medical/relais/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          consultation_id: consultationId,
+          motif: relaisForm.motif.trim(),
+          medecin_destinataire_id: relaisForm.medecin_destinataire_id || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Erreur lors de la création du relais');
+      }
+      setRelaisSuccess('Relais médical créé avec succès.');
+      setRelaisForm({ motif: '', medecin_destinataire_id: '' });
+      setTimeout(() => {
+        setShowRelaisModal(false);
+        setRelaisSuccess(null);
+      }, 1500);
+    } catch (e: any) {
+      setRelaisCreateError(e.message || 'Erreur lors de la création du relais');
+    } finally {
+      setRelaisLoading(false);
+    }
+  };
 
   // --- SAISIE & MODIFICATION DES ALLERGIES (réservée au MÉDECIN) ---
   const handleSaveAllergies = async () => {
@@ -604,13 +661,23 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
         </div>
 
         <div className="flex items-center space-x-2 shrink-0">
-          <button
-            onClick={() => setShowHistoryModal(true)}
-            className="inline-flex items-center px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition-colors min-h-[38px]"
-          >
-            <History className="w-4 h-4 mr-1 text-slate-500" />
-            <span className="hidden sm:inline">Historique</span>
-          </button>
+           <button
+             onClick={() => setShowHistoryModal(true)}
+             className="inline-flex items-center px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition-colors min-h-[38px]"
+           >
+             <History className="w-4 h-4 mr-1 text-slate-500" />
+             <span className="hidden sm:inline">Historique</span>
+           </button>
+
+           {!isFinalized && (
+             <button
+               onClick={openRelaisModal}
+               className="inline-flex items-center px-3 py-1.5 bg-cyan-50 hover:bg-cyan-100 text-cyan-700 border border-cyan-200 text-xs font-semibold rounded-lg transition-colors min-h-[38px]"
+             >
+               <RefreshCw className="w-4 h-4 mr-1" />
+               <span className="hidden sm:inline">Créer un relais</span>
+             </button>
+           )}
 
           {!isFinalized && (
             <div className="hidden sm:flex items-center space-x-2">
@@ -2917,6 +2984,80 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
 )}
 
   </div>
+
+      {/* Modal: Créer un relais médical */}
+      {showRelaisModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setShowRelaisModal(false)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full max-h-[85vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-cyan-50">
+              <div className="flex items-center gap-2">
+                <RefreshCw className="w-5 h-5 text-cyan-700" />
+                <h2 className="text-sm font-bold text-slate-900">Créer un relais médical</h2>
+              </div>
+              <button onClick={() => setShowRelaisModal(false)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+            </div>
+            <div className="p-4 space-y-4 overflow-y-auto flex-1">
+              <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600">
+                <strong>Consultation en cours :</strong> {consultation?.patient_nom} {consultation?.patient_prenom} — N°{consultation?.numero_dossier}
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Motif du relais *</label>
+                <textarea
+                  value={relaisForm.motif}
+                  onChange={(e) => setRelaisForm({ ...relaisForm, motif: e.target.value })}
+                  placeholder="Décrire la raison de la transmission du dossier..."
+                  rows={3}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 resize-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Médecin destinataire (facultatif)</label>
+                <select
+                  value={relaisForm.medecin_destinataire_id}
+                  onChange={(e) => setRelaisForm({ ...relaisForm, medecin_destinataire_id: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                >
+                  <option value="">Non désigné — tout médecin autorisé peut reprendre</option>
+                  {relaisDestinataires
+                    .filter((d) => d.id !== consultation?.medecin_id)
+                    .map((d) => (
+                      <option key={d.id} value={d.id}>{d.nom_complet}</option>
+                    ))}
+                </select>
+                <p className="text-xs text-slate-500 mt-1">Si aucun médecin n'est désigné, un médecin autorisé pourra reprendre le dossier.</p>
+              </div>
+              {relaisCreateError && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-xs text-red-700 flex items-center gap-2">
+                  <AlertCircleIcon className="w-4 h-4 flex-shrink-0" />
+                  {relaisCreateError}
+                </div>
+              )}
+              {relaisSuccess && (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-xs text-emerald-700 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                  {relaisSuccess}
+                </div>
+              )}
+            </div>
+            <div className="p-4 border-t border-slate-200 flex gap-2 bg-slate-50">
+              <button
+                onClick={() => setShowRelaisModal(false)}
+                className="flex-1 px-4 py-2 text-sm font-semibold text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={handleCreateRelais}
+                disabled={relaisLoading || !relaisForm.motif.trim()}
+                className="flex-1 px-4 py-2 text-sm font-semibold text-white bg-cyan-600 rounded-lg hover:bg-cyan-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+              >
+                {relaisLoading ? <Loader className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                Créer le relais
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

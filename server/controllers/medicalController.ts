@@ -280,6 +280,23 @@ export async function getDoctorQueue(req: AuthenticatedRequest, res: Response): 
     );
     const orientationsEnAttenteCount = orientationsEnAttente.length;
 
+    // 6j. 待接受的医疗对接
+    const relaisEnAttente = await query<any>(
+      `SELECT r.id, r.motif, r.statut, r.created_at,
+              p.nom as patient_nom, p.prenom as patient_prenom, p.numero_dossier,
+              v.numero_visite,
+              u_origine.nom_complet as medecin_origine_nom
+       FROM relais_medicaux r
+       INNER JOIN patients p ON r.patient_id = p.id
+       INNER JOIN visites v ON r.visite_id = v.id
+       LEFT JOIN users u_origine ON r.medecin_origine_id = u_origine.id
+       WHERE (r.medecin_destinataire_id IS NULL OR r.medecin_destinataire_id = ?)
+         AND r.statut = 'EN_ATTENTE'
+       ORDER BY r.created_at DESC`,
+      [doctorId]
+    );
+    const relaisEnAttenteCount = relaisEnAttente.length;
+
     await auditLogger.log({
       userId: user.id,
       action: 'DOCTOR_QUEUE_ACCESSED',
@@ -311,7 +328,8 @@ export async function getDoctorQueue(req: AuthenticatedRequest, res: Response): 
         bulletins: bulletinsDispo.length,
         arriveesJour: arriveesJour ? Number(arriveesJour.count) : 0,
         demandesLabo: demandesLaboCount,
-        orientations: orientationsEnAttenteCount
+        orientations: orientationsEnAttenteCount,
+        relais: relaisEnAttenteCount
       },
       quickAccessLists: {
         patientsReçusAujourdhui: patientsReçusAujourdhui,
@@ -321,7 +339,8 @@ export async function getDoctorQueue(req: AuthenticatedRequest, res: Response): 
         labResultsNonLus,
         bulletinsDispo,
         demandesLaboNonTraitees,
-        orientationsEnAttente
+        orientationsEnAttente,
+        relaisEnAttente
       },
       queue: {
         attente,
@@ -4740,6 +4759,8 @@ export async function getLabBulletin(req: AuthenticatedRequest, res: Response): 
       analyses,
       amendements
     };
+
+    res.json({ bulletin });
   } catch (error: any) {
     console.error('Erreur bulletin analyses:', error);
     res.status(500).json({ error: 'Erreur interne lors de la génération du bulletin d\'analyses.' });
@@ -5704,5 +5725,648 @@ export async function getLaboratoryWorklist(req: AuthenticatedRequest, res: Resp
   } catch (error: any) {
     console.error('Erreur récupération paillasse:', error);
     res.status(500).json({ error: 'Erreur interne lors de la récupération de la paillasse.' });
+  }
+}
+
+/**
+ * Relais Médical — Continuité des soins (Phase 6.1)
+ *
+ * Permet à un médecin de transmettre un dossier pour assurer la continuité des soins,
+ * même lorsqu'un autre médecin vient le remplacer.
+ */
+
+/**
+ * Créer un relais médical
+ * POST /api/medical/relais/create
+ * Strictement réservé au rôle MÉDECIN.
+ */
+export async function createRelaisMedical(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const { consultation_id, visite_id, patient_id, medecin_destinataire_id, motif, actions_realisees } = req.body;
+    const now = new Date().toISOString();
+
+    if (!consultation_id || typeof consultation_id !== 'string') {
+      res.status(400).json({ error: 'L\'identifiant de consultation (consultation_id) est obligatoire.' });
+      return;
+    }
+    if (!motif || typeof motif !== 'string' || motif.trim().length < 5) {
+      res.status(400).json({ error: 'Le motif du relais médical est obligatoire (min. 5 caractères).' });
+      return;
+    }
+
+    // Vérifier que la consultation existe et appartient au médecin
+    const consultation = await queryOne<any>(
+      `SELECT * FROM consultations WHERE id = ? AND actif = 1`,
+      [consultation_id]
+    );
+    if (!consultation) {
+      res.status(404).json({ error: 'Consultation introuvable.' });
+      return;
+    }
+    if (consultation.medecin_id !== user.id) {
+      await auditLogger.log({
+        userId: user.id,
+        action: 'ACCESS_DENIED',
+        ressourceType: 'RELIS_MEDICAL',
+        ressourceId: consultation_id,
+        details: `Dr. ${user.nom_complet} a tenté de créer un relais pour une consultation d'un confrère`,
+        ipAddress: req.ip || '127.0.0.1'
+      });
+      res.status(403).json({ error: 'Vous ne pouvez pas créer de relais pour la consultation d\'un confrère.' });
+      return;
+    }
+
+    // Vérifier qu'il n'existe pas déjà un relais en attente pour cette consultation
+    const existingRelais = await queryOne<any>(
+      `SELECT id FROM relais_medicaux WHERE consultation_id = ? AND statut = 'EN_ATTENTE'`,
+      [consultation_id]
+    );
+    if (existingRelais) {
+      res.status(409).json({ error: 'Un relais médical est déjà en cours pour cette consultation.' });
+      return;
+    }
+
+    // Vérifier que la consultation n'est PAS déjà en cours par un autre médecin sur la même visite
+    // Si la consultation actuelle n'est pas FINALISÉE et qu'un autre médecin a déjà une consultation EN_COURS
+    // sur la même visite, empêcher la création du relais
+    const activeConsultationsOnVisite = await query<any>(
+      `SELECT c.id, c.medecin_id, c.statut FROM consultations c
+       WHERE c.visite_id = ? AND c.statut = 'EN_COURS' AND c.actif = 1`,
+      [consultation.visite_id]
+    );
+    const otherActiveConsultation = activeConsultationsOnVisite.find((c: any) => c.medecin_id !== user.id);
+    if (otherActiveConsultation) {
+      const otherDoctor = await queryOne<any>(
+        `SELECT nom_complet FROM users WHERE id = ?`,
+        [otherActiveConsultation.medecin_id]
+      );
+      res.status(409).json({
+        error: `Ce dossier est actuellement en cours de prise en charge par un autre médecin (${otherDoctor?.nom_complet || 'confrère'}).`,
+        active_consultation_id: otherActiveConsultation.id,
+        active_doctor_nom: otherDoctor?.nom_complet,
+      });
+      return;
+    }
+
+    // Si medecin_destinataire_id est fourni, vérifier qu'il existe et est actif
+    if (medecin_destinataire_id) {
+      const destinataire = await queryOne<any>(
+        `SELECT id, nom_complet FROM users WHERE id = ? AND actif = 1`,
+        [medecin_destinataire_id]
+      );
+      if (!destinataire) {
+        res.status(400).json({ error: 'Le médecin destinataire n\'existe pas ou n\'est pas actif.' });
+        return;
+      }
+      if (destinataire.id === user.id) {
+        res.status(400).json({ error: 'Vous ne pouvez pas vous désigner vous-même comme destinataire.' });
+        return;
+      }
+    }
+
+    // Cohérence patient & visite
+    if (patient_id && consultation.patient_id !== patient_id) {
+      res.status(400).json({ error: 'Incohérence entre le patient indiqué et la consultation.' });
+      return;
+    }
+    if (visite_id && consultation.visite_id !== visite_id) {
+      res.status(400).json({ error: 'Incohérence entre la visite indiquée et la consultation.' });
+      return;
+    }
+
+    const id = `relais-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+
+    await execute(
+      `INSERT INTO relais_medicaux (
+        id, consultation_id, visite_id, patient_id, medecin_origine_id,
+        medecin_destinataire_id, statut, motif, actions_realisees, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 'EN_ATTENTE', ?, ?, ?, ?)`,
+      [
+        id,
+        consultation_id,
+        consultation.visite_id,
+        consultation.patient_id,
+        user.id,
+        medecin_destinataire_id || null,
+        motif.trim(),
+        actions_realisees ? actions_realisees.trim() : null,
+        now,
+        now
+      ]
+    );
+
+    // Notification au médecin destinataire s'il est désigné
+    if (medecin_destinataire_id) {
+      const numeroVisite = await queryOne<any>(
+        `SELECT numero_visite FROM visites WHERE id = ?`,
+        [consultation.visite_id]
+      );
+      const patientInfo = await queryOne<any>(
+        `SELECT nom, prenom FROM patients WHERE id = ?`,
+        [consultation.patient_id]
+      );
+      await execute(
+        `INSERT INTO notifications (id, user_id, type, titre, message, patient_id, consultation_id, visite_id, lu, created_at)
+         VALUES (?, ?, 'RELIS_MEDICAL', ?, ?, ?, ?, ?, 0, ?)`,
+        [
+          `notif-relais-${Date.now()}`,
+          medecin_destinataire_id,
+          `Relais médical — ${patientInfo?.prenom} ${patientInfo?.nom}`,
+          `Le Dr. ${user.nom_complet} vous désigne comme médecin destinataire pour le relais du patient ${patientInfo?.prenom} ${patientInfo?.nom} (Visite ${numeroVisite?.numero_visite || consultation.visite_id}). Motif: ${motif.trim()}`,
+          consultation.patient_id,
+          consultation_id,
+          consultation.visite_id,
+          now
+        ]
+      );
+    }
+
+    await auditLogger.log({
+      userId: user.id,
+      action: 'RELIS_MEDICAL_CREATE',
+      ressourceType: 'RELIS_MEDICAL',
+      ressourceId: id,
+      details: `Création du relais médical ${id} par Dr. ${user.nom_complet} pour le patient ${consultation.patient_id}`,
+      ipAddress: req.ip || '127.0.0.1'
+    });
+
+    const created = await queryOne<any>(
+      `SELECT * FROM relais_medicaux WHERE id = ?`,
+      [id]
+    );
+    res.status(201).json({ success: true, relais: created });
+  } catch (error: any) {
+    console.error('Erreur création relais médical:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la création du relais médical.' });
+  }
+}
+
+/**
+ * Récupérer les relais médicaux en attente pour le médecin connecté
+ * GET /api/medical/relais/pending
+ * Strictement réservé au rôle MÉDECIN.
+ */
+export async function getRelaisPending(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const doctorId = user.id;
+
+    const relai = await query<any>(
+      `SELECT r.*,
+              c.motif_consultation, c.diagnostic_principal, c.date_consultation,
+              p.nom as patient_nom, p.prenom as patient_prenom, p.numero_dossier,
+              p.date_naissance as patient_date_naissance, p.sexe as patient_sexe,
+              v.numero_visite, v.date_arrivee,
+              u_origine.nom_complet as medecin_origine_nom,
+              u_destinataire.nom_complet as medecin_destinataire_nom
+       FROM relais_medicaux r
+       INNER JOIN consultations c ON r.consultation_id = c.id
+       INNER JOIN patients p ON r.patient_id = p.id
+       INNER JOIN visites v ON r.visite_id = v.id
+       INNER JOIN users u_origine ON r.medecin_origine_id = u_origine.id
+       LEFT JOIN users u_destinataire ON r.medecin_destinataire_id = u_destinataire.id
+       WHERE r.statut = 'EN_ATTENTE'
+         AND (
+           r.medecin_destinataire_id IS NULL
+           OR r.medecin_destinataire_id = ?
+         )
+       ORDER BY r.created_at DESC`,
+      [doctorId]
+    );
+
+    res.json({ relais: relai, total: relai.length });
+  } catch (error: any) {
+    console.error('Erreur récupération relais en attente:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la récupération des relais en attente.' });
+  }
+}
+
+/**
+ * Accepter un relais médical
+ * POST /api/medical/relais/:id/accept
+ * Strictement réservé au rôle MÉDECIN.
+ */
+export async function acceptRelaisMedical(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const { id } = req.params;
+    const now = new Date().toISOString();
+
+    const relais = await queryOne<any>(
+      `SELECT * FROM relais_medicaux WHERE id = ?`,
+      [id]
+    );
+    if (!relais) {
+      res.status(404).json({ error: 'Relais médical introuvable.' });
+      return;
+    }
+
+    if (relais.statut !== 'EN_ATTENTE') {
+      res.status(400).json({ error: `Ce relais est déjà ${relais.statut}.` });
+      return;
+    }
+
+    // Vérifier que le médecin peut accepter ce relais
+    // Soit il est le destinataire désigné, soit aucun destinataire n'est désigné
+    if (relais.medecin_destinataire_id && relais.medecin_destinataire_id !== user.id) {
+      await auditLogger.log({
+        userId: user.id,
+        action: 'ACCESS_DENIED',
+        ressourceType: 'RELIS_MEDICAL',
+        ressourceId: id,
+        details: `Dr. ${user.nom_complet} a tenté d'accepter un relais qui lui est destiné au Dr. ${relais.medecin_destinataire_id}`,
+        ipAddress: req.ip || '127.0.0.1'
+      });
+      res.status(403).json({ error: 'Ce relais vous est destiné mais n\'a pas été créé par vos soins.' });
+      return;
+    }
+
+    // Prévenir les reprises concurrentes
+    const updated = await queryOne<any>(
+      `SELECT statut FROM relais_medicaux WHERE id = ? AND statut = 'EN_ATTENTE'`,
+      [id]
+    );
+    if (!updated) {
+      res.status(409).json({ error: 'Ce relais a été modifié simultanément. Veuillez recharger la liste.' });
+      return;
+    }
+
+    await execute(
+      `UPDATE relais_medicaux SET statut = 'ACCEPTÉ', accepte_par_id = ?, accepte_le = ?, updated_at = ? WHERE id = ?`,
+      [user.id, now, now, id]
+    );
+
+    // Notifier le médecin origine
+    await execute(
+      `INSERT INTO notifications (id, user_id, type, titre, message, patient_id, consultation_id, lu, created_at)
+       VALUES (?, ?, 'RELIS_MEDICAL', ?, ?, ?, ?, 0, ?)`,
+      [
+        `notif-relais-accept-${Date.now()}`,
+        relais.medecin_origine_id,
+        `Relais médical accepté — ${relais.patient_nom || 'Patient'}`,
+        `Le Dr. ${user.nom_complet} a accepté le relais médical pour le patient ${relais.patient_nom || 'Patient'}.`,
+        relais.patient_id,
+        relais.consultation_id,
+        now
+      ]
+    );
+
+    await auditLogger.log({
+      userId: user.id,
+      action: 'RELIS_MEDICAL_ACCEPTED',
+      ressourceType: 'RELIS_MEDICAL',
+      ressourceId: id,
+      details: `Dr. ${user.nom_complet} a accepté le relais médical ${id}`,
+      ipAddress: req.ip || '127.0.0.1'
+    });
+
+    res.json({ success: true, message: 'Relais médical accepté avec succès.' });
+  } catch (error: any) {
+    console.error('Erreur acceptation relais médical:', error);
+    res.status(500).json({ error: 'Erreur interne lors de l\'acceptation du relais médical.' });
+  }
+}
+
+/**
+ * Refuser un relais médical
+ * POST /api/medical/relais/:id/refuse
+ * Strictement réservé au rôle MÉDECIN.
+ */
+export async function refuseRelaisMedical(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const { id } = req.params;
+    const now = new Date().toISOString();
+
+    const relais = await queryOne<any>(
+      `SELECT * FROM relais_medicaux WHERE id = ?`,
+      [id]
+    );
+    if (!relais) {
+      res.status(404).json({ error: 'Relais médical introuvable.' });
+      return;
+    }
+
+    if (relais.statut !== 'EN_ATTENTE') {
+      res.status(400).json({ error: `Ce relais est déjà ${relais.statut}.` });
+      return;
+    }
+
+    // Seul le destinataire désigné peut refuser
+    if (relais.medecin_destinataire_id !== user.id) {
+      res.status(403).json({ error: 'Seul le médecin destinataire peut refuser ce relais.' });
+      return;
+    }
+
+    await execute(
+      `UPDATE relais_medicaux SET statut = 'REFUSÉ', refusé_par_id = ?, refusé_le = ?, updated_at = ? WHERE id = ?`,
+      [user.id, now, now, id]
+    );
+
+    await auditLogger.log({
+      userId: user.id,
+      action: 'RELIS_MEDICAL_REFUSED',
+      ressourceType: 'RELIS_MEDICAL',
+      ressourceId: id,
+      details: `Dr. ${user.nom_complet} a refusé le relais médical ${id}`,
+      ipAddress: req.ip || '127.0.0.1'
+    });
+
+    res.json({ success: true, message: 'Relais médical refusé.' });
+  } catch (error: any) {
+    console.error('Erreur refus relais médical:', error);
+    res.status(500).json({ error: 'Erreur interne lors du refus du relais médical.' });
+  }
+}
+
+/**
+ * Récupérer l'historique des relais médicaux d'un médecin
+ * GET /api/medical/relais/history
+ * Strictement réservé au rôle MÉDECIN.
+ */
+export async function getRelaisHistory(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const doctorId = user.id;
+
+    const relai = await query<any>(
+      `SELECT r.*,
+              c.motif_consultation, c.diagnostic_principal, c.date_consultation,
+              p.nom as patient_nom, p.prenom as patient_prenom, p.numero_dossier,
+              v.numero_visite,
+              u_origine.nom_complet as medecin_origine_nom,
+              u_destinataire.nom_complet as medecin_destinataire_nom,
+              u_accepte.nom_complet as accepte_par_nom,
+              u_refuse.nom_complet as refusé_par_nom
+       FROM relais_medicaux r
+       INNER JOIN consultations c ON r.consultation_id = c.id
+       INNER JOIN patients p ON r.patient_id = p.id
+       INNER JOIN visites v ON r.visite_id = v.id
+       INNER JOIN users u_origine ON r.medecin_origine_id = u_origine.id
+       LEFT JOIN users u_destinataire ON r.medecin_destinataire_id = u_destinataire.id
+       LEFT JOIN users u_accepte ON r.accepte_par_id = u_accepte.id
+       LEFT JOIN users u_refuse ON r.refusé_par_id = u_refuse.id
+       WHERE r.medecin_origine_id = ? OR r.accepte_par_id = ? OR r.refusé_par_id = ?
+       ORDER BY r.created_at DESC
+       LIMIT 100`,
+      [doctorId, doctorId, doctorId]
+    );
+
+    res.json({ relais: relai, total: relai.length });
+  } catch (error: any) {
+    console.error('Erreur récupération historique relais:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la récupération de l\'historique.' });
+  }
+}
+
+/**
+ * Action rapide : Patients à reprendre (liste des relais acceptés en attente de nouvelle consultation)
+ * GET /api/medical/relais/patients-to-reprise
+ * Strictement réservé au rôle MÉDECIN.
+ */
+export async function getRelaisPatientsToReprise(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const doctorId = user.id;
+
+    const relai = await query<any>(
+      `SELECT r.*,
+              c.motif_consultation, c.diagnostic_principal, c.date_consultation,
+              p.nom as patient_nom, p.prenom as patient_prenom, p.numero_dossier,
+              p.date_naissance as patient_date_naissance, p.sexe as patient_sexe,
+              v.numero_visite, v.date_arrivee,
+              u_origine.nom_complet as medecin_origine_nom,
+              u_destinataire.nom_complet as medecin_destinataire_nom
+       FROM relais_medicaux r
+       INNER JOIN consultations c ON r.consultation_id = c.id
+       INNER JOIN patients p ON r.patient_id = p.id
+       INNER JOIN visites v ON r.visite_id = v.id
+       INNER JOIN users u_origine ON r.medecin_origine_id = u_origine.id
+       LEFT JOIN users u_destinataire ON r.medecin_destinataire_id = u_destinataire.id
+       WHERE r.statut = 'ACCEPTÉ' AND r.accepte_par_id = ?
+       ORDER BY r.accepte_le DESC
+       LIMIT 50`,
+      [doctorId]
+    );
+
+    res.json({ relais: relai, total: relai.length });
+  } catch (error: any) {
+    console.error('Erreur récupération patients à reprendre:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la récupération des patients à reprendre.' });
+  }
+}
+
+/**
+ * Créer une nouvelle consultation à partir d'un relais médical accepté
+ * POST /api/medical/relais/:id/start-consultation
+ * Strictement réservé au rôle MÉDECIN.
+ */
+export async function startConsultationFromRelais(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const { id } = req.params;
+    const now = new Date().toISOString();
+
+    const relais = await queryOne<any>(
+      `SELECT * FROM relais_medicaux WHERE id = ? AND statut = 'ACCEPTÉ' AND accepte_par_id = ?`,
+      [id, user.id]
+    );
+    if (!relais) {
+      res.status(404).json({ error: 'Relais médical introuvable ou non accepté.' });
+      return;
+    }
+
+    // Vérifier qu'une consultation n'a pas déjà été créée pour ce relais
+    const existingConsultation = await queryOne<any>(
+      `SELECT id FROM consultations WHERE visite_id = ? AND medecin_id = ? AND statut = 'EN_COURS' AND actif = 1`,
+      [relais.visite_id, user.id]
+    );
+    if (existingConsultation) {
+      res.status(409).json({ error: 'Une consultation est déjà en cours pour cette visite.', consultation_id: existingConsultation.id });
+      return;
+    }
+
+    // Créer une nouvelle consultation
+    const consultationId = `csl-${crypto.randomUUID().substring(0, 12)}`;
+    const motif = `Relais médical — ${relais.motif}`;
+
+    await execute(
+      `INSERT INTO consultations (
+        id, visite_id, patient_id, medecin_id, date_consultation,
+        motif_consultation, statut, created_at, updated_at, actif
+      ) VALUES (?, ?, ?, ?, ?, ?, 'EN_COURS', ?, ?, 1)`,
+      [
+        consultationId,
+        relais.visite_id,
+        relais.patient_id,
+        user.id,
+        now,
+        motif,
+        now,
+        now
+      ]
+    );
+
+    // Mettre à jour le motif dans le relais
+    await execute(
+      `UPDATE relais_medicaux SET actions_realisees = COALESCE(actions_realisees || '', '') || ?, updated_at = ? WHERE id = ?`,
+      [`Nouvelle consultation créée: ${consultationId} par Dr. ${user.nom_complet}`, now, id]
+    );
+
+    await auditLogger.log({
+      userId: user.id,
+      action: 'RELIS_MEDICAL_CONSULTATION_CREATED',
+      ressourceType: 'RELIS_MEDICAL',
+      ressourceId: id,
+      details: `Dr. ${user.nom_complet} a créé une consultation à partir du relais médical ${id}`,
+      ipAddress: req.ip || '127.0.0.1'
+    });
+
+    res.status(201).json({ success: true, consultation_id: consultationId, message: 'Consultation créée à partir du relais médical.' });
+  } catch (error: any) {
+    console.error('Erreur création consultation depuis relais:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la création de la consultation.' });
+  }
+}
+
+/**
+ * Médecins ayant actuellement une consultation en cours sur les visites du médecin connecté
+ * GET /api/medical/relais/patients-in-progress
+ * Strictement réservé au rôle MÉDECIN.
+ */
+export async function getRelaisPatientsInProgress(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const doctorId = user.id;
+
+    const relai = await query<any>(
+      `SELECT r.id, r.consultation_id, r.visite_id, r.patient_id, r.medecin_origine_id,
+              r.medecin_destinataire_id, r.statut, r.motif, r.actions_realisees,
+              r.accepte_par_id, r.accepte_le, r.created_at, r.updated_at,
+              p.nom as patient_nom, p.prenom as patient_prenom, p.numero_dossier,
+              p.sexe as patient_sexe,
+              v.numero_visite, v.date_arrivee,
+              u_origine.nom_complet as medecin_origine_nom,
+              u_destinataire.nom_complet as medecin_destinataire_nom,
+              c_active.id as active_consultation_id,
+              c_active.medecin_id as active_medecin_id,
+              c_active.statut as active_statut,
+              c_active.date_consultation as active_date,
+              c_active.motif_consultation as active_motif,
+              u_active.nom_complet as active_medecin_nom
+        FROM relais_medicaux r
+        INNER JOIN patients p ON r.patient_id = p.id
+        INNER JOIN visites v ON r.visite_id = v.id
+        INNER JOIN users u_origine ON r.medecin_origine_id = u_origine.id
+        LEFT JOIN users u_destinataire ON r.medecin_destinataire_id = u_destinataire.id
+        LEFT JOIN consultations c_active ON c_active.visite_id = r.visite_id 
+          AND c_active.statut = 'EN_COURS' AND c_active.actif = 1 AND c_active.medecin_id != r.medecin_origine_id
+        LEFT JOIN users u_active ON u_active.id = c_active.medecin_id
+        WHERE r.medecin_origine_id = ?
+        ORDER BY r.created_at DESC`,
+      [doctorId]
+    );
+
+    res.json({ relais: relai, total: relai.length });
+  } catch (error: any) {
+    console.error('Erreur récupération patients en cours:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la récupération des patients en cours.' });
+  }
+}
+
+/**
+ * Historique complet des relais médicaux pour un patient donné
+ * GET /api/medical/relais/patient/:patientId
+ * Strictement réservé au rôle MÉDECIN.
+ */
+export async function getRelaisPatientHistory(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const { patientId } = req.params;
+
+    const relai = await query<any>(
+      `SELECT r.id, r.consultation_id, r.visite_id, r.patient_id, r.medecin_origine_id,
+              r.medecin_destinataire_id, r.statut, r.motif, r.actions_realisees,
+              r.accepte_par_id, r.accepte_le, r.refusé_par_id, r.refusé_le, r.created_at, r.updated_at,
+              p.nom as patient_nom, p.preinom as patient_prenom, p.numero_dossier,
+              p.sexe as patient_sexe, p.date_naissance as patient_date_naissance,
+              v.numero_visite, v.date_arrivee, v.motif_venue,
+              u_origine.nom_complet as medecin_origine_nom,
+              u_destinataire.nom_complet as medecin_destinataire_nom,
+              u_accepte.nom_complet as accepte_par_nom,
+              c_diagnostic.motif_consultation as diagnostic_motif,
+              c_diagnostic.diagnostic_principal,
+              c_diagnostic.statut as diag_statut,
+              c_diagnostic.finalisee_le,
+              c_active.id as active_consultation_id,
+              c_active.medecin_id as active_medecin_id,
+              c_active.statut as active_statut,
+              u_active.nom_complet as active_medecin_nom,
+              c_active.date_consultation as active_date
+        FROM relais_medicaux r
+        INNER JOIN patients p ON r.patient_id = p.id
+        INNER JOIN visites v ON r.visite_id = v.id
+        INNER JOIN users u_origine ON r.medecin_origine_id = u_origine.id
+        LEFT JOIN users u_destinataire ON r.medecin_destinataire_id = u_destinataire.id
+        LEFT JOIN users u_accepte ON r.accepte_par_id = u_accepte.id
+        LEFT JOIN consultations c_diagnostic ON c_diagnostic.id = r.consultation_id
+        LEFT JOIN consultations c_active ON c_active.visite_id = r.visite_id 
+          AND c_active.statut = 'EN_COURS' AND c_active.actif = 1
+        LEFT JOIN users u_active ON u_active.id = c_active.medecin_id
+        WHERE r.patient_id = ?
+        ORDER BY r.created_at DESC`,
+      [patientId]
+    );
+
+    res.json({ relais: relai, total: relai.length });
+  } catch (error: any) {
+    console.error('Erreur récupération historique relais patient:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la récupération de l\'historique.' });
   }
 }

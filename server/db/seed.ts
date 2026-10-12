@@ -347,7 +347,7 @@ export async function seedDatabase(): Promise<void> {
             type_resultat: 'NUMERIQUE',
             obligatoire: 1,
             ordre_affichage: 2,
-            prix_usd: 3.0,
+            prix_usd: 1.5,
             valeurs_ref: { type: 'GENERAL', min: 4.0, max: 5.5, unite: '10^6/µL' }
           },
           {

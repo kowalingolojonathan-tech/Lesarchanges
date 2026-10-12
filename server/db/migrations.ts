@@ -731,6 +731,7 @@ export async function runMigrations(): Promise<void> {
           remarques_techniques TEXT,
           document_url TEXT,
           document_nom TEXT,
+          vu_par_medecin_le TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
           FOREIGN KEY (consultation_id) REFERENCES consultations(id) ON DELETE RESTRICT,
@@ -742,22 +743,22 @@ export async function runMigrations(): Promise<void> {
           FOREIGN KEY (facture_id) REFERENCES factures(id) ON DELETE RESTRICT
         );
 
-        INSERT INTO demandes_laboratoire_v4 (
-          id, numero_demande, consultation_id, patient_id, visite_id, medecin_id,
-          laborantin_id, assigned_at, assigned_by, date_demande, statut, urgence,
-          indication_clinique, commentaire, amendement_motif, facture_id,
-          result_entered_by, result_entered_at, validated_by, validated_at,
-          date_prelevement, preleve_par_id, conclusion_globale, remarques_techniques,
-          document_url, document_nom, created_at, updated_at
-        )
-        SELECT 
-          id, numero_demande, consultation_id, patient_id, visite_id, medecin_id,
-          laborantin_id, assigned_at, assigned_by, date_demande, statut, urgence,
-          indication_clinique, commentaire, amendement_motif, facture_id,
-          result_entered_by, result_entered_at, validated_by, validated_at,
-          date_prelevement, preleve_par_id, conclusion_globale, remarques_techniques,
-          document_url, document_nom, created_at, updated_at
-        FROM demandes_laboratoire;
+         INSERT INTO demandes_laboratoire_v4 (
+           id, numero_demande, consultation_id, patient_id, visite_id, medecin_id,
+           laborantin_id, assigned_at, assigned_by, date_demande, statut, urgence,
+           indication_clinique, commentaire, amendement_motif, facture_id,
+           result_entered_by, result_entered_at, validated_by, validated_at,
+           date_prelevement, preleve_par_id, conclusion_globale, remarques_techniques,
+           document_url, document_nom, vu_par_medecin_le, created_at, updated_at
+         )
+         SELECT
+           id, numero_demande, consultation_id, patient_id, visite_id, medecin_id,
+           laborantin_id, assigned_at, assigned_by, date_demande, statut, urgence,
+           indication_clinique, commentaire, amendement_motif, facture_id,
+           result_entered_by, result_entered_at, validated_by, validated_at,
+           date_prelevement, preleve_par_id, conclusion_globale, remarques_techniques,
+           document_url, document_nom, vu_par_medecin_le, created_at, updated_at
+         FROM demandes_laboratoire;
 
         DROP TABLE demandes_laboratoire;
         ALTER TABLE demandes_laboratoire_v4 RENAME TO demandes_laboratoire;
@@ -1666,6 +1667,45 @@ export async function runMigrations(): Promise<void> {
 
   } catch (err) {
     console.error('Erreur lors de la migration catalogue laboratoire (Phase 2C-5):', err);
+  }
+
+  // Migration Phase 6.1 — Relais Médical (continuité des soins)
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS relais_medicaux (
+        id TEXT PRIMARY KEY,
+        consultation_id TEXT NOT NULL,
+        visite_id TEXT NOT NULL,
+        patient_id TEXT NOT NULL,
+        medecin_origine_id TEXT NOT NULL,
+        medecin_destinataire_id TEXT,
+        statut TEXT NOT NULL DEFAULT 'EN_ATTENTE' CHECK(statut IN ('EN_ATTENTE', 'ACCEPTÉ', 'REFUSÉ', 'ANNULÉ')),
+        motif TEXT NOT NULL,
+        actions_realisees TEXT,
+        accepte_par_id TEXT,
+        accepte_le TEXT,
+        refusé_par_id TEXT,
+        refusé_le TEXT,
+        annulé_par_id TEXT,
+        annulé_le TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (consultation_id) REFERENCES consultations(id) ON DELETE RESTRICT,
+        FOREIGN KEY (visite_id) REFERENCES visites(id) ON DELETE RESTRICT,
+        FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE RESTRICT,
+        FOREIGN KEY (medecin_origine_id) REFERENCES users(id) ON DELETE RESTRICT,
+        FOREIGN KEY (medecin_destinataire_id) REFERENCES users(id) ON DELETE SET NULL,
+        FOREIGN KEY (accepte_par_id) REFERENCES users(id) ON DELETE SET NULL,
+        FOREIGN KEY (refusé_par_id) REFERENCES users(id) ON DELETE SET NULL,
+        FOREIGN KEY (annulé_par_id) REFERENCES users(id) ON DELETE SET NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_relais_consultation ON relais_medicaux(consultation_id);
+      CREATE INDEX IF NOT EXISTS idx_relais_patient ON relais_medicaux(patient_id);
+      CREATE INDEX IF NOT EXISTS idx_relais_destinataire ON relais_medicaux(medecin_destinataire_id);
+      CREATE INDEX IF NOT EXISTS idx_relais_statut ON relais_medicaux(statut);
+    `);
+  } catch (err) {
+    console.error('Erreur lors de la migration relais médical (Phase 6.1):', err);
   }
 
   db.exec('PRAGMA foreign_keys = ON;');

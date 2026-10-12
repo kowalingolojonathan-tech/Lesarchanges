@@ -18,6 +18,7 @@ import { AssignDoctorModal } from './components/reception/AssignDoctorModal.js';
 import { DoctorDashboardView } from './components/medical/DoctorDashboardView.js';
 import { DoctorReportsView } from './components/medical/DoctorReportsView.js';
 import { LaboratoryQueueView } from './components/medical/LaboratoryQueueView.js';
+import { RelaisMedicalView } from './components/medical/RelaisMedicalView.js';
 import { MobileBottomNav } from './components/layout/MobileBottomNav.js';
 import { Visite } from './types/index.js';
 import { Loader2 } from 'lucide-react';
@@ -144,6 +145,9 @@ const MainApp: React.FC = () => {
 
       case 'doctor-reports':
         return <DoctorReportsView onBack={() => setCurrentTab('dashboard')} />;
+
+      case 'doctor-relais':
+        return <RelaisMedicalView />;
 
       default:
         return <RoleDashboard onNavigate={setCurrentTab} />;

@@ -335,6 +335,7 @@ export interface DoctorQueueData {
     arriveesJour: number;
     demandesLabo: number;
     orientations: number;
+    relais: number;
   };
   quickAccessLists?: {
     patientsReçusAujourdhui: any[];
@@ -345,6 +346,7 @@ export interface DoctorQueueData {
     bulletinsDispo: any[];
     demandesLaboNonTraitees: any[];
     orientationsEnAttente: any[];
+    relaisEnAttente: any[];
   };
   queue: {
     attente: Visite[];
@@ -849,4 +851,45 @@ export interface BillingReportsData {
     devise_affichee: 'FC' | 'USD';
   };
   paiements: Paiement[];
+}
+
+// ==========================================
+// TYPES RELAIS MÉDICAL (Phase 6.1)
+// ==========================================
+
+export type RelaisStatut = 'EN_ATTENTE' | 'ACCEPTÉ' | 'REFUSÉ' | 'ANNULÉ';
+
+export interface RelaisMedical {
+  id: string;
+  consultation_id: string;
+  visite_id: string;
+  patient_id: string;
+  medecin_origine_id: string;
+  medecin_destinataire_id: string | null;
+  statut: RelaisStatut;
+  motif: string;
+  actions_realisees: string | null;
+  accepte_par_id: string | null;
+  accepte_le: string | null;
+  refusé_par_id: string | null;
+  refusé_le: string | null;
+  annulé_par_id: string | null;
+  annulé_le: string | null;
+  created_at: string;
+  updated_at: string;
+  // Données jointes
+  patient_nom?: string;
+  patient_prenom?: string;
+  numero_dossier?: string;
+  patient_date_naissance?: string;
+  patient_sexe?: 'M' | 'F';
+  medecin_origine_nom?: string;
+  medecin_destinataire_nom?: string;
+  accepte_par_nom?: string;
+  refusé_par_nom?: string;
+  numero_visite?: string;
+  date_arrivee?: string;
+  motif_consultation?: string;
+  diagnostic_principal?: string;
+  date_consultation?: string;
 }

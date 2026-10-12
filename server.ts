@@ -187,6 +187,17 @@ app.post('/api/medical/lab-orders/:id/mark-viewed', requireAuth, requireRole(['M
   app.get('/api/medical/consultations/:id/orientations', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.getConsultationOrientations);
   app.get('/api/medical/orientations/pending', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.getPendingOrientations);
 
+  // --- RELAIS MÉDICAL (Phase 6.1) ---
+  app.post('/api/medical/relais/create', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.createRelaisMedical);
+  app.get('/api/medical/relais/pending', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.getRelaisPending);
+  app.post('/api/medical/relais/:id/accept', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.acceptRelaisMedical);
+  app.post('/api/medical/relais/:id/refuse', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.refuseRelaisMedical);
+  app.get('/api/medical/relais/history', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.getRelaisHistory);
+  app.get('/api/medical/relais/patients-to-reprise', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.getRelaisPatientsToReprise);
+  app.post('/api/medical/relais/:id/start-consultation', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.startConsultationFromRelais);
+  app.get('/api/medical/relais/patients-in-progress', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.getRelaisPatientsInProgress);
+  app.get('/api/medical/relais/patient/:patientId', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.getRelaisPatientHistory);
+
   // --- NOTIFICATIONS SYSTÈME ---
   app.get('/api/notifications', requireAuth, medicalCtrl.getUserNotifications);
   app.patch('/api/notifications/:id/read', requireAuth, medicalCtrl.markNotificationRead);
