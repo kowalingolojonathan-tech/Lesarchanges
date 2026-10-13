@@ -58,11 +58,102 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
   const [newRetenuPrecision, setNewRetenuPrecision] = useState<string>('');
   const [newRetenuIsPrincipal, setNewRetenuIsPrincipal] = useState<boolean>(false);
 
+  // Prise en charge du patient — actions rapides
+  // 1. Relais médical — Transmettre le dossier &agrave; un autre m&eacute;decin
+  const [showRelaisModal, setShowRelaisModal] = useState<boolean>(false);
+  const [relaisLoading, setRelaisLoading] = useState<boolean>(false);
+  const [relaisCreateError, setRelaisCreateError] = useState<string | null>(null);
+  const [relaisSuccess, setRelaisSuccess] = useState<string | null>(null);
+  const [relaisDestinataires, setRelaisDestinataires] = useState<any[]>([]);
+  const [relaisForm, setRelaisForm] = useState({
+    motif: '',
+    medecin_destinataire_id: '',
+  });
+
+  // 2. Mettre en observation — Surveiller l'&eacute;volution cliniqu&eacute;e du patient (Phase 6.2)
+  const [showObservationModal, setShowObservationModal] = useState<boolean>(false);
+  const [observationLoading, setObservationLoading] = useState<boolean>(false);
+  const [observationError, setObservationError] = useState<string | null>(null);
+  const [observationSuccess, setObservationSuccess] = useState<string | null>(null);
+  const [hasActiveObservation, setHasActiveObservation] = useState<boolean>(false);
+
+  // 3. Hospitaliser le patient — Organiser l'admission et le s&eacute;jour hospitalier (Phase 6.3)
+  const [showHospitalisationModal, setShowHospitalisationModal] = useState<boolean>(false);
+
+
+  // Prise en charge du patient
+  const titrePriseEnCharge = "Prise en charge du patient";
   // Mode amendement pour consultation finalisée
   const [isAmendmentMode, setIsAmendmentMode] = useState<boolean>(false);
-  const [amendementMotif, setAmendementMotif] = useState<string>('');
+
+  const sectionTitle = "Prise en charge du patient";
 
   // Modale historique
+
+  // Section: Prise en charge du patient
+  const sectionContent = (
+    <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
+      <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2.5 flex items-center justify-between">
+        <span>{sectionTitle}</span>
+        <span className="text-[10px] text-emerald-500 bg-emerald-50 px-2 py-0.5 rounded font-semibold">Poste Clinique</span>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-7 gap-2">
+        {/* Bouton Relais médical */}
+        <button
+          type="button"
+          onClick={() => setShowRelaisModal(true)}
+          className="p-2.5 bg-cyan-50/60 hover:bg-cyan-100/80 border border-cyan-200 rounded-xl flex flex-col items-center justify-center text-center transition-all min-h-[56px] group relative"
+        >
+          <div className="relative">
+            <RefreshCw className="w-5 h-5 text-cyan-700 mb-1" />
+            {(q?.relais ?? 0) > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                {q?.relais}
+              </span>
+            )}
+          </div>
+          <span className="text-xs font-bold text-cyan-900">Relais médical</span>
+          <span className="text-[9px] text-cyan-600 font-semibold">en attente</span>
+        </button>
+
+        {/* Bouton Mettre en observation */}
+        <button
+          type="button"
+          onClick={() => setShowObservationModal(true)}
+          className="p-2.5 bg-orange-50/60 hover:bg-orange-100/80 border border-orange-200 rounded-xl flex flex-col items-center justify-center text-center transition-all min-h-[56px] group relative"
+        >
+          <div className="relative">
+            <HeartPulse className="w-5 h-5 text-orange-700 mb-1" />
+            {(q?.observations ?? 0) > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                {q?.observations}
+              </span>
+            )}
+          </div>
+          <span className="text-xs font-bold text-orange-900">Observation</span>
+          <span className="text-[9px] text-orange-600 font-semibold">en cours</span>
+        </button>
+
+        {/* Bouton Hospitaliser le patient */}
+        <button
+          type="button"
+          onClick={() => setShowHospitalisationModal(true)}
+          className="p-2.5 bg-indigo-50/60 hover:bg-indigo-100/80 border border-indigo-200 rounded-xl flex flex-col items-center justify-center text-center transition-all min-h-[56px] group relative"
+        >
+          <div className="relative">
+            <ShieldCheck className="w-5 h-5 text-indigo-700 mb-1" />
+            {(q?.hospitalisations ?? 0) > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                {q?.hospitalisations}
+              </span>
+            )}
+          </div>
+          <span className="text-xs font-bold text-indigo-900">Hospitalisation</span>
+          <span className="text-[9px] text-indigo-600 font-semibold">actives</span>
+        </button>
+      </div>
+    </div>
+  );
   const [showHistoryModal, setShowHistoryModal] = useState<boolean>(false);
 
   // Modale confirmation finalisation
@@ -70,9 +161,6 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [paymentStatus, setPaymentStatus] = useState<string>('NON PAYÉ');
 
-  // Allergies — saisie & modification réservées au MÉDECIN
-  const [allergies, setAllergies] = useState<string>('');
-  const [editingAllergies, setEditingAllergies] = useState<boolean>(false);
 
   // Orientations — state & modale
   const [orientations, setOrientations] = useState<any[]>([]);
@@ -92,22 +180,6 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
   });
 
   // Relais médical — state & modale
-  const [showRelaisModal, setShowRelaisModal] = useState<boolean>(false);
-  const [relaisLoading, setRelaisLoading] = useState<boolean>(false);
-  const [relaisCreateError, setRelaisCreateError] = useState<string | null>(null);
-  const [relaisSuccess, setRelaisSuccess] = useState<string | null>(null);
-  const [relaisDestinataires, setRelaisDestinataires] = useState<any[]>([]);
-  const [relaisForm, setRelaisForm] = useState({
-    motif: '',
-    medecin_destinataire_id: '',
-  });
-
-  // Observation médicale — state (Phase 6.2)
-  const [showObservationModal, setShowObservationModal] = useState<boolean>(false);
-  const [observationLoading, setObservationLoading] = useState<boolean>(false);
-  const [observationError, setObservationError] = useState<string | null>(null);
-  const [observationSuccess, setObservationSuccess] = useState<string | null>(null);
-  const [hasActiveObservation, setHasActiveObservation] = useState<boolean>(false);
 
   const fetchConsultation = async (preserveFormFields = false) => {
     setLoading(true);

@@ -297,9 +297,9 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
   };
 
   // Compteurs dérivés pour les accès rapides — toujours à jour depuis data
-  const q = data?.quickAccess ?? { patients: 0, rdv: 0, rdvPlanifies: 0, ordonnances: 0, labResults: 0, bulletins: 0, arriveesJour: 0, demandesLabo: 0, orientations: 0, relais: 0, observations: 0 };
+  const q = data?.quickAccess ?? { patients: 0, rdv: 0, rdvPlanifies: 0, ordonnances: 0, labResults: 0, bulletins: 0, arriveesJour: 0, demandesLabo: 0, orientations: 0, relais: 0, observations: 0, hospitalisations: 0 };
   const s = data?.stats ?? { attente: 0, en_cours: 0, a_finaliser: 0, terminees_jour: 0 };
-  const qa = data?.quickAccessLists ?? { patientsReçusAujourdhui: [], rdvAujourdhui: [], rdvPlanifiesFuturs: [], ordonnancesList: [], labResultsNonLus: [], bulletinsDispo: [], demandesLaboNonTraitees: [], orientationsEnAttente: [], relaisEnAttente: [], observationsActives: [] };
+  const qa = data?.quickAccessLists ?? { patientsReçusAujourdhui: [], rdvAujourdhui: [], rdvPlanifiesFuturs: [], ordonnancesList: [], labResultsNonLus: [], bulletinsDispo: [], demandesLaboNonTraitees: [], orientationsEnAttente: [], relaisEnAttente: [], observationsActives: [], hospitalisationsActives: [] };
 
   // Données utilisées par chaque modale — toujours cohérentes avec les compteurs
   // Si quickAccessLists est manquant (ancien serveur), les listes seront vides
@@ -321,6 +321,7 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
     finalisation: { count: s.a_finaliser, items: (data?.queue?.a_finaliser) || [] },
     orientations: { count: q.orientations, items: qa.orientationsEnAttente || [] },
     observations: { count: q.observations, items: qa.observationsActives || [] },
+    hospitalisations: { count: q.hospitalisations, items: qa.hospitalisationsActives || [] },
   };
 
   return (
@@ -533,6 +534,24 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
             </div>
             <span className="text-xs font-bold text-orange-900">Observations</span>
             <span className="text-[9px] text-orange-600 font-semibold">en cours</span>
+          </button>
+
+          {/* Hospitalisations */}
+          <button
+            type="button"
+            onClick={() => setActiveModal('hospitalisations')}
+            className="p-2.5 bg-indigo-50/60 hover:bg-indigo-100/80 border border-indigo-200 rounded-xl flex flex-col items-center justify-center text-center transition-all min-h-[56px] group relative"
+          >
+            <div className="relative">
+              <ShieldCheck className="w-5 h-5 text-indigo-700 mb-1" />
+              {(q?.hospitalisations ?? 0) > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                  {q.hospitalisations}
+                </span>
+              )}
+            </div>
+            <span className="text-xs font-bold text-indigo-900">Hospitalisations</span>
+            <span className="text-[9px] text-indigo-600 font-semibold">actives</span>
           </button>
 
           {/* Finalisation */}
