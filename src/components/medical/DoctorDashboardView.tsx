@@ -2548,7 +2548,7 @@ export const HospitalisationDetailView: React.FC<HospitalisationDetailViewProps>
   };
 
   const handleSortie = async () => {
-    if (!window.confirm('Êtes-vous sûr de vouloir程序er la sortie de ce patient ?')) return;
+    if (!window.confirm('Êtes-vous sûr de vouloirprogrammer la sortie de ce patient ?')) return;
     setLoading(true);
     setError(null);
     try {
@@ -2560,7 +2560,7 @@ export const HospitalisationDetailView: React.FC<HospitalisationDetailViewProps>
         onBack();
       }, 1500);
     } catch (err: any) {
-      setError(err.message || 'Impossible de程序er la sortie.');
+      setError(err.message || 'Impossible deprogrammer la sortie.');
     } finally {
       setLoading(false);
     }
@@ -2682,7 +2682,7 @@ export const HospitalisationDetailView: React.FC<HospitalisationDetailViewProps>
               className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1.5"
             >
               <CheckCircle2 className="w-3.5 h-3.5" />
-             程序er la sortie
+             programmer la sortie
             </button>
           )}
         </div>
