@@ -106,9 +106,9 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
         >
           <div className="relative">
             <RefreshCw className="w-5 h-5 text-cyan-700 mb-1" />
-            {(q?.relais ?? 0) > 0 && (
+            {(relaisDestinataires.length ?? 0) > 0 && (
               <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
-                {q?.relais}
+                {relaisDestinataires.length}
               </span>
             )}
           </div>
@@ -124,9 +124,9 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
         >
           <div className="relative">
             <HeartPulse className="w-5 h-5 text-orange-700 mb-1" />
-            {(q?.observations ?? 0) > 0 && (
+            {(consultation?.patient_nom ? 1 : 0) > 0 && (
               <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
-                {q?.observations}
+                {consultation?.patient_nom ? 1 : 0}
               </span>
             )}
           </div>
@@ -142,9 +142,9 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
         >
           <div className="relative">
             <ShieldCheck className="w-5 h-5 text-indigo-700 mb-1" />
-            {(q?.hospitalisations ?? 0) > 0 && (
+            {(consultation?.patient_nom ? 1 : 0) > 0 && (
               <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
-                {q?.hospitalisations}
+                {consultation?.patient_nom ? 1 : 0}
               </span>
             )}
           </div>
