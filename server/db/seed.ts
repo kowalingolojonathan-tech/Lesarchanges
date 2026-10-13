@@ -313,6 +313,25 @@ export async function seedDatabase(): Promise<void> {
     `);
   }
 
+  // 5b. Initialisation des catégories d'hospitalisation par défaut (Phase 6.3)
+  const existingHospCatCount = await queryOne<{ count: number }>('SELECT count(*) as count FROM hospitalisation_cATEGORIES', []);
+  if (!existingHospCatCount || Number(existingHospCatCount.count) === 0) {
+    const now = new Date().toISOString();
+    const defaultCats = [
+      { id: 'hcat-standard', nom: 'Hospitalisation Standard', tarif: 50, description: 'Chambre commune, soins généraux' },
+      { id: 'hcat-semi', nom: 'Chambre Semi-Privée', tarif: 80, description: 'Chambre à 2 lits, confort amélioré' },
+      { id: 'hcat-privee', nom: 'Chambre Privée', tarif: 120, description: 'Chambre individuelle, services complets' },
+      { id: 'hcat-usc', nom: 'Unité de Soins Intensifs (USI)', tarif: 200, description: 'Surveillance continue, equipment médical dédié' },
+      { id: 'hcat-ped', nom: 'Hospitalisation Pédiatrique', tarif: 60, description: 'Enfant, environnement adapté, monitoring spécifique' },
+    ];
+    for (const c of defaultCats) {
+      await execute(`
+        INSERT INTO hospitalisation_cATEGORIES (id, nom, tarif_journalier_usd, actif, created_at, updated_at)
+        VALUES (?, ?, ?, 1, ?, ?)
+      `, [c.id, c.nom, c.tarif, now, now]);
+    }
+  }
+
   // 6. Initialisation du Catalogue Réel de Laboratoire (Phase 4)
   const existingExamensCount = await queryOne<{ count: number }>('SELECT count(*) as count FROM examens_laboratoire', []);
   if (!existingExamensCount || Number(existingExamensCount.count) === 0) {

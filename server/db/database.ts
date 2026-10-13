@@ -163,13 +163,29 @@ export async function execute(sql: string, params: QueryParam[] = []): Promise<{
       db.exec(sql);
       changes = db.getRowsModified();
     } else {
-      const stmt = db.prepare(sql);
       try {
-        const cleanParams = sanitizeParams(params);
-        stmt.run(cleanParams);
-        changes = db.getRowsModified();
-      } finally {
-        stmt.free();
+        const stmt = db.prepare(sql);
+        try {
+          const cleanParams = sanitizeParams(params);
+          console.error('[DB execute] SQL:', sql.substring(0, 500).replace(/\n/g, ' '));
+          console.error('[DB execute] Params count:', params.length, 'cleanParams:', cleanParams.length);
+          stmt.run(cleanParams);
+          changes = db.getRowsModified();
+          console.error('[DB execute] SUCCESS, changes:', changes);
+        } catch (e: any) {
+          console.error('[DB execute ERROR] SQL:', sql.substring(0, 500).replace(/\n/g, ' '));
+console.error('[DB execute ERROR] Params:', JSON.stringify(params));
+          console.error('[DB execute ERROR] Message:', e.message);
+          console.error('[DB execute ERROR] Stack:', e.stack);
+          throw e;
+        } finally {
+          stmt.free();
+        }
+      } catch (e: any) {
+        console.error('[DB prepare ERROR] SQL:', sql.substring(0, 500).replace(/\n/g, ' '));
+        console.error('[DB prepare ERROR] Message:', e.message);
+        console.error('[DB prepare ERROR] Stack:', e.stack);
+        throw e;
       }
     }
     saveDb();

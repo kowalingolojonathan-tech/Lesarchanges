@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { query, queryOne, execute, transaction } from '../db/database.js';
 import { auditLogger } from '../utils/auditLogger.js';
 import { AuthenticatedRequest, isDoctorRole } from '../middleware/auth.js';
-import { createLinkedFactureCore } from './billingController.js';
+import { createLinkedFactureCore, getFactureFinancialDetails } from './billingController.js';
 import { saveDb } from '../db/database.js';
 
 /**
@@ -317,6 +317,28 @@ export async function getDoctorQueue(req: AuthenticatedRequest, res: Response): 
     );
     const observationsCount = observationsActives.length;
 
+    // 6l. Hospitalisations actives pour le médecin connecté (Phase 6.3)
+    const hospitalisationsActives = await query<any>(
+      `SELECT h.id, h.consultation_id, h.visite_id, h.patient_id, h.medecin_id, h.medecin_responsable_id,
+              h.categorie_id, h.tarif_journalier_usd, h.motif, h.statut, h.date_demande, h.date_admission,
+              h.created_at,
+              p.numero_dossier, p.nom as patient_nom, p.prenom as patient_prenom,
+              p.sexe as patient_sexe,
+              v.numero_visite, v.date_arrivee,
+              cat.nom as categorie_nom,
+              c.statut as consultation_statut
+       FROM hospitalisations h
+       INNER JOIN patients p ON h.patient_id = p.id
+       INNER JOIN visites v ON h.visite_id = v.id
+       INNER JOIN consultations c ON h.consultation_id = c.id
+       INNER JOIN hospitalisation_cATEGORIES cat ON h.categorie_id = cat.id
+       WHERE h.medecin_responsable_id = ? AND h.actif = 1
+         AND h.statut IN ('DEMANDE', 'ADMISE', 'EN_SEJOUR')
+       ORDER BY h.created_at DESC`,
+      [doctorId]
+    );
+    const hospitalisationsCount = hospitalisationsActives.length;
+
     await auditLogger.log({
       userId: user.id,
       action: 'DOCTOR_QUEUE_ACCESSED',
@@ -350,7 +372,8 @@ export async function getDoctorQueue(req: AuthenticatedRequest, res: Response): 
         demandesLabo: demandesLaboCount,
         orientations: orientationsEnAttenteCount,
         relais: relaisEnAttenteCount,
-        observations: observationsCount
+        observations: observationsCount,
+        hospitalisations: hospitalisationsCount
       },
       quickAccessLists: {
         patientsReçusAujourdhui: patientsReçusAujourdhui,
@@ -362,7 +385,8 @@ export async function getDoctorQueue(req: AuthenticatedRequest, res: Response): 
         demandesLaboNonTraitees,
         orientationsEnAttente,
         relaisEnAttente,
-        observationsActives
+        observationsActives,
+        hospitalisationsActives
       },
       queue: {
         attente,
@@ -7011,5 +7035,927 @@ export async function updateObservation(req: AuthenticatedRequest, res: Response
   } catch (error: any) {
     console.error('Erreur mise à jour observation:', error);
     res.status(500).json({ error: 'Erreur interne lors de la mise à jour de l\'observation.' });
+  }
+}
+
+// ============================================================
+// PHASE 6.3 — HOSPITALISATION
+// ============================================================
+
+/**
+ * Vérifie si une consultation est hospitalisable (non finalisée ou en observation)
+ */
+function isConsultationHospitalisable(consultation: any, status: string): boolean {
+  if (!consultation) return false;
+  if (consultation.statut === 'FINALISEE') return false;
+  return true;
+}
+
+/**
+ * Calcule le nombre de journées facturables depuis l'admission
+ * Règle : tranche complète ou commencée de 24h = 1 journée facturable
+ */
+export function calculateHospitalisationDays(admissionDate: string, referenceDate: string = new Date().toISOString()): number {
+  if (!admissionDate) return 0;
+  const admission = new Date(admissionDate).getTime();
+  const reference = new Date(referenceDate).getTime();
+  
+  if (reference <= admission) return 0;
+  
+  const diffMs = reference - admission;
+  const days = Math.ceil(diffMs / (24 * 60 * 60 * 1000));
+  return Math.max(1, days); // Minimum 1 journée après admission
+}
+
+/**
+ * Calcule le montant estimé pour une hospitalisation
+ */
+export function calculateHospitalisationCost(
+  admissionDate: string | null,
+  dateSortie: string | null,
+  tarifJournalier: number,
+  referenceDate: string = new Date().toISOString()
+): {
+  joursFacturables: number;
+  montantEstimeUsd: number;
+  statutFacturation: string;
+} {
+  if (!admissionDate) {
+    return {
+      joursFacturables: 0,
+      montantEstimeUsd: 0,
+      statutFacturation: 'DEMANDE EN ATTENTE — Aucune facturation avant admission'
+    };
+  }
+
+  const days = calculateHospitalisationDays(admissionDate, dateSortie || referenceDate);
+  const montant = Math.round(days * tarifJournalier * 100) / 100;
+
+  return {
+    joursFacturables: days,
+    montantEstimeUsd: montant,
+    statutFacturation: dateSortie 
+      ? `Séjour terminé — ${days} jour(s) facturés`
+      : 'Séjour en cours — Facturation mise à jour automatiquement'
+  };
+}
+
+/**
+ * Créer une demande d'hospitalisation
+ * POST /api/medical/hospitalisations/demander
+ */
+export async function demanderHospitalisation(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const { consultation_id, categorie_id, motif, observation_id } = req.body;
+    if (!consultation_id) {
+      res.status(400).json({ error: 'L\'identifiant de consultation est obligatoire.' });
+      return;
+    }
+    if (!categorie_id) {
+      res.status(400).json({ error: 'La catégorie d\'hospitalisation est obligatoire.' });
+      return;
+    }
+
+    // Récupérer la consultation
+    const consultation = await queryOne<any>(
+      `SELECT * FROM consultations WHERE id = ? AND actif = 1`,
+      [consultation_id]
+    );
+    if (!consultation) {
+      res.status(404).json({ error: 'Consultation introuvable.' });
+      return;
+    }
+
+    // Vérifier que c'est bien le médecin responsable
+    if (consultation.medecin_id !== user.id) {
+      res.status(403).json({ error: 'Vous ne pouvez pas hospitaliser un patient pris en charge par un confrère.' });
+      return;
+    }
+
+    // Vérifier que la consultation n'est pas finalisée
+    if (consultation.statut === 'FINALISEE') {
+      res.status(400).json({ error: 'Impossible d\'hospitaliser une consultation déjà finalisée.' });
+      return;
+    }
+
+    // Vérifier qu'une demande d'hospitalisation n'existe pas déjà pour cette consultation
+    const existingHosp = await queryOne<any>(
+      `SELECT id FROM hospitalisations WHERE consultation_id = ? AND statut IN ('DEMANDE', 'ADMISE', 'EN_SEJOUR') AND actif = 1`,
+      [consultation_id]
+    );
+    if (existingHosp) {
+      res.status(409).json({ error: 'Une demande d\'hospitalisation existe déjà pour cette consultation.' });
+      return;
+    }
+
+    // Récupérer la catégorie
+    const categorie = await queryOne<any>(
+      `SELECT * FROM hospitalisation_cATEGORIES WHERE id = ? AND actif = 1`,
+      [categorie_id]
+    );
+    if (!categorie) {
+      res.status(400).json({ error: 'Catégorie d\'hospitalisation invalide ou inactive.' });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const hospitalisationId = `hosp-${crypto.randomUUID().substring(0, 12)}`;
+    const noteId = `hospn-${crypto.randomUUID().substring(0, 12)}`;
+
+    await transaction(async () => {
+      // Créer la demande d'hospitalisation
+      await execute(
+        `INSERT INTO hospitalisations (
+          id, demande_id, consultation_id, visite_id, patient_id,
+          medecin_id, medecin_responsable_id, medecin_origine_id,
+          observation_id, categorie_id, tarif_journalier_usd, motif,
+          statut, date_demande, date_admission, instructions_sortie,
+          created_at, updated_at, actif
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DEMANDE', ?, NULL, NULL, ?, ?, 1)`,
+        [
+          hospitalisationId,
+          hospitalisationId,
+          consultation_id,
+          consultation.visite_id,
+          consultation.patient_id,
+          user.id,
+          user.id,
+          user.id,
+          observation_id || null,
+          categorie_id,
+          categorie.tarif_journalier_usd,
+          motif?.trim() || null,
+          now,
+          now,
+          now
+        ]
+      );
+
+      // Créer un événement d'admission (pour le suivi)
+      const eventId = `hevt-${crypto.randomUUID().substring(0, 12)}`;
+      await execute(
+        `INSERT INTO hospitalisation_evenements (
+          id, hospitalisation_id, type_evenement, medecin_id, details, date_evenement, created_at
+        ) VALUES (?, ?, 'DEMANDE', ?, ?, ?, ?)`,
+        [eventId, hospitalisationId, user.id, `Demande d'hospitalisation créée par Dr. ${user.nom_complet}`, now, now]
+      );
+
+      // Notification à la Caisse
+      await execute(
+        `INSERT INTO notifications (
+          id, user_id, titre, message, type, patient_id, consultation_id, lu, created_at
+        ) VALUES (?, 'usr-recep-01', 'Nouvelle demande d''hospitalisation', ?, 'HOSPITALISATION', ?, ?, 0, ?)`,
+        [
+          `notif-hosp-${Date.now()}`,
+          `Le patient ${consultation.patient_id} (consultation ${consultation_id}) a fait l'objet d'une demande d'hospitalisation en catégorie "${categorie.nom}" au tarif journalier de ${categorie.tarif_journalier_usd} USD.`,
+          consultation.patient_id,
+          consultation_id,
+          now
+        ]
+      );
+    });
+
+    await auditLogger.log({
+      userId: user.id,
+      action: 'HOSPITALISATION_DEMANDE_CREATE',
+      ressourceType: 'HOSPITALISATION',
+      ressourceId: hospitalisationId,
+      details: `Demande d'hospitalisation créée pour patient ${consultation.patient_id}, consultation ${consultation_id}, catégorie ${categorie.nom}`,
+      ipAddress: req.ip || '127.0.0.1'
+    });
+
+    res.status(201).json({
+      message: 'Demande d\'hospitalisation créée avec succès.',
+      hospitalisation: {
+        id: hospitalisationId,
+        consultation_id: consultation_id,
+        patient_id: consultation.patient_id,
+        categorie_id: categorie_id,
+        tarif_journalier_usd: categorie.tarif_journalier_usd,
+        motif: motif?.trim() || null,
+        statut: 'DEMANDE',
+        date_demande: now
+      }
+    });
+  } catch (error: any) {
+    console.error('Erreur création demande hospitalisation:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la création de la demande d\'hospitalisation.' });
+  }
+}
+
+/**
+ * Admettre un patient (entrée effective en hospitalisation)
+ * POST /api/medical/hospitalisations/:id/admettre
+ */
+export async function admettreHospitalisation(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const { id } = req.params;
+
+    const hospitalisation = await queryOne<any>(
+      `SELECT * FROM hospitalisations WHERE id = ? AND actif = 1`,
+      [id]
+    );
+    if (!hospitalisation) {
+      res.status(404).json({ error: 'Hospitalisation introuvable.' });
+      return;
+    }
+
+    // Vérifier la responsabilité médicale
+    if (hospitalisation.medecin_responsable_id !== user.id) {
+      res.status(403).json({ error: 'Vous ne pouvez pas admettre un patient qui n\'est pas sous votre responsabilité.' });
+      return;
+    }
+
+    if (hospitalisation.statut !== 'DEMANDE') {
+      res.status(400).json({ error: 'Seule une demande peut être admise.' });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    let joursFacturables = 0;
+    let montantEstimeUsd = 0;
+
+    await transaction(async () => {
+      // Admettre le patient
+      await execute(
+        `UPDATE hospitalisations SET statut = 'ADMISE', date_admission = ?, updated_at = ? WHERE id = ?`,
+        [now, now, id]
+      );
+
+      // Créer un événement d'admission
+      const eventId = `hevt-${crypto.randomUUID().substring(0, 12)}`;
+      await execute(
+        `INSERT INTO hospitalisation_evenements (
+          id, hospitalisation_id, type_evenement, medecin_id, details, date_evenement, created_at
+        ) VALUES (?, ?, 'ADMISSION', ?, ?, ?, ?)`,
+        [eventId, id, user.id, `Admission effective par Dr. ${user.nom_complet}`, now, now]
+      );
+
+      // Notification à la Caisse
+      await execute(
+        `INSERT INTO notifications (
+          id, user_id, titre, message, type, patient_id, consultation_id, lu, created_at
+        ) VALUES (?, 'usr-recep-01', 'Patient admis en hospitalisation', ?, 'HOSPITALISATION', ?, ?, 0, ?)`,
+        [
+          `notif-hosp-${Date.now()}`,
+          `Le patient vient d'être admis en hospitalisation. Catégorie: ${hospitalisation.categorie_id}, Tarif journalier: ${hospitalisation.tarif_journalier_usd} USD.`,
+          hospitalisation.patient_id,
+          hospitalisation.consultation_id,
+          now
+        ]
+      );
+    });
+
+    // Calculer les jours et montant
+    const daysResult = calculateHospitalisationCost(
+      now,
+      null,
+      hospitalisation.tarif_journalier_usd
+    );
+
+    await auditLogger.log({
+      userId: user.id,
+      action: 'HOSPITALISATION_ADMISSION',
+      ressourceType: 'HOSPITALISATION',
+      ressourceId: id,
+      details: `Patient admis en hospitalisation. Jours facturables: ${daysResult.joursFacturables}, Montant estimé: ${daysResult.montantEstimeUsd} USD`,
+      ipAddress: req.ip || '127.0.0.1'
+    });
+
+    res.json({
+      message: 'Patient admis avec succès.',
+      hospitalisation: {
+        ...hospitalisation,
+        statut: 'ADMISE',
+        date_admission: now
+      },
+      facturation: daysResult
+    });
+  } catch (error: any) {
+    console.error('Erreur admission hospitalisation:', error);
+    res.status(500).json({ error: 'Erreur interne lors de l\'admission.' });
+  }
+}
+
+/**
+ * Ajouter une note médicale pendant le séjour
+ * POST /api/medical/hospitalisations/:id/note
+ */
+export async function addHospitalisationNote(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const { id } = req.params;
+    const { note_texte } = req.body;
+
+    if (!note_texte || typeof note_texte !== 'string' || note_texte.trim().length < 1) {
+      res.status(400).json({ error: 'Le texte de la note est obligatoire.' });
+      return;
+    }
+
+    const hospitalisation = await queryOne<any>(
+      `SELECT * FROM hospitalisations WHERE id = ? AND actif = 1`,
+      [id]
+    );
+    if (!hospitalisation) {
+      res.status(404).json({ error: 'Hospitalisation introuvable.' });
+      return;
+    }
+
+    // Vérifier la responsabilité
+    if (hospitalisation.medecin_responsable_id !== user.id) {
+      res.status(403).json({ error: 'Vous ne pouvez pas modifier l\'hospitalisation d\'un confrère.' });
+      return;
+    }
+
+    if (hospitalisation.statut === 'SORTIE') {
+      res.status(400).json({ error: 'Cette hospitalisation est clôturée. Aucune note ne peut être ajoutée.' });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const noteId = `hospn-${crypto.randomUUID().substring(0, 12)}`;
+
+    await transaction(async () => {
+      // Créer la note
+      await execute(
+        `INSERT INTO hospitalisation_notes (id, hospitalisation_id, medecin_id, note_texte, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        [noteId, id, user.id, note_texte.trim(), now]
+      );
+
+      // Mettre à jour la note_clinique globale
+      const currentNote = hospitalisation.notes_medicales || '';
+      const timestamp = new Date(now).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+      const newNote = `[${timestamp}] Dr. ${user.nom_complet}: ${note_texte.trim()}`;
+      const updatedNote = currentNote ? currentNote + '\n\n' + newNote : newNote;
+      
+      await execute(
+        `UPDATE hospitalisations SET notes_medicales = ?, updated_at = ? WHERE id = ?`,
+        [updatedNote, now, id]
+      );
+    });
+
+    await auditLogger.log({
+      userId: user.id,
+      action: 'HOSPITALISATION_NOTE_ADDED',
+      ressourceType: 'HOSPITALISATION',
+      ressourceId: id,
+      details: `Note ajoutée à l'hospitalisation ${id} par Dr. ${user.nom_complet}`,
+      ipAddress: req.ip || '127.0.0.1'
+    });
+
+    res.json({ message: 'Note ajoutée avec succès.', note_id: noteId });
+  } catch (error: any) {
+    console.error('Erreur ajout note hospitalisation:', error);
+    res.status(500).json({ error: 'Erreur interne lors de l\'ajout de la note.' });
+  }
+}
+
+/**
+ * Sortir un patient (clôturer le séjour)
+ * POST /api/medical/hospitalisations/:id/sortie
+ */
+export async function sortirHospitalisation(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const { id } = req.params;
+    const { instructions_sortie, motif_sortie } = req.body;
+
+    const hospitalisation = await queryOne<any>(
+      `SELECT * FROM hospitalisations WHERE id = ? AND actif = 1`,
+      [id]
+    );
+    if (!hospitalisation) {
+      res.status(404).json({ error: 'Hospitalisation introuvable.' });
+      return;
+    }
+
+    if (hospitalisation.medecin_responsable_id !== user.id) {
+      res.status(403).json({ error: 'Vous ne pouvez pas sortir un patient qui n\'est pas sous votre responsabilité.' });
+      return;
+    }
+
+    if (hospitalisation.statut === 'SORTIE') {
+      res.status(400).json({ error: 'Ce patient a déjà étésorti.' });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const daysResult = calculateHospitalisationCost(
+      hospitalisation.date_admission,
+      now,
+      hospitalisation.tarif_journalier_usd
+    );
+
+    await transaction(async () => {
+      // Sortir le patient
+      await execute(
+        `UPDATE hospitalisations SET statut = 'SORTIE', date_sortie = ?, instructions_sortie = ?, notes_medicales = CASE WHEN notes_medicales IS NULL THEN ? ELSE notes_medicales END, updated_at = ? WHERE id = ?`,
+        [now, instructions_sortie?.trim() || null, motif_sortie?.trim() || null, now, id]
+      );
+
+      // Créer un événement de sortie
+      const eventId = `hevt-${crypto.randomUUID().substring(0, 12)}`;
+      await execute(
+        `INSERT INTO hospitalisation_evenements (
+          id, hospitalisation_id, type_evenement, medecin_id, details, date_evenement, created_at
+        ) VALUES (?, ?, 'SORTIE', ?, ?, ?, ?)`,
+        [eventId, id, user.id, `Sortie prononcée par Dr. ${user.nom_complet}. Instructions: ${instructions_sortie || 'Aucune'}`, now, now]
+      );
+
+      // Notification à la Caisse
+      await execute(
+        `INSERT INTO notifications (
+          id, user_id, titre, message, type, patient_id, consultation_id, lu, created_at
+        ) VALUES (?, 'usr-recep-01', 'Patient sorti de l\'hospitalisation', ?, 'HOSPITALISATION', ?, ?, 0, ?)`,
+        [
+          `notif-hosp-${Date.now()}`,
+          `Patientsorti de l'hospitalisation. ${daysResult.joursFacturables} jour(s) facturable(s), montant final: ${daysResult.montantEstimeUsd} USD.`,
+          hospitalisation.patient_id,
+          hospitalisation.consultation_id,
+          now
+        ]
+      );
+    });
+
+    await auditLogger.log({
+      userId: user.id,
+      action: 'HOSPITALISATION_SORTIE',
+      ressourceType: 'HOSPITALISATION',
+      ressourceId: id,
+      details: `Patientsorti. Jours facturés: ${daysResult.joursFacturables}, Montant: ${daysResult.montantEstimeUsd} USD`,
+      ipAddress: req.ip || '127.0.0.1'
+    });
+
+    res.json({
+      message: 'Patientsorti avec succès.',
+      hospitalisation: {
+        ...hospitalisation,
+        statut: 'SORTIE',
+        date_sortie: now
+      },
+      facturation: daysResult
+    });
+  } catch (error: any) {
+    console.error('Erreur sortie hospitalisation:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la sortie.' });
+  }
+}
+
+/**
+ * Récupérer les hospitalisations d'un médecin pour son dashboard
+ * GET /api/medical/hospitalisations
+ */
+export async function getDoctorHospitalisations(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const doctorId = user.id;
+    const { statut } = req.query;
+
+    const statFilter = statut ? `AND h.statut = '${statut}'` : '';
+    const statFilterActive = statut === 'SORTIE' ? 'AND h.statut = \'SORTIE\'' : 'AND h.statut IN (\'DEMANDE\', \'ADMISE\', \'EN_SEJOUR\')';
+
+    // Hospitalisations actives pour ce médecin (statut RESPONSABLE)
+    const hospitalisations = await query<any>(
+      `SELECT h.id, h.consultation_id, h.visite_id, h.patient_id, h.medecin_id, h.medecin_responsable_id,
+              h.medecin_origine_id, h.observation_id, h.categorie_id, h.tarif_journalier_usd,
+              h.motif, h.statut, h.date_demande, h.date_admission, h.date_sortie, h.instructions_sortie,
+              h.notes_medicales, h.created_at, h.updated_at,
+              p.numero_dossier, p.nom as patient_nom, p.prenom as patient_prenom,
+              v.numero_visite, v.date_arrivee,
+              c.statut as consultation_statut,
+              cat.nom as categorie_nom, cat.tarif_journalier_usd as tarif_cat,
+              u_nom.nom_complet as medecin_responsable_nom,
+              u_origine.nom_complet as medecin_origine_nom
+       FROM hospitalisations h
+       INNER JOIN patients p ON h.patient_id = p.id
+       INNER JOIN visites v ON h.visite_id = v.id
+       INNER JOIN consultations c ON h.consultation_id = c.id
+       INNER JOIN hospitalisation_cATEGORIES cat ON h.categorie_id = cat.id
+       INNER JOIN users u_nom ON h.medecin_responsable_id = u_nom.id
+       LEFT JOIN users u_origine ON h.medecin_origine_id = u_origine.id
+       WHERE h.medecin_responsable_id = ? AND h.actif = 1 ${statFilterActive}
+       ORDER BY h.created_at DESC`,
+      [doctorId]
+    );
+
+    // Enrichir avec les notes et événements
+    const enrichedHosp = await Promise.all(
+      hospitalisations.map(async (h: any) => {
+        const notes = await query<any>(
+          `SELECT hn.*, u.nom_complet as medecin_nom FROM hospitalisation_notes hn
+           INNER JOIN users u ON hn.medecin_id = u.id
+           WHERE hn.hospitalisation_id = ? ORDER BY hn.created_at ASC`,
+          [h.id]
+        );
+        const evenements = await query<any>(
+          `SELECT * FROM hospitalisation_evenements WHERE hospitalisation_id = ? ORDER BY date_evenement DESC`,
+          [h.id]
+        );
+
+        // Calculer la facturation
+        const facturation = calculateHospitalisationCost(
+          h.date_admission,
+          h.date_sortie,
+          h.tarif_journalier_usd
+        );
+
+        return {
+          ...h,
+          notes,
+          evenements,
+          facturation
+        };
+      })
+    );
+
+    res.json({ hospitalisations: enrichedHosp, total: enrichedHosp.length });
+  } catch (error: any) {
+    console.error('Erreur récupération hospitalisations:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la récupération des hospitalisations.' });
+  }
+}
+
+/**
+ * Récupérer le détail d'une hospitalisation
+ * GET /api/medical/hospitalisations/:id
+ */
+export async function getHospitalisationDetails(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const { id } = req.params;
+
+    const hospitalisation = await queryOne<any>(
+      `SELECT h.*, 
+              p.numero_dossier, p.nom as patient_nom, p.prenom as patient_prenom,
+              v.numero_visite, v.date_arrivee,
+              c.statut as consultation_statut, c.motif_consultation as consultation_motif,
+              cat.nom as categorie_nom, cat.tarif_journalier_usd as tarif_cat,
+              u_resp.nom_complet as medecin_responsable_nom,
+              u_origine.nom_complet as medecin_origine_nom
+       FROM hospitalisations h
+       INNER JOIN patients p ON h.patient_id = p.id
+       INNER JOIN visites v ON h.visite_id = v.id
+       INNER JOIN consultations c ON h.consultation_id = c.id
+       INNER JOIN hospitalisation_cATEGORIES cat ON h.categorie_id = cat.id
+       INNER JOIN users u_resp ON h.medecin_responsable_id = u_resp.id
+       LEFT JOIN users u_origine ON h.medecin_origine_id = u_origine.id
+       WHERE h.id = ? AND h.actif = 1`,
+      [id]
+    );
+
+    if (!hospitalisation) {
+      res.status(404).json({ error: 'Hospitalisation introuvable.' });
+      return;
+    }
+
+    // Vérifier l'accès (responsable ou origine)
+    if (hospitalisation.medecin_responsable_id !== user.id && 
+        hospitalisation.medecin_origine_id !== user.id) {
+      res.status(403).json({ error: 'Vous n\'avez pas accès à cette hospitalisation.' });
+      return;
+    }
+
+    const notes = await query<any>(
+      `SELECT hn.*, u.nom_complet as medecin_nom FROM hospitalisation_notes hn
+       INNER JOIN users u ON hn.medecin_id = u.id
+       WHERE hn.hospitalisation_id = ? ORDER BY hn.created_at ASC`,
+      [id]
+    );
+    const evenements = await query<any>(
+      `SELECT * FROM hospitalisation_evenements WHERE hospitalisation_id = ? ORDER BY date_evenement DESC`,
+      [id]
+    );
+    const facturation = calculateHospitalisationCost(
+      hospitalisation.date_admission,
+      hospitalisation.date_sortie,
+      hospitalisation.tarif_journalier_usd
+    );
+
+    res.json({
+      hospitalisation: {
+        ...hospitalisation,
+        notes,
+        evenements,
+        facturation
+      }
+    });
+  } catch (error: any) {
+    console.error('Erreur récupération détail hospitalisation:', error);
+    res.status(500).json({ error: 'Erreur interne lors du chargement de l\'hospitalisation.' });
+  }
+}
+
+/**
+ * Historique des hospitalisations d'un patient
+ * GET /api/medical/hospitalisations/history/:patient_id
+ */
+export async function getHospitalisationHistory(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const { patient_id } = req.params;
+
+    const patient = await queryOne<any>(
+      `SELECT id, nom, prenom, numero_dossier FROM patients WHERE id = ? AND actif = 1`,
+      [patient_id]
+    );
+    if (!patient) {
+      res.status(404).json({ error: 'Patient introuvable.' });
+      return;
+    }
+
+    const hospitalisations = await query<any>(
+      `SELECT h.*, 
+              p.nom as patient_nom, p.prenom as patient_prenom,
+              v.numero_visite, v.date_arrivee,
+              cat.nom as categorie_nom,
+              u_resp.nom_complet as medecin_responsable_nom
+       FROM hospitalisations h
+       INNER JOIN patients p ON h.patient_id = p.id
+       INNER JOIN visites v ON h.visite_id = v.id
+       INNER JOIN hospitalisation_cATEGORIES cat ON h.categorie_id = cat.id
+       INNER JOIN users u_resp ON h.medecin_responsable_id = u_resp.id
+       WHERE h.patient_id = ? AND h.actif = 1
+       ORDER BY h.created_at DESC`,
+      [patient_id]
+    );
+
+    const enrichedHosp = await Promise.all(
+      hospitalisations.map(async (h: any) => {
+        const notes = await query<any>(
+          `SELECT * FROM hospitalisation_notes WHERE hospitalisation_id = ? ORDER BY created_at ASC`,
+          [h.id]
+        );
+        const facturation = calculateHospitalisationCost(
+          h.date_admission,
+          h.date_sortie,
+          h.tarif_journalier_usd
+        );
+        return { ...h, notes, facturation };
+      })
+    );
+
+    res.json({ patient, hospitalisations: enrichedHosp, total: enrichedHosp.length });
+  } catch (error: any) {
+    console.error('Erreur récupération historique hospitalisations:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la récupération de l\'historique.' });
+  }
+}
+
+/**
+ * Get the active hospitalization for a consultation (if any)
+ */
+export async function getActiveHospitalisationByConsultation(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const { consultation_id } = req.params;
+    
+    const hosp = await queryOne<any>(
+      `SELECT * FROM hospitalisations 
+       WHERE consultation_id = ? AND statut IN ('DEMANDE', 'ADMISE', 'EN_SEJOUR') AND actif = 1
+       ORDER BY created_at DESC LIMIT 1`,
+      [consultation_id]
+    );
+
+    if (hosp) {
+      const facturation = calculateHospitalisationCost(
+        hosp.date_admission,
+        hosp.date_sortie,
+        hosp.tarif_journalier_usd
+      );
+      res.json({ hospitalisation: { ...hosp, facturation } });
+    } else {
+      res.json({ hospitalisation: null });
+    }
+  } catch (error: any) {
+    console.error('Erreur récupération hospitalisation active:', error);
+    res.status(500).json({ error: 'Erreur interne.' });
+  }
+}
+
+/**
+ * Update responsable médical (used when relais is accepted)
+ */
+export async function updateHospitalisationResponsable(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const { id } = req.params;
+    const { medecin_responsable_id } = req.body;
+
+    const hospitalisation = await queryOne<any>(
+      `SELECT * FROM hospitalisations WHERE id = ? AND actif = 1`,
+      [id]
+    );
+    if (!hospitalisation) {
+      res.status(404).json({ error: 'Hospitalisation introuvable.' });
+      return;
+    }
+
+    // Only the current responsible or the original doctor can transfer
+    if (hospitalisation.medecin_responsable_id !== user.id && 
+        hospitalisation.medecin_origine_id !== user.id) {
+      res.status(403).json({ error: 'Vous ne pouvez pas transférer cette hospitalisation.' });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    await execute(
+      `UPDATE hospitalisations 
+       SET medecin_responsable_id = ?, medecin_origine_id = ?, updated_at = ?
+       WHERE id = ?`,
+      [medecin_responsable_id, user.id, now, id]
+    );
+
+    // Event
+    const eventId = `hevt-${crypto.randomUUID().substring(0, 12)}`;
+    await execute(
+      `INSERT INTO hospitalisation_evenements (
+        id, hospitalisation_id, type_evenement, medecin_id, details, date_evenement, created_at
+      ) VALUES (?, ?, 'TRANSFERT', ?, ?, ?, ?)`,
+      [eventId, id, user.id, `Transfert de responsabilité à Dr. ${medecin_responsable_id}`, now, now]
+    );
+
+    await auditLogger.log({
+      userId: user.id,
+      action: 'HOSPITALISATION_RESPOSABLE_UPDATE',
+      ressourceType: 'HOSPITALISATION',
+      ressourceId: id,
+      details: `Responsabilité transférée à ${medecin_responsable_id}`,
+      ipAddress: req.ip || '127.0.0.1'
+    });
+
+    res.json({ success: true, message: 'Responsabilité transférée avec succès.' });
+  } catch (error: any) {
+    console.error('Erreur mise à jour responsable:', error);
+    res.status(500).json({ error: 'Erreur interne.' });
+  }
+}
+
+/**
+ * Check if a patient can be hospitalized (has active consultation or observation)
+ */
+export async function checkHospitalisationEligibility(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const { consultation_id } = req.query;
+
+    if (!consultation_id) {
+      res.status(400).json({ error: 'consultation_id est requis.' });
+      return;
+    }
+
+    // Handle array query params
+    const consultationId = Array.isArray(consultation_id) ? consultation_id[0] : consultation_id;
+    if (typeof consultationId !== 'string') {
+      res.status(400).json({ error: 'consultation_id doit être une chaîne.' });
+      return;
+    }
+
+    const consultation = await queryOne<any>(
+      `SELECT * FROM consultations WHERE id = ? AND actif = 1`,
+      [consultationId]
+    );
+
+    if (!consultation) {
+      res.status(404).json({ error: 'Consultation introuvable.' });
+      return;
+    }
+
+    if (consultation.medecin_id !== user.id) {
+      res.status(403).json({ error: 'Vous ne pouvez pas hospitaliser un patient pris en charge par un confrère.' });
+      return;
+    }
+
+    if (consultation.statut === 'FINALISEE') {
+      res.status(400).json({ 
+        error: 'Impossible d\'hospitaliser : cette consultation est déjà finalisée.',
+        eligible: false,
+        reason: 'CONSULTATION_FINALISEE'
+      });
+      return;
+    }
+
+    // Check if already hospitalized
+    const existingHosp = await queryOne<any>(
+      `SELECT id, statut FROM hospitalisations 
+       WHERE consultation_id = ? AND statut IN ('DEMANDE', 'ADMISE', 'EN_SEJOUR') AND actif = 1`,
+      [String(consultation_id)]
+    );
+
+    res.json({
+      eligible: true,
+      consultation,
+      existing_hospitalisation: existingHosp,
+      categories: await query<any>(
+        `SELECT * FROM hospitalisation_cATEGORIES WHERE actif = 1 ORDER BY tarif_journalier_usd ASC`
+      )
+    });
+  } catch (error: any) {
+    console.error('Erreur vérification éligibilité hospitalisation:', error);
+    res.status(500).json({ error: 'Erreur interne.' });
+  }
+}
+
+/**
+ * Get billable hospitalization details for Reception (Caisse)
+ */
+export async function getHospitalisationBill(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user) {
+      res.status(401).json({ error: 'Non authentifié.' });
+      return;
+    }
+
+    const { id } = req.params;
+
+    const hosp = await queryOne<any>(
+      `SELECT h.*, 
+              p.numero_dossier, p.nom as patient_nom, p.prenom as patient_prenom,
+              cat.nom as categorie_nom,
+              u_resp.nom_complet as medecin_responsable_nom
+       FROM hospitalisations h
+       INNER JOIN patients p ON h.patient_id = p.id
+       INNER JOIN hospitalisation_cATEGORIES cat ON h.categorie_id = cat.id
+       INNER JOIN users u_resp ON h.medecin_responsable_id = u_resp.id
+       WHERE h.id = ? AND h.actif = 1`,
+      [id]
+    );
+
+    if (!hosp) {
+      res.status(404).json({ error: 'Hospitalisation introuvable.' });
+      return;
+    }
+
+    const facturation = calculateHospitalisationCost(
+      hosp.date_admission,
+      hosp.date_sortie,
+      hosp.tarif_journalier_usd
+    );
+
+    // Check if already invoiced
+    const existingFacture = await queryOne<any>(
+      `SELECT f.id, f.montant_total, f.statut FROM factures f
+       JOIN facture_items fi ON f.id = fi.facture_id
+       WHERE f.visite_id = ? AND fi.categorie = 'HOSPITALISATION'
+       LIMIT 1`,
+      [hosp.visite_id]
+    );
+
+    res.json({
+      hospitalisation: hosp,
+      facturation,
+      facture_exists: !!existingFacture,
+      facture_id: existingFacture?.id || null
+    });
+  } catch (error: any) {
+    console.error('Erreur récupération facturation hospitalisation:', error);
+    res.status(500).json({ error: 'Erreur interne.' });
   }
 }

@@ -337,6 +337,7 @@ export interface DoctorQueueData {
     orientations: number;
     relais: number;
     observations: number;
+    hospitalisations: number;
   };
   quickAccessLists?: {
     patientsReçusAujourdhui: any[];
@@ -349,6 +350,7 @@ export interface DoctorQueueData {
     orientationsEnAttente: any[];
     relaisEnAttente: any[];
     observationsActives: Observation[];
+    hospitalisationsActives: Hospitalisation[];
   };
   queue: {
     attente: Visite[];
@@ -931,4 +933,94 @@ export interface RelaisMedical {
   motif_consultation?: string;
   diagnostic_principal?: string;
   date_consultation?: string;
+}
+
+// ========================================================
+// TYPES HOSPITALISATION (Phase 6.3)
+// ========================================================
+
+export type HospitalisationStatut = 'DEMANDE' | 'ADMISE' | 'EN_SEJOUR' | 'SORTIE';
+
+export type HospitalisationEventType = 'ADMISSION' | 'SORTIE' | 'TRANSFERT' | 'CRITICAL';
+
+export interface HospitalisationCategory {
+  id: string;
+  nom: string;
+  tarif_journalier_usd: number;
+  actif: boolean;
+  description?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface HospitalisationEvent {
+  id: string;
+  hospitalisation_id: string;
+  type_evenement: HospitalisationEventType;
+  medecin_id?: string | null;
+  details?: string | null;
+  date_evenement: string;
+  created_at: string;
+}
+
+export interface HospitalisationNote {
+  id: string;
+  hospitalisation_id: string;
+  medecin_id: string;
+  note_texte: string;
+  created_at: string;
+  medecin_nom?: string;
+}
+
+export interface HospitalisationFacturation {
+  joursFacturables: number;
+  montantEstimeUsd: number;
+  statutFacturation: string;
+}
+
+export interface Hospitalisation {
+  id: string;
+  demande_id?: string | null;
+  consultation_id: string;
+  visite_id: string;
+  patient_id: string;
+  medecin_id: string;
+  medecin_responsable_id: string;
+  medecin_origine_id?: string | null;
+  observation_id?: string | null;
+  categorie_id: string;
+  tarif_journalier_usd: number;
+  motif: string | null;
+  statut: HospitalisationStatut;
+  date_demande: string;
+  date_admission: string | null;
+  date_sortie: string | null;
+  instructions_sortie: string | null;
+  notes_medicales: string | null;
+  created_at: string;
+  updated_at: string;
+  // Données jointes
+  patient_nom?: string;
+  patient_prenom?: string;
+  numero_dossier?: string;
+  numero_visite?: string;
+  date_arrivee?: string;
+  consultation_statut?: string;
+  consultation_motif?: string;
+  categorie_nom?: string;
+  medecin_responsable_nom?: string;
+  medecin_origine_nom?: string;
+  // Données enrichies
+  notes?: HospitalisationNote[];
+  evenements?: HospitalisationEvent[];
+  facturation?: HospitalisationFacturation;
+}
+
+export interface HospitalisationEligibility {
+  eligible: boolean;
+  consultation?: Consultation | null;
+  existing_hospitalisation?: Hospitalisation | null;
+  categories: HospitalisationCategory[];
+  error?: string;
+  reason?: string;
 }

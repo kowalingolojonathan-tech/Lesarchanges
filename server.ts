@@ -207,6 +207,19 @@ app.post('/api/medical/lab-orders/:id/mark-viewed', requireAuth, requireRole(['M
   app.get('/api/medical/observations/history/:patient_id', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.getObservationHistory);
   app.patch('/api/medical/observations/:id', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.updateObservation);
 
+  // --- HOSPITALISATION (Phase 6.3) ---
+  app.post('/api/medical/hospitalisations/demander', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.demanderHospitalisation);
+  app.post('/api/medical/hospitalisations/:id/admettre', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.admettreHospitalisation);
+  app.post('/api/medical/hospitalisations/:id/note', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.addHospitalisationNote);
+  app.post('/api/medical/hospitalisations/:id/sortie', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.sortirHospitalisation);
+  app.get('/api/medical/hospitalisations', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.getDoctorHospitalisations);
+  app.get('/api/medical/hospitalisations/:id', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.getHospitalisationDetails);
+  app.get('/api/medical/hospitalisations/history/:patient_id', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.getHospitalisationHistory);
+  app.get('/api/medical/hospitalisations/active/:consultation_id', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.getActiveHospitalisationByConsultation);
+  app.put('/api/medical/hospitalisations/:id/responsable', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.updateHospitalisationResponsable);
+  app.get('/api/medical/hospitalisations/eligibility', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.checkHospitalisationEligibility);
+  app.get('/api/medical/hospitalisations/:id/bill', requireAuth, requireRole(['MÉDECIN', 'RÉCEPTION']), medicalCtrl.getHospitalisationBill);
+
   // --- NOTIFICATIONS SYSTÈME ---
   app.get('/api/notifications', requireAuth, medicalCtrl.getUserNotifications);
   app.patch('/api/notifications/:id/read', requireAuth, medicalCtrl.markNotificationRead);

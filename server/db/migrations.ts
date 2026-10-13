@@ -1759,6 +1759,141 @@ export async function runMigrations(): Promise<void> {
     console.error('Erreur lors de la migration observations (Phase 6.2):', err);
   }
 
+// Migration Phase 6.3 — Correction typo type_evenEMENT → type_evenement et ajout DEMANDE si nécessaire
+  try {
+    const evenSql = db.exec("SELECT sql FROM sqlite_master WHERE type='table' AND name='hospitalisation_evenements';");
+    if (evenSql.length > 0 && evenSql[0].values.length > 0) {
+      const sql = String(evenSql[0].values[0][0]);
+      if (sql.includes('type_evenEMENT') || !sql.includes('DEMANDE')) {
+        // Recréer la table avec les corrections
+        db.exec(`
+          PRAGMA foreign_keys = OFF;
+          CREATE TABLE hospitalisation_evenements_new (
+            id TEXT PRIMARY KEY,
+            hospitalisation_id TEXT NOT NULL,
+            type_evenement TEXT NOT NULL CHECK(type_evenement IN ('DEMANDE', 'ADMISSION', 'SORTIE', 'TRANSFERT', 'CRITICAL')),
+            medecin_id TEXT,
+            details TEXT,
+            date_evenement TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (hospitalisation_id) REFERENCES hospitalisations(id) ON DELETE CASCADE,
+            FOREIGN KEY (medecin_id) REFERENCES users(id) ON DELETE SET NULL
+          );
+          INSERT INTO hospitalisation_evenements_new (id, hospitalisation_id, type_evenement, medecin_id, details, date_evenement, created_at)
+          SELECT id, hospitalisation_id, CASE WHEN type_evenEMENT = 'DEMANDE' THEN 'DEMANDE' ELSE type_evenEMENT END, medecin_id, details, date_evenement, created_at FROM hospitalisation_evenements;
+          DROP TABLE hospitalisation_evenements;
+          ALTER TABLE hospitalisation_evenements_new RENAME TO hospitalisation_evenements;
+          CREATE INDEX IF NOT EXISTS idx_hosp_even_hosp ON hospitalisation_evenements(hospitalisation_id);
+          CREATE INDEX IF NOT EXISTS idx_hosp_even_type ON hospitalisation_evenements(type_evenement);
+          PRAGMA foreign_keys = ON;
+        `);
+      }
+    }
+  } catch (err) {
+    console.error('Erreur correction evenements:', err);
+  }
+
+  // Migration Phase 6.3 — Hospitalisation (demande, admission, séjour, sortie, tarification)
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS hospitalisation_cATEGORIES (
+        id TEXT PRIMARY KEY,
+        nom TEXT NOT NULL,
+        tarif_journalier_usd REAL NOT NULL DEFAULT 0 CHECK(tarif_journalier_usd >= 0),
+        actif INTEGER NOT NULL DEFAULT 1 CHECK(actif IN (0, 1)),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_hosp_cat_actif ON hospitalisation_cATEGORIES(actif);
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS hospitalisations (
+        id TEXT PRIMARY KEY,
+        demande_id TEXT,
+        consultation_id TEXT NOT NULL,
+        visite_id TEXT NOT NULL,
+        patient_id TEXT NOT NULL,
+        medecin_id TEXT NOT NULL,
+        medecin_responsable_id TEXT NOT NULL,
+        medecin_origine_id TEXT,
+        observation_id TEXT,
+        categorie_id TEXT NOT NULL,
+        tarif_journalier_usd REAL NOT NULL DEFAULT 0,
+        motif TEXT NOT NULL,
+        statut TEXT NOT NULL DEFAULT 'DEMANDE' CHECK(statut IN ('DEMANDE', 'ADMISE', 'EN_SEJOUR', 'SORTIE')),
+        date_demande TEXT NOT NULL,
+        date_admission TEXT,
+        date_sortie TEXT,
+        instructions_sortie TEXT,
+        notes_medicales TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (consultation_id) REFERENCES consultations(id) ON DELETE RESTRICT,
+        FOREIGN KEY (visite_id) REFERENCES visites(id) ON DELETE RESTRICT,
+        FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE RESTRICT,
+        FOREIGN KEY (medecin_id) REFERENCES users(id) ON DELETE RESTRICT,
+        FOREIGN KEY (medecin_responsable_id) REFERENCES users(id) ON DELETE RESTRICT,
+        FOREIGN KEY (medecin_origine_id) REFERENCES users(id) ON DELETE SET NULL,
+        FOREIGN KEY (observation_id) REFERENCES observations(id) ON DELETE SET NULL,
+        FOREIGN KEY (categorie_id) REFERENCES hospitalisation_cATEGORIES(id) ON DELETE RESTRICT
+      );
+      CREATE INDEX IF NOT EXISTS idx_hosp_consultation ON hospitalisations(consultation_id);
+      CREATE INDEX IF NOT EXISTS idx_hosp_patient ON hospitalisations(patient_id);
+      CREATE INDEX IF NOT EXISTS idx_hosp_medecin ON hospitalisations(medecin_responsable_id);
+      CREATE INDEX IF NOT EXISTS idx_hosp_statut ON hospitalisations(statut);
+      CREATE INDEX IF NOT EXISTS idx_hosp_categorie ON hospitalisations(categorie_id);
+      CREATE INDEX IF NOT EXISTS idx_hosp_observation ON hospitalisations(observation_id);
+
+      CREATE TABLE IF NOT EXISTS hospitalisation_notes (
+        id TEXT PRIMARY KEY,
+        hospitalisation_id TEXT NOT NULL,
+        medecin_id TEXT NOT NULL,
+        note_texte TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (hospitalisation_id) REFERENCES hospitalisations(id) ON DELETE CASCADE,
+        FOREIGN KEY (medecin_id) REFERENCES users(id) ON DELETE RESTRICT
+      );
+      CREATE INDEX IF NOT EXISTS idx_hosp_notes_hosp ON hospitalisation_notes(hospitalisation_id);
+      CREATE INDEX IF NOT EXISTS idx_hosp_notes_medecin ON hospitalisation_notes(medecin_id);
+      CREATE INDEX IF NOT EXISTS idx_hosp_notes_created ON hospitalisation_notes(created_at);
+
+      CREATE TABLE IF NOT EXISTS hospitalisation_evenements (
+        id TEXT PRIMARY KEY,
+        hospitalisation_id TEXT NOT NULL,
+        type_evenement TEXT NOT NULL CHECK(type_evenement IN ('DEMANDE', 'ADMISSION', 'SORTIE', 'TRANSFERT', 'CRITICAL')),
+        medecin_id TEXT,
+        details TEXT,
+        date_evenement TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (hospitalisation_id) REFERENCES hospitalisations(id) ON DELETE CASCADE,
+        FOREIGN KEY (medecin_id) REFERENCES users(id) ON DELETE SET NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_hosp_even_hosp ON hospitalisation_evenements(hospitalisation_id);
+      CREATE INDEX IF NOT EXISTS idx_hosp_even_type ON hospitalisation_evenements(type_evenement);
+    `);
+
+    // Migration pour tables existantes : ajouter colonne actif si manquante
+    const hospColsRes = db.exec("PRAGMA table_info(hospitalisations);");
+    if (hospColsRes.length > 0 && hospColsRes[0].values.length > 0) {
+      const hospCols = hospColsRes[0].values.map((v: any[]) => String(v[1]).toUpperCase());
+      if (!hospCols.includes('ACTIF')) {
+        db.exec("ALTER TABLE hospitalisations ADD COLUMN actif INTEGER NOT NULL DEFAULT 1 CHECK(actif IN (0, 1));");
+      }
+    }
+    
+    // Migration pour la table evenements
+    const evenColsRes = db.exec("PRAGMA table_info(hospitalisation_evenements);");
+    if (evenColsRes.length > 0 && evenColsRes[0].values.length > 0) {
+      const evenCols = evenColsRes[0].values.map((v: any[]) => String(v[1]).toUpperCase());
+      if (!evenCols.includes('DATE_EVENEMENT')) {
+        db.exec("ALTER TABLE hospitalisation_evenements ADD COLUMN date_evenement TEXT NOT NULL DEFAULT '' ;");
+      }
+    }
+  } catch (err) {
+    console.error('Erreur lors de la migration hospitalisations (Phase 6.3):', err);
+  }
+
   db.exec('PRAGMA foreign_keys = ON;');
   saveDb();
 }
