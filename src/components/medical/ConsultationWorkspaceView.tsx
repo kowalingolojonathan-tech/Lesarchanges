@@ -80,6 +80,11 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
   // 3. Hospitaliser le patient — Organiser l'admission et le s&eacute;jour hospitalier (Phase 6.3)
   const [showHospitalisationModal, setShowHospitalisationModal] = useState<boolean>(false);
 
+  // Allergies & amendement ( champs manquants non d&eacute;clar&eacute;s )
+  const [allergies, setAllergies] = useState<string>('');
+  const [editingAllergies, setEditingAllergies] = useState<boolean>(false);
+  const [amendementMotif, setAmendementMotif] = useState<string>('');
+
 
   // Prise en charge du patient
   const titrePriseEnCharge = "Prise en charge du patient";
@@ -607,7 +612,7 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
         conduite_a_tenir: conduiteATenir,
         notes_confidentielles: notesConfidentielles,
         statut: targetStatus,
-      };
+};
 
       if (consultation?.statut === 'FINALISEE') {
         payload.is_amendment = true;
@@ -3237,7 +3242,188 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
         </div>
       )}
 
+      {/* Modal: Hospitalisation (Phase 6.3) */}
+      {showHospitalisationModal && (
+        <HospitalisationModal
+          consultationId={consultationId}
+          patientId={consultation?.patient_id}
+          patientName={`${consultation?.patient_nom} ${consultation?.patient_prenom}`}
+          onClose={() => setShowHospitalisationModal(false)}
+          onSuccess={() => {
+            setShowHospitalisationModal(false);
+            fetchConsultation(true);
+          }}
+        />
+      )}
+
     </div>
   );
 
+};
+
+// ============================================================================
+// COMPONENT: HospitalisationModal (Phase 6.3)
+// ============================================================================
+interface HospitalisationModalProps {
+  consultationId: string;
+  patientId?: string | null;
+  patientName: string;
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+export const HospitalisationModal: React.FC<HospitalisationModalProps> = ({
+  consultationId,
+  patientId,
+  patientName,
+  onClose,
+  onSuccess,
+}) => {
+  const [categories, setCategories] = useState<any[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<string>('');
+  const [motif, setMotif] = useState<string>('');
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [existingHosp, setExistingHosp] = useState<any>(null);
+
+  useEffect(() => {
+    const loadEligibility = async () => {
+      try {
+        const res = await apiFetch(`/api/medical/hospitalisations/eligibility?consultation_id=${consultationId}`);
+        if (res.ok) {
+          const data = await res.json();
+          setCategories(data.categories || []);
+          if (data.existing_hospitalisation) {
+            setExistingHosp(data.existing_hospitalisation);
+          }
+        }
+      } catch (err) {
+        console.error('Erreur chargement éligibilité hospitalisation:', err);
+      }
+    };
+    loadEligibility();
+  }, [consultationId]);
+
+  const handleSubmit = async () => {
+    if (!selectedCategory) {
+      setError('Veuillez sélectionner une catégorie d\'hospitalisation.');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const res = await apiFetch('/api/medical/hospitalisations/demander', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          consultation_id: consultationId,
+          categorie_id: selectedCategory,
+          motif: motif.trim() || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erreur lors de la création');
+      setSuccess('Demande d\'hospitalisation créée avec succès.');
+      setTimeout(() => {
+        onClose();
+        onSuccess();
+      }, 1500);
+    } catch (err: any) {
+      setError(err.message || 'Impossible de créer la demande.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[85vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+        <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-indigo-50">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-5 h-5 text-indigo-700" />
+            <h2 className="text-sm font-bold text-slate-900">Hospitalisation</h2>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+        </div>
+        <div className="p-4 space-y-4 overflow-y-auto flex-1">
+          <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-600">
+            <strong>Consultation en cours :</strong> {patientName}
+          </div>
+
+          {existingHosp && (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+              <strong>Une hospitalisation existe déjà :</strong> {existingHosp.statut}
+              (N°{existingHosp.id})
+            </div>
+          )}
+
+          {error && (
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-700 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              {error}
+            </div>
+          )}
+          {success && (
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-700 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+              {success}
+            </div>
+          )}
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+              Catégorie d'hospitalisation *
+            </label>
+            {categories.length > 0 ? (
+              <select
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="">Sélectionner une catégorie...</option>
+                {categories.map((cat) => (
+                  <option key={cat.id} value={cat.id}>
+                    {cat.nom} — {cat.tarif_journalier_usd} USD/jour
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <div className="text-xs text-slate-400 italic">Chargement des catégories...</div>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+              Motif de l'hospitalisation (facultatif)
+            </label>
+            <textarea
+              value={motif}
+              onChange={(e) => setMotif(e.target.value)}
+              placeholder="Décrire le motif médical de l'hospitalisation..."
+              rows={3}
+              className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+            />
+          </div>
+        </div>
+        <div className="p-4 border-t border-slate-200 flex gap-2 bg-slate-50">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-2 text-sm font-semibold text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
+          >
+            Annuler
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={loading || !selectedCategory}
+            className="flex-1 px-4 py-2 text-sm font-semibold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+          >
+            {loading ? <Loader className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
+            Créer la demande
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 };

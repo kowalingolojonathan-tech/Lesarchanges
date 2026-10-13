@@ -31,6 +31,8 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
   const [activeObservationId, setActiveObservationId] = useState<string | null>(null);
   const [activeObservation, setActiveObservation] = useState<any>(null);
   const [showObservationDetail, setShowObservationDetail] = useState<boolean>(false);
+  const [activeHospitalisation, setActiveHospitalisation] = useState<any>(null);
+  const [showHospitalisationDetail, setShowHospitalisationDetail] = useState<boolean>(false);
 
   // Rendez-vous planifiés state
   const [showRdvCreateModal, setShowRdvCreateModal] = useState<boolean>(false);
@@ -2189,6 +2191,111 @@ export const DoctorDashboardView: React.FC<DoctorDashboardViewProps> = ({ onNavi
         />
       )}
 
+      {/* Modal: Hospitalisations actives */}
+      {activeModal === 'hospitalisations' && (() => {
+        const items = modalData.hospitalisations.items;
+        return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setActiveModal(null)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-indigo-50">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-indigo-700" />
+                <h2 className="text-sm font-bold text-slate-900">Hospitalisations actives ({modalData.hospitalisations.count})</h2>
+              </div>
+              <button onClick={() => setActiveModal(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+            </div>
+            <div className="overflow-y-auto flex-1 p-4">
+              {items.length > 0 ? (
+                <div className="space-y-3">
+                  {items.map((h: any) => {
+                    const statutColor = h.statut === 'DEMANDE' ? 'bg-amber-100 text-amber-800' :
+                                      h.statut === 'ADMISE' ? 'bg-blue-100 text-blue-800' :
+                                      h.statut === 'EN_SEJOUR' ? 'bg-indigo-100 text-indigo-800' : 'bg-slate-100 text-slate-800';
+                    const statutLabel = h.statut === 'DEMANDE' ? 'Demande' :
+                                       h.statut === 'ADMISE' ? 'Admise' :
+                                       h.statut === 'EN_SEJOUR' ? 'En séjour' : h.statut;
+                    return (
+                      <div key={h.id} className="p-3 bg-indigo-50 rounded-lg border border-indigo-200">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-xs font-bold text-slate-800">{h.patient_nom} {h.patient_prenom}</span>
+                              <span className="text-[10px] text-slate-500 font-mono">{h.numero_dossier}</span>
+                              <span className="text-[10px] text-slate-400 font-mono">Visite N°{h.numero_visite}</span>
+                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${statutColor}`}>{statutLabel}</span>
+                            </div>
+                            <div className="text-[11px] text-slate-500 mt-0.5">
+                              Catégorie: <strong className="text-slate-700">{h.categorie_nom}</strong>
+                              {h.motif && <span className="ml-2">• Motif: {h.motif}</span>}
+                            </div>
+                            <div className="text-[10px] text-slate-400 mt-0.5">
+                              Demande: {new Date(h.date_demande).toLocaleString('fr-FR')}
+                              {h.date_admission && <span> • Admission: {new Date(h.date_admission).toLocaleString('fr-FR')}</span>}
+                            </div>
+                            <div className="text-[10px] text-indigo-600 mt-0.5 font-semibold">
+                              Tarif: {h.tarif_journalier_usd} USD/jour
+                            </div>
+                          </div>
+                          <div className="flex gap-1.5 shrink-0">
+                            {h.statut === 'DEMANDE' && (
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    const res = await apiFetch(`/api/medical/hospitalisations/${h.id}/admettre`, { method: 'POST' });
+                                    if (res.ok) {
+                                      setActiveModal(null);
+                                      fetchDoctorQueue();
+                                    }
+                                  } catch {}
+                                }}
+                                className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold rounded-lg transition-colors"
+                              >
+                                Admettre
+                              </button>
+                            )}
+                            <button
+                              onClick={async () => {
+                                try {
+                                  const res = await apiFetch(`/api/medical/hospitalisations/${h.id}`);
+                                  if (res.ok) {
+                                    const data = await res.json();
+                                    setActiveHospitalisation(data.hospitalisation);
+                                    setShowHospitalisationDetail(true);
+                                    setActiveModal(null);
+                                  }
+                                } catch {}
+                              }}
+                              className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold rounded-lg transition-colors"
+                            >
+                              Détails
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="py-8 text-center text-slate-400 text-sm">
+                  <ShieldCheck className="w-8 h-8 mx-auto text-slate-300 mb-2" />
+                  Aucune hospitalisation active pour le moment.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* Modal: Détail d'une hospitalisation */}
+      {showHospitalisationDetail && activeHospitalisation && (
+        <HospitalisationDetailView
+          hospitalisation={activeHospitalisation}
+          onBack={() => { setShowHospitalisationDetail(false); fetchDoctorQueue(); }}
+          onUpdate={() => { fetchDoctorQueue(); }}
+        />
+      )}
+
     </div>
   );
 };
@@ -2383,6 +2490,201 @@ export const ObservationDetailView: React.FC<ObservationDetailViewProps> = ({ ob
             <CheckCircle2 className="w-3.5 h-3.5" />
             Clôturer l'observation
           </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ============================================================================
+// COMPONENT: HospitalisationDetailView (Phase 6.3)
+// ============================================================================
+interface HospitalisationDetailViewProps {
+  hospitalisation: any;
+  onBack: () => void;
+  onUpdate: () => void;
+}
+
+export const HospitalisationDetailView: React.FC<HospitalisationDetailViewProps> = ({ hospitalisation, onBack, onUpdate }) => {
+  const [noteText, setNoteText] = useState<string>('');
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [hospData, setHospData] = useState<any>(hospitalisation);
+
+  const fetchHosp = async () => {
+    try {
+      const res = await apiFetch(`/api/medical/hospitalisations/${hospData.id}`);
+      if (res.ok) {
+        const data = await res.json();
+        setHospData(data.hospitalisation);
+      }
+    } catch {}
+  };
+
+  const handleAddNote = async () => {
+    if (!noteText.trim()) return;
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const res = await apiFetch(`/api/medical/hospitalisations/${hospData.id}/note`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note_texte: noteText.trim() })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erreur lors de l\'ajout de la note');
+      setNoteText('');
+      setSuccess('Note ajoutée avec succès.');
+      await fetchHosp();
+      onUpdate();
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err: any) {
+      setError(err.message || 'Impossible d\'ajouter la note.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSortie = async () => {
+    if (!window.confirm('Êtes-vous sûr de vouloir程序er la sortie de ce patient ?')) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await apiFetch(`/api/medical/hospitalisations/${hospData.id}/sortie`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Erreur lors de la sortie');
+      setSuccess('Patient sorti avec succès.');
+      setTimeout(() => {
+        onBack();
+      }, 1500);
+    } catch (err: any) {
+      setError(err.message || 'Impossible de程序er la sortie.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const statutColor = hospData?.statut === 'DEMANDE' ? 'bg-amber-100 text-amber-800' :
+                     hospData?.statut === 'ADMISE' ? 'bg-blue-100 text-blue-800' :
+                     hospData?.statut === 'EN_SEJOUR' ? 'bg-indigo-100 text-indigo-800' : 'bg-slate-100 text-slate-800';
+  const statutLabel = hospData?.statut === 'DEMANDE' ? 'Demande' :
+                     hospData?.statut === 'ADMISE' ? 'Admise' :
+                     hospData?.statut === 'EN_SEJOUR' ? 'En séjour' : hospData?.statut || 'Inconnu';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={onBack}>
+      <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[85vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+        {/* Header */}
+        <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-indigo-50">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-5 h-5 text-indigo-700" />
+            <div>
+              <h2 className="text-sm font-bold text-slate-900">Détail Hospitalisation</h2>
+              <p className="text-[10px] text-slate-500">
+                {hospData?.patient_nom} {hospData?.patient_prenom} — N°{hospData?.numero_dossier}
+                <span className={`ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold ${statutColor}`}>{statutLabel}</span>
+              </p>
+            </div>
+          </div>
+          <button onClick={onBack} className="text-slate-400 hover:text-slate-600 text-xl leading-none">&times;</button>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {error && (
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-700">{error}</div>
+          )}
+          {success && (
+            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-700">{success}</div>
+          )}
+
+          {/* Informations générales */}
+          <div className="bg-slate-50 rounded-lg p-3 text-xs space-y-1">
+            <div className="flex gap-4 flex-wrap">
+              <span><strong>Consultation:</strong> {hospData?.consultation_id}</span>
+              <span><strong>Visite:</strong> N°{hospData?.numero_visite}</span>
+              <span><strong>Catégorie:</strong> {hospData?.categorie_nom}</span>
+              <span><strong>Tarif:</strong> {hospData?.tarif_journalier_usd} USD/jour</span>
+            </div>
+            {hospData?.motif && (
+              <div className="pt-1 border-t border-slate-200">
+                <strong>Motif:</strong> {hospData.motif}
+              </div>
+            )}
+            <div className="flex gap-4 flex-wrap pt-1">
+              <span><strong>Demande:</strong> {new Date(hospData?.date_demande).toLocaleString('fr-FR')}</span>
+              {hospData?.date_admission && (
+                <span><strong>Admission:</strong> {new Date(hospData.date_admission).toLocaleString('fr-FR')}</span>
+              )}
+            </div>
+          </div>
+
+          {/* Notes médicales */}
+          <div>
+            <h3 className="text-xs font-bold text-slate-700 mb-2 flex items-center gap-1">
+              <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
+              Notes médicales & suivi
+            </h3>
+            <div className="bg-slate-50 rounded-lg border border-slate-200 p-3 min-h-[80px] max-h-[150px] overflow-y-auto text-xs space-y-2">
+              {hospData?.notes && hospData.notes.length > 0 ? (
+                hospData.notes.map((note: any) => (
+                  <div key={note.id} className="border-l-2 border-indigo-300 pl-3 py-1">
+                    <div className="text-[10px] text-slate-400 font-mono">
+                      {new Date(note.created_at).toLocaleString('fr-FR')}
+                    </div>
+                    <div className="text-slate-700 mt-0.5">{note.note_texte}</div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-slate-400 italic">Aucune note enregistrée.</div>
+              )}
+            </div>
+          </div>
+
+          {/* Formulaire d'ajout de note */}
+          {(hospData?.statut === 'ADMISE' || hospData?.statut === 'EN_SEJOUR') && (
+            <div className="bg-white rounded-lg border border-slate-200 p-3 space-y-2">
+              <label className="block text-xs font-semibold text-slate-700">Ajouter une note médicale</label>
+              <textarea
+                value={noteText}
+                onChange={(e) => setNoteText(e.target.value)}
+                placeholder="Suivi clinique, évolution, décisions thérapeutiques..."
+                rows={2}
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={handleAddNote}
+                  disabled={loading || !noteText.trim()}
+                  className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {loading ? 'Enregistrement...' : 'Ajouter la note'}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer actions */}
+        <div className="shrink-0 bg-slate-50 px-4 py-3 border-t border-slate-200 flex justify-end gap-2">
+          <button
+            onClick={onBack}
+            className="px-4 py-2 text-xs font-semibold text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
+          >
+            Retour
+          </button>
+          {(hospData?.statut === 'DEMANDE' || hospData?.statut === 'ADMISE' || hospData?.statut === 'EN_SEJOUR') && (
+            <button
+              onClick={handleSortie}
+              disabled={loading}
+              className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1.5"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+             程序er la sortie
+            </button>
+          )}
         </div>
       </div>
     </div>
