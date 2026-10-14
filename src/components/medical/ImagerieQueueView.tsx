@@ -239,6 +239,40 @@ export const ImagerieQueueView: React.FC = () => {
     }
   };
 
+  const handleSubmitForValidation = async (demandeId: string) => {
+    try {
+      const res = await apiFetch(`/api/medical/imagerie-demande/${demandeId}/submit-for-validation`, {
+        method: 'POST'
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Erreur soumission');
+      }
+      setSuccess('Demande soumise pour validation avec succès');
+      fetchDemandes();
+      setSelectedDemande(null);
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  const handleTransmit = async (demandeId: string) => {
+    try {
+      const res = await apiFetch(`/api/medical/imagerie-demande/${demandeId}/transmit`, {
+        method: 'POST'
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Erreur transmission');
+      }
+      setSuccess('Résultat transmis au médecin prescripteur');
+      fetchDemandes();
+      setSelectedDemande(null);
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
   const handleAmend = async (demandeId: string) => {
     try {
       const demande = demandes.find(d => d.id === demandeId);
@@ -488,7 +522,7 @@ export const ImagerieQueueView: React.FC = () => {
                         </div>
 
                         {/* Actions du service d'imagerie */}
-                        {user?.role === 'LABORATOIRE' && (
+                        {user?.role === 'IMAGERIE' && (
                           <div className="flex flex-wrap gap-2 pt-2">
                             {demande.statut === 'DEMANDE_CREEE' && (
                               <button
@@ -519,9 +553,7 @@ export const ImagerieQueueView: React.FC = () => {
                             )}
                             {demande.statut === 'RESULTATS_SAISIS' && (
                               <button
-                                onClick={() => {
-                                  // Soumettre pour validation
-                                }}
+                                onClick={() => handleSubmitForValidation(demande.id)}
                                 className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-medium rounded-lg hover:bg-indigo-700 flex items-center gap-1"
                               >
                                 <ShieldCheck className="w-3 h-3" />
@@ -538,19 +570,37 @@ export const ImagerieQueueView: React.FC = () => {
                               </button>
                             )}
                             {demande.statut === 'RESULTAT_VALIDE' && (
-                              <button
-                                onClick={() => handleAmend(demande.id)}
-                                className="px-3 py-1.5 bg-orange-600 text-white text-xs font-medium rounded-lg hover:bg-orange-700 flex items-center gap-1"
-                              >
-                                <RefreshCw className="w-3 h-3" />
-                                Amender le compte rendu
-                              </button>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={() => handleTransmit(demande.id)}
+                                  className="px-3 py-1.5 bg-green-600 text-white text-xs font-medium rounded-lg hover:bg-green-700 flex items-center gap-1"
+                                >
+                                    <ArrowRight className="w-3 h-3" />
+                                    Transmettre au médecin
+                                  </button>
+                                <button
+                                  onClick={() => handleAmend(demande.id)}
+                                  className="px-3 py-1.5 bg-orange-600 text-white text-xs font-medium rounded-lg hover:bg-orange-700 flex items-center gap-1"
+                                >
+                                  <RefreshCw className="w-3 h-3" />
+                                  Amender
+                                </button>
+                              </div>
                             )}
                             {demande.statut === 'TRANSMIS_AU_MEDECIN' && (
-                              <span className="px-3 py-1.5 bg-slate-100 text-slate-600 text-xs font-medium rounded-lg flex items-center gap-1">
-                                <CheckCircle2 className="w-3 h-3" />
-                                Transmis
-                              </span>
+                              <div className="flex gap-2">
+                                <span className="px-3 py-1.5 bg-green-100 text-green-700 text-xs font-medium rounded-lg flex items-center gap-1">
+                                  <CheckCircle2 className="w-3 h-3" />
+                                  Transmis au médecin
+                                </span>
+                                <button
+                                  onClick={() => handleAmend(demande.id)}
+                                  className="px-3 py-1.5 bg-orange-600 text-white text-xs font-medium rounded-lg hover:bg-orange-700 flex items-center gap-1"
+                                >
+                                  <RefreshCw className="w-3 h-3" />
+                                  Amender
+                                </button>
+                              </div>
                             )}
                           </div>
                         )}

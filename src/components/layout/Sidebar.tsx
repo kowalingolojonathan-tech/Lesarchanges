@@ -48,6 +48,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const isAdmin = ['ADMINISTRATEUR', 'ADMIN'].includes(user.role) || user.role_categorie === 'ADMINISTRATEUR';
   const isReception = ['RÉCEPTION', 'RECEPTION'].includes(user.role) || user.role_categorie === 'RÉCEPTION';
   const isLab = ['LABORATOIRE', 'LABO'].includes(user.role) || user.role_categorie === 'LABORATOIRE';
+  const isImagerie = user.role === 'IMAGERIE' || user.role_categorie === 'IMAGERIE';
 
   // Définition des items de navigation par rôle
   const navItems = [
@@ -85,20 +86,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Consultations & Actes',
       badge: 'V1 Socle',
       icon: Stethoscope,
-      roles: ['MÉDECIN'],
+      roles: ['MÉDECIN', 'IMAGERIE'],
     },
     {
       id: 'doctor-reports',
       label: 'Rapports / Historique',
       icon: FileText,
-      roles: ['MÉDECIN'],
+      roles: ['MÉDECIN', 'IMAGERIE'],
     },
     {
       id: 'doctor-relais',
       label: 'Relais Médical',
       badge: '6.1',
       icon: RefreshCw,
-      roles: ['MÉDECIN'],
+      roles: ['MÉDECIN', 'IMAGERIE'],
     },
     // Menus pour IMAGERIE MÉDICALE
     {
@@ -106,7 +107,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Imagerie Médicale',
       badge: '7.1',
       icon: Scan,
-      roles: ['MÉDECIN'],
+      roles: ['MÉDECIN', 'IMAGERIE'],
     },
     // Menus pour LABORATOIRE
     {
@@ -173,6 +174,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     if (isDoctor && (item.roles.includes('MÉDECIN') || item.id === 'dashboard')) return true;
     if (isReception && (item.roles.includes('RÉCEPTION') || item.id === 'dashboard')) return true;
     if (isLab && (item.roles.includes('LABORATOIRE') || item.id === 'dashboard')) return true;
+    if (isImagerie && (item.roles.includes('IMAGERIE') || item.id === 'dashboard')) return true;
 
     return item.roles.includes(user.role) || (user.role_categorie ? item.roles.includes(user.role_categorie) : false);
   });
