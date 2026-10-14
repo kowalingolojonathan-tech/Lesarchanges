@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Scan, Camera, Activity, Brain, ShieldCheck, AlertCircle,
   Loader, FileText, CheckCircle2, Clock, XCircle,
-  UserCircle, ArrowRight, RefreshCw
+  UserCircle, ArrowRight, RefreshCw, Coins, Eye
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { apiFetch } from '../../lib/api';
@@ -51,6 +51,7 @@ export const ImagerieQueueView: React.FC = () => {
   const [success, setSuccess] = useState<string | null>(null);
   const [demandes, setDemandes] = useState<ImagerieDemande[]>([]);
   const [filterStatut, setFilterStatut] = useState<string>('all');
+  const [filterPaiement, setFilterPaiement] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [selectedDemande, setSelectedDemande] = useState<ImagerieDemande | null>(null);
 
@@ -148,7 +149,10 @@ export const ImagerieQueueView: React.FC = () => {
       d.patient_nom?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       d.numero_demande?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       d.numero_dossier?.toLowerCase().includes(searchTerm.toLowerCase());
-    return matchStatut && matchSearch;
+    const matchPaiement = filterPaiement === 'all' ||
+      (filterPaiement === 'paye' && d.facture_id !== null) ||
+      (filterPaiement === 'non_paye' && d.facture_id === null);
+    return matchStatut && matchSearch && matchPaiement;
   });
 
   const handleTakeCharge = async (demandeId: string) => {
@@ -347,6 +351,45 @@ export const ImagerieQueueView: React.FC = () => {
                 </button>
               </div>
             </div>
+
+            {/* Filtre par paiement */}
+            <div className="flex items-center gap-1.5 bg-slate-200/60 p-1 rounded-lg w-fit">
+              <button
+                type="button"
+                onClick={() => setFilterPaiement('all')}
+                className={`px-2.5 py-1 text-xs font-bold rounded-md transition-colors cursor-pointer ${
+                  filterPaiement === 'all'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Tous
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilterPaiement('paye')}
+                className={`px-2.5 py-1 text-xs font-bold rounded-md transition-colors cursor-pointer flex items-center gap-1 ${
+                  filterPaiement === 'paye'
+                    ? 'bg-emerald-700 text-white shadow-xs'
+                    : 'text-emerald-800 hover:bg-emerald-100/60'
+                }`}
+              >
+                <Coins className="w-3 h-3" />
+                Payé
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilterPaiement('non_paye')}
+                className={`px-2.5 py-1 text-xs font-bold rounded-md transition-colors cursor-pointer flex items-center gap-1 ${
+                  filterPaiement === 'non_paye'
+                    ? 'bg-rose-700 text-white shadow-xs'
+                    : 'text-rose-800 hover:bg-rose-100/60'
+                }`}
+              >
+                <Eye className="w-3 h-3" />
+                En attente
+              </button>
+            </div>
           </div>
 
           {/* Liste des demandes */}
@@ -372,6 +415,17 @@ export const ImagerieQueueView: React.FC = () => {
                           {demande.urgence === 'URGENTE' && (
                             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700 border border-rose-200">
                               URGENT
+                            </span>
+                          )}
+                          {demande.facture_id !== null && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-0.5">
+                              <Coins className="w-3 h-3" />
+                              Payé
+                            </span>
+                          )}
+                          {demande.facture_id === null && demande.statut === 'DEMANDE_CREEE' && (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                              En attente paiement
                             </span>
                           )}
                         </div>

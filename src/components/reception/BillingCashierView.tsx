@@ -22,7 +22,7 @@ export const BillingCashierView: React.FC = () => {
   const [factures, setFactures] = useState<Facture[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'NON PAYÉ' | 'PARTIELLEMENT PAYÉ' | 'PAYÉ'>('ALL');
-  const [prestationFilter, setPrestationFilter] = useState<'ALL' | 'LABORATOIRE' | 'CONSULTATION'>('ALL');
+  const [prestationFilter, setPrestationFilter] = useState<'ALL' | 'LABORATOIRE' | 'CONSULTATION' | 'IMAGERIE'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Taux officiel actuel
@@ -412,10 +412,17 @@ export const BillingCashierView: React.FC = () => {
     return false;
   };
 
+  const isImagerieFacture = (f: Facture) => {
+    if (f.type_prestation === 'IMAGERIE') return true;
+    if (f.items && f.items.some(it => it.categorie === 'IMAGERIE' || (it.description && it.description.toLowerCase().includes('imagerie')))) return true;
+    return false;
+  };
+
   const filteredFactures = factures.filter(f => {
     if (statusFilter !== 'ALL' && f.statut !== statusFilter) return false;
     if (prestationFilter === 'LABORATOIRE' && !isLabFacture(f)) return false;
-    if (prestationFilter === 'CONSULTATION' && isLabFacture(f)) return false;
+    if (prestationFilter === 'CONSULTATION' && (isLabFacture(f) || isImagerieFacture(f))) return false;
+    if (prestationFilter === 'IMAGERIE' && !isImagerieFacture(f)) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       const patientMatch = (f.patient_nom && f.patient_nom.toLowerCase().includes(q)) || 
@@ -587,6 +594,17 @@ export const BillingCashierView: React.FC = () => {
                 }`}
               >
                 <span>🔬 Examens Labo (Reçus & Factures)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPrestationFilter('IMAGERIE')}
+                className={`px-2.5 py-1 text-xs font-bold rounded-md transition-colors cursor-pointer flex items-center space-x-1 ${
+                  prestationFilter === 'IMAGERIE'
+                    ? 'bg-violet-700 text-white shadow-xs'
+                    : 'text-violet-800 hover:bg-violet-100/60'
+                }`}
+              >
+                <span>🖥️ Imagerie (Reçus & Factures)</span>
               </button>
               <button
                 type="button"

@@ -619,6 +619,8 @@ export interface ImagerieDemande {
   commentaire?: string | null;
   amendement_motif?: string | null;
   facture_id?: string | null;
+  facture_montant_usd?: number | null;
+  facture_montant_fc?: number | null;
   medecin_realisateur_id?: string | null;
   medecin_validateur_id?: string | null;
   medecin_realisateur_nom?: string | null;

@@ -1561,3 +1561,301 @@ export async function collectLabOrderPayment(req: Request, res: Response): Promi
     res.status(500).json({ error: err.message || 'Erreur lors de l\'encaissement du bon d\'examen.' });
   }
 }
+
+/**
+ * Récupérer les examens d'imagerie en attente d'encaissement à la réception/caisse
+ * GET /api/billing/imagerie-orders-to-collect
+ */
+export async function getImagerieOrdersToCollect(req: Request, res: Response): Promise<void> {
+  const authReq = req as AuthenticatedRequest;
+  const user = authReq.user;
+  if (!user) {
+    res.status(401).json({ error: 'Non authentifié.' });
+    return;
+  }
+
+  try {
+    const orders = await queryAll<any>(
+      `SELECT di.id, di.numero_demande, di.date_demande, di.urgence, di.statut, di.facture_id,
+              di.amendement_motif, di.categorie,
+              pat.id as patient_id, pat.nom as patient_nom, pat.prenom as patient_prenom, pat.numero_dossier,
+              pat.telephone as patient_telephone,
+              v.numero_visite, v.id as visite_id,
+              u.nom_complet as medecin_nom,
+              f.statut as statut_facture, f.montant_total as montant_total_facture, f.notes as notes_facture
+       FROM demandes_imagerie di
+       JOIN patients pat ON di.patient_id = pat.id
+       JOIN visites v ON di.visite_id = v.id
+       JOIN users u ON di.medecin_id = u.id
+       LEFT JOIN factures f ON di.facture_id = f.id
+       WHERE di.statut NOT IN ('TERMINEE', 'ANNULEE')
+       ORDER BY di.created_at DESC`
+    );
+
+    const settingRate = await queryOne("SELECT value FROM clinic_settings WHERE key = 'EXCHANGE_RATE_USD_FC' OR key = 'EXCHANGE_RATE_USD_CDF' LIMIT 1");
+    const tauxActuel = settingRate && settingRate.value ? parseFloat(settingRate.value) : 2850;
+
+    const enriched = await Promise.all(
+      orders.map(async (ord) => {
+        let finDetails: any = null;
+        if (ord.facture_id) {
+          finDetails = await getFactureFinancialDetails(ord.facture_id);
+        }
+
+        const isDerogation = (ord.notes_facture && ord.notes_facture.includes('DÉROGATION')) ||
+                             (ord.amendement_motif && ord.amendement_motif.includes('DÉROGATION'));
+        const motifDerogation = isDerogation ? (ord.notes_facture || ord.amendement_motif) : null;
+
+        let statutPaiement = finDetails ? finDetails.statut : (ord.statut_facture || 'NON PAYÉ');
+        if (statutPaiement === 'NON PAYÉ' && isDerogation) {
+          statutPaiement = 'NON PAYÉ (Avec Dérogation)';
+        }
+
+        // Calcul du montant à partir du tarif IMAGERIE si pas de facture
+        let montantTotalUsd = finDetails ? finDetails.montant_total_usd : 0;
+        if (!finDetails) {
+          const tarifRow = await queryOne<any>(
+            `SELECT prix_usd FROM tarifs WHERE categorie = 'IMAGERIE' AND nom LIKE ? AND actif = 1 LIMIT 1`,
+            [ord.categorie ? `%${ord.categorie}%` : '%']
+          );
+          if (tarifRow && tarifRow.prix_usd != null) {
+            montantTotalUsd = parseFloat(tarifRow.prix_usd);
+          } else {
+            // Fallback : prendre le tarif IMAGERIE le moins cher
+            const fallback = await queryOne<any>(
+              `SELECT prix_usd FROM tarifs WHERE categorie = 'IMAGERIE' AND actif = 1 ORDER BY prix_usd ASC LIMIT 1`
+            );
+            montantTotalUsd = fallback && fallback.prix_usd ? parseFloat(fallback.prix_usd) : 25;
+          }
+        }
+
+        const montantTotalFc = Math.round(montantTotalUsd * tauxActuel);
+        const soldeUsd = finDetails ? finDetails.solde_usd : (statutPaiement === 'PAYÉ' ? 0 : montantTotalUsd);
+        const soldeFc = Math.round(soldeUsd * tauxActuel);
+        const totalPayeUsd = finDetails ? finDetails.total_paye_usd : 0;
+
+        return {
+          id: ord.id,
+          numero_demande: ord.numero_demande,
+          date_demande: ord.date_demande,
+          urgence: ord.urgence,
+          statut: ord.statut,
+          categorie: ord.categorie || null,
+          patient_id: ord.patient_id,
+          patient_nom: ord.patient_nom,
+          patient_prenom: ord.patient_prenom,
+          numero_dossier: ord.numero_dossier,
+          patient_telephone: ord.patient_telephone,
+          visite_id: ord.visite_id,
+          numero_visite: ord.numero_visite,
+          medecin_nom: ord.medecin_nom,
+          facture_id: ord.facture_id,
+          statut_paiement: statutPaiement,
+          is_derogation: Boolean(isDerogation),
+          motif_derogation: motifDerogation,
+          montant_total_usd: montantTotalUsd,
+          montant_total_fc: montantTotalFc,
+          solde_usd: soldeUsd,
+          solde_fc: soldeFc,
+          total_paye_usd: totalPayeUsd,
+          taux_usd_fc: tauxActuel
+        };
+      })
+    );
+
+    res.json({
+      success: true,
+      imagerie_orders: enriched,
+      en_attente_encaissement: enriched.filter(o => o.solde_usd > 0.01 && !o.is_derogation)
+    });
+  } catch (err: any) {
+    console.error('Erreur getImagerieOrdersToCollect:', err);
+    res.status(500).json({ error: 'Erreur interne lors de la récupération des examens d\'imagerie à encaisser.' });
+  }
+}
+
+/**
+ * Enregistrer un règlement d'examens d'imagerie par la réception/caisse
+ * POST /api/billing/imagerie-orders/:id/collect
+ */
+export async function collectImagerieOrderPayment(req: Request, res: Response): Promise<void> {
+  const authReq = req as AuthenticatedRequest;
+  const user = authReq.user;
+  if (!user) {
+    res.status(401).json({ error: 'Non authentifié.' });
+    return;
+  }
+
+  const { id } = req.params; // imagerie_demande_id
+  const {
+    type_reglement = 'PAYE',
+    montant_paye,
+    devise = 'USD',
+    mode_paiement = 'ESPECES',
+    reference_transaction,
+    motif
+  } = req.body;
+
+  try {
+    const imgOrder = await queryOne<any>(
+      `SELECT di.*, pat.nom as patient_nom, pat.prenom as patient_prenom, pat.numero_dossier
+       FROM demandes_imagerie di
+       JOIN patients pat ON di.patient_id = pat.id
+       WHERE di.id = ?`,
+      [id]
+    );
+
+    if (!imgOrder) {
+      res.status(404).json({ error: 'Demande d\'imagerie introuvable.' });
+      return;
+    }
+
+    let factureId = imgOrder.facture_id;
+    if (!factureId) {
+      // Rechercher un tarif pour créer la facture
+      const tarifRow = await queryOne<any>(
+        `SELECT id, nom, prix_usd FROM tarifs WHERE categorie = 'IMAGERIE' AND (
+          (? IS NULL OR LOWER(nom) LIKE LOWER(?))
+          OR LOWER(nom) LIKE '%echographie%' OR LOWER(nom) LIKE '%radiographie%'
+        ) AND actif = 1 ORDER BY CASE WHEN (? IS NOT NULL AND LOWER(nom) LIKE LOWER(?)) THEN 1 ELSE 2 END LIMIT 1`,
+        [imgOrder.categorie, imgOrder.categorie ? `%${imgOrder.categorie}%` : null,
+         imgOrder.categorie, imgOrder.categorie ? `%${imgOrder.categorie}%` : null]
+      );
+
+      const itemPrice = tarifRow?.prix_usd ? parseFloat(tarifRow.prix_usd) : 25;
+      const itemDescription = tarifRow?.nom || (imgOrder.categorie ? `${imgOrder.categorie} — Imagerie` : 'Examen d\'imagerie');
+
+      const factureResult = await createLinkedFactureCore({
+        patient_id: imgOrder.patient_id,
+        visite_id: imgOrder.visite_id,
+        type_prestation: 'IMAGERIE',
+        items: [{
+          description: itemDescription,
+          categorie: 'IMAGERIE',
+          quantite: 1,
+          prix_unitaire: itemPrice,
+          tarif_id: tarifRow?.id || null
+        }],
+        emise_par_id: user.id,
+        notes: `Facture émise à l'encaissement réception pour la demande d'imagerie n° ${imgOrder.numero_demande}`,
+        ip_address: req.ip || '127.0.0.1'
+      });
+      factureId = factureResult.facture.id;
+      await execute('UPDATE demandes_imagerie SET facture_id = ? WHERE id = ?', [factureId, id]);
+    }
+
+    const now = new Date().toISOString();
+
+    if (type_reglement === 'NON_PAYE') {
+      if (!motif || typeof motif !== 'string' || motif.trim().length < 4) {
+        res.status(400).json({ error: 'Un motif explicite est strictement obligatoire pour autoriser un examen non payé à la caisse (ex: Urgence vitale, Entente administrative).' });
+        return;
+      }
+
+      const notesStr = `[DÉROGATION CAISSE ACCUEIL - Par ${user.nom_complet}] Motif : ${motif.trim()}`;
+      await execute(
+        `UPDATE factures SET notes = COALESCE(notes || ' | ', '') || ?, updated_at = ? WHERE id = ?`,
+        [notesStr, now, factureId]
+      );
+      await execute(
+        `UPDATE demandes_imagerie SET amendement_motif = ?, updated_at = ? WHERE id = ?`,
+        [notesStr, now, id]
+      );
+
+      // Marquer les notifications liées comme lues
+      await execute(
+        `UPDATE notifications SET lu = 1, lu_le = ? WHERE imagerie_demande_id = ? OR (type = 'IMAGERIE_DEMANDE' AND visite_id = ?)`,
+        [now, id, imgOrder.visite_id]
+      );
+
+      saveDb();
+
+      res.json({
+        success: true,
+        message: 'Dérogation financière enregistrée avec succès. La demande est débloquée pour l\'imagerie.',
+        statut_paiement: 'NON PAYÉ (Avec Dérogation)',
+        motif: motif.trim()
+      });
+      return;
+    }
+
+    const finDetails = await getFactureFinancialDetails(factureId);
+    if (!finDetails) {
+      res.status(404).json({ error: 'Détails financiers introuvables.' });
+      return;
+    }
+
+    if (finDetails.solde_usd <= 0.005 || finDetails.statut === 'PAYÉ') {
+      await execute(
+        `UPDATE notifications SET lu = 1, lu_le = ? WHERE imagerie_demande_id = ? OR (type = 'IMAGERIE_DEMANDE' AND visite_id = ?)`,
+        [now, id, imgOrder.visite_id]
+      );
+      saveDb();
+
+      const lastPayment = await queryOne<any>(
+        `SELECT * FROM paiements WHERE facture_id = ? ORDER BY date_paiement DESC, created_at DESC LIMIT 1`,
+        [factureId]
+      );
+
+      res.json({
+        success: true,
+        already_paid: true,
+        message: 'Cette facture est déjà intégralement payée. La demande d\'imagerie est débloquée.',
+        recu: lastPayment?.numero_recu || `REC-IMG-${imgOrder.numero_demande || imgOrder.id}`,
+        paiement: lastPayment || {
+          montant_paye: finDetails.total_paye_usd || finDetails.montant_total_usd,
+          devise: 'USD',
+          mode_paiement: 'DÉJÀ ENCAISSÉ',
+          statut_paiement: 'PAYÉ',
+          date_paiement: now,
+          numero_recu: `REC-IMG-${imgOrder.numero_demande || imgOrder.id}`
+        },
+        facture: finDetails
+      });
+      return;
+    }
+
+    const devisePaiement = devise === 'CDF' ? 'FC' : devise;
+    let verser = parseFloat(String(montant_paye));
+    if (isNaN(verser) || verser <= 0) {
+      verser = devisePaiement === 'USD' ? finDetails.solde_usd : Math.round(finDetails.solde_usd * 2850);
+    }
+    if (devisePaiement === 'USD' && verser > finDetails.solde_usd) {
+      verser = finDetails.solde_usd;
+    } else if (devisePaiement === 'FC') {
+      const maxFc = Math.round(finDetails.solde_usd * 2850);
+      if (verser > maxFc) {
+        verser = maxFc;
+      }
+    }
+
+    const paymentResult = await processPaiementDirectCore({
+      facture_id: factureId,
+      montant_paye: verser,
+      devise: devisePaiement as 'USD' | 'FC',
+      mode_paiement,
+      reference_transaction,
+      notes: `Règlement examen d'imagerie n° ${imgOrder.numero_demande} perçu à l'accueil/caisse`,
+      encaisse_par_id: user.id,
+      ip_address: req.ip || '127.0.0.1'
+    });
+
+    await execute(
+      `UPDATE notifications SET lu = 1, lu_le = ? WHERE imagerie_demande_id = ? OR (type = 'IMAGERIE_DEMANDE' AND visite_id = ?)`,
+      [now, id, imgOrder.visite_id]
+    );
+
+    saveDb();
+
+    res.json({
+      success: true,
+      message: `Paiement enregistré avec succès (${paymentResult.paiement.montant_paye} ${paymentResult.paiement.devise}). La demande d'imagerie est débloquée.`,
+      recu: paymentResult.recu,
+      paiement: paymentResult.paiement,
+      facture: paymentResult.facture
+    });
+  } catch (err: any) {
+    console.error('Erreur collectImagerieOrderPayment:', err);
+    res.status(500).json({ error: err.message || 'Erreur lors de l\'encaissement de la demande d\'imagerie.' });
+  }
+}

@@ -14,6 +14,7 @@ import {
 import { PatientHistoryModal } from './PatientHistoryModal';
 import { PrescriptionManager } from './PrescriptionManager';
 import { LabOrderManager } from './LabOrderManager';
+import { ImagerieOrderManager } from './ImagerieOrderManager';
 import { FollowUpAppointmentSection } from './FollowUpAppointmentSection';
 import { apiFetch } from '../../lib/api';
 
@@ -855,6 +856,13 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
           className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 whitespace-nowrap min-h-[34px]"
         >
           🔬 Laboratoire
+        </button>
+        <button
+          type="button"
+          onClick={() => document.getElementById('sec_imagerie')?.scrollIntoView({ behavior: 'smooth' })}
+          className="px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 whitespace-nowrap min-h-[34px]"
+        >
+          🖥️ Imagerie
         </button>
         <button
           type="button"
@@ -2455,7 +2463,20 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
             />
           </div>
 
-          {/* 3. RENDEZ-VOUS — pleine largeur, en bas de la page */}
+          {/* 3. IMAGERIE — pleine largeur, sous les analyses */}
+          <div id="sec_imagerie" className="w-full">
+            <ImagerieOrderManager
+              consultationId={consultation.id}
+              patientId={consultation.patient_id}
+              visiteId={consultation.visite_id}
+              isConsultationFinalized={isFinalized}
+              isAmendmentMode={isAmendmentMode}
+              amendementMotif={amendementMotif}
+              onOrdersUpdated={() => fetchConsultation(true)}
+            />
+          </div>
+
+          {/* 4. RENDEZ-VOUS — pleine largeur, en bas de la page */}
           <div id="sec_suivi" className="w-full">
             <FollowUpAppointmentSection
               consultationId={consultation.id}
@@ -2468,7 +2489,7 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
             />
           </div>
 
-          {/* 4. ORIENTATIONS VERS SPÉCIALISTES */}
+          {/* 5. ORIENTATIONS VERS SPÉCIALISTES */}
           <div id="sec_orientations" className="w-full">
             <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
               <div className="p-4 bg-gradient-to-r from-purple-900 to-violet-900 text-white flex items-center justify-between">

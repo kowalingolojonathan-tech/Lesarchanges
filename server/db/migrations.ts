@@ -880,7 +880,8 @@ export async function runMigrations(): Promise<void> {
         { name: 'emetteur_nom', type: 'TEXT' },
         { name: 'emetteur_role', type: 'TEXT' },
         { name: 'destinataire_role', type: 'TEXT' },
-        { name: 'lu_le', type: 'TEXT' }
+        { name: 'lu_le', type: 'TEXT' },
+        { name: 'imagerie_demande_id', type: 'TEXT' }
       ];
       for (const col of addCols) {
         if (!notifCols.includes(col.name)) {
@@ -1960,6 +1961,19 @@ export async function runMigrations(): Promise<void> {
     `);
   } catch (err) {
     console.error('Erreur lors de la migration imagerie (Phase 7.1):', err);
+  }
+
+  // --- PHASE 7.1 ÉTAPE 3A : CATEGORIE D'EXAMEN DANS LES DEMANDES IMAGERIE ---
+  try {
+    const imgColsRes = db.exec("PRAGMA table_info(demandes_imagerie);");
+    if (imgColsRes.length > 0 && imgColsRes[0].values.length > 0) {
+      const imgCols = imgColsRes[0].values.map((v: any[]) => String(v[1]).toUpperCase());
+      if (!imgCols.includes('CATEGORIE')) {
+        db.exec("ALTER TABLE demandes_imagerie ADD COLUMN categorie TEXT;");
+      }
+    }
+  } catch (err) {
+    console.error('Erreur migration colonne categorie demandes_imagerie:', err);
   }
 
   // --- PHASE 7.1 ÉTAPE 3 : AMENDEMENTS IMAGERIE ---

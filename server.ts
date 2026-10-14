@@ -131,6 +131,10 @@ async function startServer() {
   app.post('/api/billing/lab-orders/:id/collect', requireAuth, requireRole(['RÉCEPTION', 'ADMINISTRATEUR']), billingCtrl.collectLabOrderPayment);
   app.post('/api/billing/lab-orders-to-collect/:id/pay', requireAuth, requireRole(['RÉCEPTION', 'ADMINISTRATEUR']), billingCtrl.collectLabOrderPayment);
 
+  // Encaissement des examens d'imagerie par la Réception (agissant comme Caisse)
+  app.get('/api/billing/imagerie-orders-to-collect', requireAuth, requireRole(['RÉCEPTION', 'ADMINISTRATEUR', 'MÉDECIN']), billingCtrl.getImagerieOrdersToCollect);
+  app.post('/api/billing/imagerie-orders/:id/collect', requireAuth, requireRole(['RÉCEPTION', 'ADMINISTRATEUR']), billingCtrl.collectImagerieOrderPayment);
+
   // --- ROUTES API PHASE 2B : ESPACE MÉDECIN, CONSULTATIONS CLINIQUES & HISTORIQUE MÉDICAL ---
   // Protection RBAC stricte : Seul le rôle MÉDECIN peut accéder à ces données confidentielles.
   // ADMINISTRATEUR, RÉCEPTION et LABORATOIRE reçoivent un 403 Forbidden systématique.

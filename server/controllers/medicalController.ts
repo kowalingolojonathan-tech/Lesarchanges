@@ -8182,6 +8182,41 @@ export async function getHospitalisationBill(req: AuthenticatedRequest, res: Res
  * POST /api/medical/imagerie-demandes
  * Rôle strict : MÉDECIN
  */
+/**
+ * Recherche un tarif IMAGERIE correspondant à une catégorie d'examen.
+ * Retourne l'objet tarif ou null si aucun ne correspond.
+ */
+async function findImagerieTarif(categorie: string): Promise<any> {
+  if (!categorie || typeof categorie !== 'string') return null;
+
+  // Recherche directe par nom contenant la catégorie (insensible à la casse)
+  const tarifs = await query<any>(
+    `SELECT id, nom, prix_usd, categorie FROM tarifs
+     WHERE categorie = 'IMAGERIE' AND actif = 1 AND LOWER(nom) LIKE LOWER(?)
+     ORDER BY prix_usd DESC LIMIT 1`,
+    [`%${categorie}%`]
+  );
+  if (tarifs.length > 0) return tarifs[0];
+
+  // Recherche générique par catégorie
+  const generic = await query<any>(
+    `SELECT id, nom, prix_usd, categorie FROM tarifs
+     WHERE categorie = 'IMAGERIE' AND actif = 1
+     ORDER BY CASE
+       WHEN LOWER(nom) LIKE '%echographie%' THEN 1
+       WHEN LOWER(nom) LIKE '%radiographie%' THEN 2
+       ELSE 3
+     END LIMIT 1`,
+    []
+  );
+  return generic.length > 0 ? generic[0] : null;
+}
+
+/**
+ * CRÉER UNE DEMANDE D'IMAGERIE DEPUIS UNE CONSULTATION
+ * POST /api/medical/imagerie-demandes
+ * Rôle strict : MÉDECIN
+ */
 export async function createImagerieDemande(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const user = req.user;
@@ -8194,7 +8229,8 @@ export async function createImagerieDemande(req: AuthenticatedRequest, res: Resp
       consultation_id,
       indication_clinique,
       commentaire,
-      urgence
+      urgence,
+      categorie
     } = req.body || {};
 
     if (!consultation_id || typeof consultation_id !== 'string') {
@@ -8257,7 +8293,20 @@ export async function createImagerieDemande(req: AuthenticatedRequest, res: Resp
       return;
     }
 
-    // 7. Générer les clés et insérer
+    // 7. Chercher un tarif IMAGERIE correspondant à la catégorie
+    let tarifRow: any = null;
+    if (categorie) {
+      tarifRow = await findImagerieTarif(categorie);
+    }
+    // Fallback : prendre le tarif IMAGERIE le moins cher disponible
+    if (!tarifRow) {
+      const fallback = await queryOne<any>(
+        `SELECT id, nom, prix_usd FROM tarifs WHERE categorie = 'IMAGERIE' AND actif = 1 ORDER BY prix_usd ASC LIMIT 1`
+      );
+      tarifRow = fallback;
+    }
+
+    // 8. Générer les clés et insérer
     const now = new Date().toISOString();
     const orderId = 'dli-' + crypto.randomUUID().substring(0, 12);
     const randSuffix = crypto.randomBytes(3).toString('hex').toUpperCase();
@@ -8267,21 +8316,62 @@ export async function createImagerieDemande(req: AuthenticatedRequest, res: Resp
       await execute(
         `INSERT INTO demandes_imagerie (
           id, numero_demande, consultation_id, patient_id, visite_id, medecin_id,
-          date_demande, statut, urgence, indication_clinique, commentaire,
+          date_demande, statut, urgence, indication_clinique, commentaire, categorie,
           medecin_realisateur_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           orderId, numeroDemande, consultation.id, consultation.patient_id,
           consultation.visite_id, user.id,
           now, 'DEMANDE_CREEE', targetUrgence,
           indication_clinique?.trim() || null,
           commentaire?.trim() || null,
+          categorie?.trim() || null,
           user.id, now, now
         ]
       );
     });
 
-    // 8. Récupérer la demande créée avec jointures
+    // 9. Créer ou rattacher une facture liée si un tarif est trouvé
+    let factureId: string | null = null;
+    if (tarifRow && tarifRow.id) {
+      try {
+        const invoiceResult = await createLinkedFactureCore({
+          patient_id: consultation.patient_id,
+          visite_id: consultation.visite_id,
+          type_prestation: 'IMAGERIE',
+          items: [{
+            tarif_id: tarifRow.id,
+            description: tarifRow.nom,
+            categorie: 'IMAGERIE',
+            quantite: 1,
+            prix_unitaire: tarifRow.prix_usd
+          }],
+          emise_par_id: user.id,
+          notes: `Facture imagerie — demande n° ${numeroDemande}`,
+          ip_address: req.ip || '127.0.0.1'
+        });
+
+        if (!invoiceResult.isDuplicate && invoiceResult.facture?.id) {
+          factureId = invoiceResult.facture.id;
+          await execute(
+            `UPDATE demandes_imagerie SET facture_id = ?, updated_at = ? WHERE id = ?`,
+            [factureId, now, orderId]
+          );
+        } else if (invoiceResult.facture?.id) {
+          // Doublon détecté : rattacher l'ID de la facture existante
+          factureId = invoiceResult.facture.id;
+          await execute(
+            `UPDATE demandes_imagerie SET facture_id = ?, updated_at = ? WHERE id = ?`,
+            [factureId, now, orderId]
+          );
+        }
+      } catch (invErr) {
+        // En cas d'erreur de facturation, on conserve la demande sans facture liée
+        console.error('Erreur création facture imagerie:', invErr);
+      }
+    }
+
+    // 10. Récupérer la demande créée avec jointures
     const createdDemande = await queryOne<any>(
       `SELECT di.*, p.numero_dossier, pat.nom as patient_nom, pat.prenom as patient_prenom,
               pat.date_naissance as patient_date_naissance, pat.sexe as patient_sexe,
@@ -8296,7 +8386,7 @@ export async function createImagerieDemande(req: AuthenticatedRequest, res: Resp
       [orderId]
     );
 
-    // 9. Notification à la réception
+    // 11. Notification à la réception / caisse
     try {
       const receptionUsers = await query<any>(
         `SELECT u.id FROM users u WHERE (u.role = 'RÉCEPTION' OR u.role = 'RECEPTION') AND u.actif = 1`
@@ -8306,13 +8396,13 @@ export async function createImagerieDemande(req: AuthenticatedRequest, res: Resp
         await execute(
           `INSERT INTO notifications (
             id, user_id, emetteur_id, emetteur_nom, emetteur_role, destinataire_role,
-            titre, message, type, patient_id, consultation_id, visite_id, lu, created_at
-          ) VALUES (?, ?, ?, ?, ?, 'RÉCEPTION', ?, ?, 'IMAGERIE_DEMANDE', ?, ?, ?, 0, ?)`,
+            titre, message, type, patient_id, consultation_id, visite_id, imagerie_demande_id, lu, created_at
+          ) VALUES (?, ?, ?, ?, ?, 'RÉCEPTION', ?, ?, 'IMAGERIE_DEMANDE', ?, ?, ?, ?, 0, ?)`,
           [
             notifId, recUser.id, user.id, user.nom_complet, user.role,
             'Nouvelle demande d\'imagerie : ' + (createdDemande?.patient_nom || 'Patient'),
             'Demande n° ' + numeroDemande + ' par Dr. ' + user.nom_complet + '. Patient : ' + (createdDemande?.patient_nom || '') + ' ' + (createdDemande?.patient_prenom || ''),
-            consultation.patient_id, consultation.id, consultation.visite_id, now
+            consultation.patient_id, consultation.id, consultation.visite_id, orderId, now
           ]
         );
       }
@@ -8320,9 +8410,19 @@ export async function createImagerieDemande(req: AuthenticatedRequest, res: Resp
       console.error('Erreur notification réception imagerie:', notifErr);
     }
 
+    // 12. Réponse enrichie avec les infos de facturation
+    let factureDetails: any = null;
+    if (factureId) {
+      try {
+        factureDetails = await getFactureFinancialDetails(factureId);
+      } catch (_) {}
+    }
+
     res.status(201).json({
       message: 'Demande d\'imagerie créée avec succès.',
-      demande: createdDemande
+      demande: createdDemande,
+      facture_id: factureId,
+      facture_details: factureDetails
     });
   } catch (error: any) {
     console.error('Erreur création demande imagerie:', error);
