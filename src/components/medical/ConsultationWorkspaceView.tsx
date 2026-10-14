@@ -87,78 +87,9 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
 
 
   // Prise en charge du patient
-  const titrePriseEnCharge = "Prise en charge du patient";
+  const titrePriseEnCharge = "PRISE EN CHARGE DU PATIENT";
   // Mode amendement pour consultation finalisée
   const [isAmendmentMode, setIsAmendmentMode] = useState<boolean>(false);
-
-  const sectionTitle = "Prise en charge du patient";
-
-  // Modale historique
-
-  // Section: Prise en charge du patient
-  const sectionContent = (
-    <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200 shadow-xs">
-      <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2.5 flex items-center justify-between">
-        <span>{sectionTitle}</span>
-        <span className="text-[10px] text-emerald-500 bg-emerald-50 px-2 py-0.5 rounded font-semibold">Poste Clinique</span>
-      </div>
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-7 gap-2">
-        {/* Bouton Relais médical */}
-        <button
-          type="button"
-          onClick={() => setShowRelaisModal(true)}
-          className="p-2.5 bg-cyan-50/60 hover:bg-cyan-100/80 border border-cyan-200 rounded-xl flex flex-col items-center justify-center text-center transition-all min-h-[56px] group relative"
-        >
-          <div className="relative">
-            <RefreshCw className="w-5 h-5 text-cyan-700 mb-1" />
-            {(relaisDestinataires.length ?? 0) > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
-                {relaisDestinataires.length}
-              </span>
-            )}
-          </div>
-          <span className="text-xs font-bold text-cyan-900">Relais médical</span>
-          <span className="text-[9px] text-cyan-600 font-semibold">en attente</span>
-        </button>
-
-        {/* Bouton Mettre en observation */}
-        <button
-          type="button"
-          onClick={() => setShowObservationModal(true)}
-          className="p-2.5 bg-orange-50/60 hover:bg-orange-100/80 border border-orange-200 rounded-xl flex flex-col items-center justify-center text-center transition-all min-h-[56px] group relative"
-        >
-          <div className="relative">
-            <HeartPulse className="w-5 h-5 text-orange-700 mb-1" />
-            {(consultation?.patient_nom ? 1 : 0) > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
-                {consultation?.patient_nom ? 1 : 0}
-              </span>
-            )}
-          </div>
-          <span className="text-xs font-bold text-orange-900">Observation</span>
-          <span className="text-[9px] text-orange-600 font-semibold">en cours</span>
-        </button>
-
-        {/* Bouton Hospitaliser le patient */}
-        <button
-          type="button"
-          onClick={() => setShowHospitalisationModal(true)}
-          className="p-2.5 bg-indigo-50/60 hover:bg-indigo-100/80 border border-indigo-200 rounded-xl flex flex-col items-center justify-center text-center transition-all min-h-[56px] group relative"
-        >
-          <div className="relative">
-            <ShieldCheck className="w-5 h-5 text-indigo-700 mb-1" />
-            {(consultation?.patient_nom ? 1 : 0) > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 bg-red-500 text-white text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
-                {consultation?.patient_nom ? 1 : 0}
-              </span>
-            )}
-          </div>
-          <span className="text-xs font-bold text-indigo-900">Hospitalisation</span>
-          <span className="text-[9px] text-indigo-600 font-semibold">actives</span>
-        </button>
-      </div>
-    </div>
-  );
   const [showHistoryModal, setShowHistoryModal] = useState<boolean>(false);
 
   // Modale confirmation finalisation
@@ -933,6 +864,117 @@ export const ConsultationWorkspaceView: React.FC<ConsultationWorkspaceViewProps>
           📅 Rendez-vous
         </button>
       </div>
+
+      {/* ============================================================
+          SECTION : PRISE EN CHARGE DU PATIENT
+          ============================================================ */}
+      {consultation && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm">
+          <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <Activity className="w-4 h-4 text-emerald-600" />
+              <span className="text-[11px] font-black uppercase tracking-widest text-slate-600">
+                PRISE EN CHARGE DU PATIENT
+              </span>
+            </div>
+            <span className="hidden sm:inline text-[10px] text-slate-400 font-medium">
+              Actions cliniques &bull; Poste de consultation
+            </span>
+          </div>
+
+          <div className="p-3 flex flex-col sm:flex-row gap-2.5">
+
+            {/* ─── Action 1 : RELAIS MÉDICAL ─── */}
+            {!isFinalized && (
+              <button
+                type="button"
+                onClick={() => {
+                  setRelaisCreateError(null);
+                  setRelaisSuccess(null);
+                  setRelaisForm({ motif: '', medecin_destinataire_id: '' });
+                  setShowRelaisModal(true);
+                }}
+                className="flex-1 flex items-center gap-3 px-4 py-3 bg-cyan-50 hover:bg-cyan-100 border border-cyan-200 hover:border-cyan-400 rounded-xl transition-all text-left group"
+              >
+                <div className="w-9 h-9 rounded-lg bg-cyan-100 border border-cyan-200 flex items-center justify-center shrink-0 group-hover:bg-cyan-200 transition-colors">
+                  <RefreshCw className="w-4.5 h-4.5 text-cyan-700" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-black text-cyan-900 uppercase tracking-wide">Relais Médical</div>
+                  <div className="text-[10px] text-cyan-700/80 font-medium truncate">Transmettre le dossier à un autre médecin</div>
+                </div>
+                {(relaisDestinataires.length ?? 0) > 0 && (
+                  <span className="shrink-0 bg-red-500 text-white text-[9px] font-black rounded-full w-5 h-5 flex items-center justify-center border-2 border-cyan-100">
+                    {relaisDestinataires.length}
+                  </span>
+                )}
+              </button>
+            )}
+
+            {/* ─── Action 2 : METTRE EN OBSERVATION ─── */}
+            {!isFinalized && !hasActiveObservation && (
+              <button
+                type="button"
+                onClick={() => setShowObservationModal(true)}
+                className="flex-1 flex items-center gap-3 px-4 py-3 bg-orange-50 hover:bg-orange-100 border border-orange-200 hover:border-orange-400 rounded-xl transition-all text-left group"
+              >
+                <div className="w-9 h-9 rounded-lg bg-orange-100 border border-orange-200 flex items-center justify-center shrink-0 group-hover:bg-orange-200 transition-colors">
+                  <HeartPulse className="w-4.5 h-4.5 text-orange-700" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-black text-orange-900 uppercase tracking-wide">Mettre en Observation</div>
+                  <div className="text-[10px] text-orange-700/80 font-medium truncate">Surveiller l'évolution clinique du patient</div>
+                </div>
+              </button>
+            )}
+
+            {/* ─── Observation déjà active ─── */}
+            {!isFinalized && hasActiveObservation && (
+              <div className="flex-1 flex items-center gap-3 px-4 py-3 bg-orange-100 border-2 border-orange-300 rounded-xl">
+                <div className="w-9 h-9 rounded-lg bg-orange-200 border border-orange-300 flex items-center justify-center shrink-0">
+                  <HeartPulse className="w-4.5 h-4.5 text-orange-800" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-black text-orange-900 uppercase tracking-wide">Observation Active</div>
+                  <div className="text-[10px] text-orange-700 font-medium">Patient en cours de surveillance</div>
+                </div>
+              </div>
+            )}
+
+            {/* ─── Action 3 : HOSPITALISER LE PATIENT ─── */}
+            {!isFinalized && (
+              <button
+                type="button"
+                onClick={() => setShowHospitalisationModal(true)}
+                className="flex-1 flex items-center gap-3 px-4 py-3 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 hover:border-indigo-400 rounded-xl transition-all text-left group"
+              >
+                <div className="w-9 h-9 rounded-lg bg-indigo-100 border border-indigo-200 flex items-center justify-center shrink-0 group-hover:bg-indigo-200 transition-colors">
+                  <ShieldCheck className="w-4.5 h-4.5 text-indigo-700" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-black text-indigo-900 uppercase tracking-wide">Hospitaliser le Patient</div>
+                  <div className="text-[10px] text-indigo-700/80 font-medium truncate">Organiser l'admission et le séjour hospitalier</div>
+                </div>
+              </button>
+            )}
+
+          </div>
+
+          {/* Footer */}
+          <div className="px-4 py-2 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-[10px] text-slate-400">
+            <span className="flex items-center gap-1.5">
+              <ShieldCheck className="w-3 h-3 text-emerald-500" />
+              Actions réservées au médecin responsable
+            </span>
+            {isFinalized && (
+              <span className="flex items-center gap-1.5 text-rose-500 font-semibold">
+                <Lock className="w-3 h-3" />
+                Consultation finalisée — actions désactivées
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Messages d'alerte ou succès */}
       {successMessage && (
@@ -3281,6 +3323,7 @@ export const HospitalisationModal: React.FC<HospitalisationModalProps> = ({
 }) => {
   const [categories, setCategories] = useState<any[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('');
+  const [selectedCatDetail, setSelectedCatDetail] = useState<any>(null);
   const [motif, setMotif] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -3379,18 +3422,68 @@ export const HospitalisationModal: React.FC<HospitalisationModalProps> = ({
             {categories.length > 0 ? (
               <select
                 value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                onChange={(e) => {
+                  const cat = categories.find((c) => c.id === e.target.value);
+                  setSelectedCatDetail(cat || null);
+                  setSelectedCategory(e.target.value);
+                }}
+                className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
               >
-                <option value="">Sélectionner une catégorie...</option>
+                <option value="">— Sélectionner une catégorie —</option>
                 {categories.map((cat) => (
                   <option key={cat.id} value={cat.id}>
-                    {cat.nom} — {cat.tarif_journalier_usd} USD/jour
+                    {cat.nom} &mdash; {cat.tarif_journalier_usd} USD/jour
                   </option>
                 ))}
               </select>
             ) : (
-              <div className="text-xs text-slate-400 italic">Chargement des catégories...</div>
+              <div className="text-xs text-slate-400 italic py-2">Chargement des catégories...</div>
+            )}
+
+            {/* Détail de la catégorie sélectionnée — visible pour la réception */}
+            {selectedCatDetail && (
+              <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-500">
+                    Catégorie sélectionnée
+                  </span>
+                  <span className="text-[10px] text-indigo-400">
+                    Tarif journalier fixé à la demande
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <span className="text-slate-400 block text-[10px] uppercase tracking-wide">Nom</span>
+                    <span className="font-bold text-indigo-900">{selectedCatDetail.nom}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[10px] uppercase tracking-wide">Type de chambre</span>
+                    <span className="font-semibold text-slate-800">
+                      {(() => {
+                        const n = selectedCatDetail.nom?.toLowerCase() || '';
+                        if (n.includes('usc') || n.includes('intensif')) return 'USI — Surveillance continue';
+                        if (n.includes('priv')) return 'Chambre individuelle';
+                        if (n.includes('semi')) return 'Chambre à 2 lits';
+                        if (n.includes('pédi')) return 'Chambre pédiatrique';
+                        return 'Chambre standard';
+                      })()}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[10px] uppercase tracking-wide">Tarif journalier</span>
+                    <span className="font-black text-indigo-700 text-sm">
+                      {selectedCatDetail.tarif_journalier_usd} USD
+                      <span className="text-[10px] font-normal text-slate-500 ml-1">/jour</span>
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[10px] uppercase tracking-wide">Estimation facturation</span>
+                    <span className="text-slate-600 text-[11px]">
+                      Visible à la réception avant/après admission
+                    </span>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
 

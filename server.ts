@@ -219,6 +219,8 @@ app.post('/api/medical/lab-orders/:id/mark-viewed', requireAuth, requireRole(['M
   app.put('/api/medical/hospitalisations/:id/responsable', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.updateHospitalisationResponsable);
   app.get('/api/medical/hospitalisations/eligibility', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.checkHospitalisationEligibility);
   app.get('/api/medical/hospitalisations/:id/bill', requireAuth, requireRole(['MÉDECIN', 'RÉCEPTION']), medicalCtrl.getHospitalisationBill);
+  app.post('/api/medical/hospitalisations/:id/derogation', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.demanderDerogationSortie);
+  app.post('/api/medical/hospitalisations/:id/derogation/approuver', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.approuverDerogationSortie);
 
   // --- NOTIFICATIONS SYSTÈME ---
   app.get('/api/notifications', requireAuth, medicalCtrl.getUserNotifications);

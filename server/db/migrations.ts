@@ -1880,6 +1880,21 @@ export async function runMigrations(): Promise<void> {
       if (!hospCols.includes('ACTIF')) {
         db.exec("ALTER TABLE hospitalisations ADD COLUMN actif INTEGER NOT NULL DEFAULT 1 CHECK(actif IN (0, 1));");
       }
+      if (!hospCols.includes('FACTURE_ID')) {
+        db.exec("ALTER TABLE hospitalisations ADD COLUMN facture_id TEXT DEFAULT NULL;");
+      }
+      if (!hospCols.includes('HAS_DEROGATION')) {
+        db.exec("ALTER TABLE hospitalisations ADD COLUMN has_derogation INTEGER NOT NULL DEFAULT 0 CHECK(has_derogation IN (0, 1));");
+      }
+      if (!hospCols.includes('DEROGATION_MOTIF')) {
+        db.exec("ALTER TABLE hospitalisations ADD COLUMN derogation_motif TEXT DEFAULT NULL;");
+      }
+      if (!hospCols.includes('DEROGATION_APPROUVE_PAR')) {
+        db.exec("ALTER TABLE hospitalisations ADD COLUMN derogation_approuve_par TEXT DEFAULT NULL;");
+      }
+      if (!hospCols.includes('DEROGATION_APPROUVEE_LE')) {
+        db.exec("ALTER TABLE hospitalisations ADD COLUMN derogation_approuvee_le TEXT DEFAULT NULL;");
+      }
     }
     
     // Migration pour la table evenements

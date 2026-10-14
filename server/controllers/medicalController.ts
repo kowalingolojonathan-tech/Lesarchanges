@@ -7286,6 +7286,7 @@ export async function admettreHospitalisation(req: AuthenticatedRequest, res: Re
     const now = new Date().toISOString();
     let joursFacturables = 0;
     let montantEstimeUsd = 0;
+    let factureCrenee = false;
 
     await transaction(async () => {
       // Admettre le patient
@@ -7293,6 +7294,42 @@ export async function admettreHospitalisation(req: AuthenticatedRequest, res: Re
         `UPDATE hospitalisations SET statut = 'ADMISE', date_admission = ?, updated_at = ? WHERE id = ?`,
         [now, now, id]
       );
+
+      // Créer une facture hospitalisation automatique liée à la visite
+      try {
+        const consultation = await queryOne<any>(
+          `SELECT patient_id, visite_id FROM consultations WHERE id = ?`,
+          [hospitalisation.consultation_id]
+        );
+        if (consultation) {
+          const items = [{
+            tarif_id: hospitalisation.categorie_id,
+            code_prestation: hospitalisation.categorie_id,
+            description: `${hospitalisation.categorie_nom || 'Hospitalisation'} — ${hospitalisation.tarif_journalier_usd} USD/jour`,
+            categorie: 'HOSPITALISATION',
+            quantite: 1,
+            prix_unitaire: hospitalisation.tarif_journalier_usd
+          }];
+          const factureResult = await createLinkedFactureCore({
+            patient_id: hospitalisation.patient_id,
+            visite_id: hospitalisation.visite_id,
+            type_prestation: 'AUTRE',
+            items,
+            emise_par_id: user.id,
+            notes: `Facture hospitalisation — Demande N°${hospitalisation.demande_id}`,
+            ip_address: req.ip || '127.0.0.1'
+          });
+          if (factureResult && !factureResult.isDuplicate && factureResult.facture) {
+            await execute(
+              `UPDATE hospitalisations SET facture_id = ? WHERE id = ?`,
+              [factureResult.facture.id, id]
+            );
+            factureCrenee = true;
+          }
+        }
+      } catch (factErr) {
+        console.error('Erreur création facture hospitalisation:', factErr);
+      }
 
       // Créer un événement d'admission
       const eventId = `hevt-${crypto.randomUUID().substring(0, 12)}`;
@@ -7310,7 +7347,7 @@ export async function admettreHospitalisation(req: AuthenticatedRequest, res: Re
         ) VALUES (?, 'usr-recep-01', 'Patient admis en hospitalisation', ?, 'HOSPITALISATION', ?, ?, 0, ?)`,
         [
           `notif-hosp-${Date.now()}`,
-          `Le patient vient d'être admis en hospitalisation. Catégorie: ${hospitalisation.categorie_id}, Tarif journalier: ${hospitalisation.tarif_journalier_usd} USD.`,
+          `Le patient vient d'être admis en hospitalisation. Catégorie: ${hospitalisation.categorie_id}, Tarif journalier: ${hospitalisation.tarif_journalier_usd} USD. Facture ${factureCrenee ? 'créée' : 'non créée'}.`,
           hospitalisation.patient_id,
           hospitalisation.consultation_id,
           now
@@ -7441,7 +7478,7 @@ export async function sortirHospitalisation(req: AuthenticatedRequest, res: Resp
     }
 
     const { id } = req.params;
-    const { instructions_sortie, motif_sortie } = req.body;
+    const { instructions_sortie, motif_sortie } = req.body || {};
 
     const hospitalisation = await queryOne<any>(
       `SELECT * FROM hospitalisations WHERE id = ? AND actif = 1`,
@@ -7458,8 +7495,35 @@ export async function sortirHospitalisation(req: AuthenticatedRequest, res: Resp
     }
 
     if (hospitalisation.statut === 'SORTIE') {
-      res.status(400).json({ error: 'Ce patient a déjà étésorti.' });
+      res.status(400).json({ error: 'Ce patient a déjà été sorti.' });
       return;
+    }
+
+    // Vérifier le statut de paiement avant d'autoriser la sortie
+    if (hospitalisation.facture_id) {
+      const finDetails = await getFactureFinancialDetails(hospitalisation.facture_id);
+      if (finDetails) {
+        const isPaid = finDetails.solde_usd <= 0.005 || finDetails.statut === 'PAYÉ';
+        const hasDerogation = hospitalisation.has_derogation === 1 || hospitalisation.has_derogation === true;
+
+        if (!isPaid && !hasDerogation) {
+          const soldeFc = finDetails.solde_fc || Math.round(finDetails.solde_usd * (finDetails.taux_usd_fc || 2850));
+          res.status(403).json({
+            error: 'Sortie bloquée — solde de caisse non soldé.',
+            detail: `Le solde de la caisse d'hospitalisation n'est pas réglé. Montant restant : ${finDetails.solde_usd} USD (~${soldeFc} FC).`,
+            solde_usd: finDetails.solde_usd,
+            solde_fc: soldeFc,
+            statut_paiement: finDetails.statut,
+            facture_id: finDetails.id
+          });
+          return;
+        }
+
+        if (!isPaid && hasDerogation) {
+          const soldeFc = finDetails.solde_fc || Math.round(finDetails.solde_usd * (finDetails.taux_usd_fc || 2850));
+          console.log(`[HOSPITALISATION] Sortie autorisée par dérogation. Solde: ${finDetails.solde_usd} USD (~${soldeFc} FC)`);
+        }
+      }
     }
 
     const now = new Date().toISOString();
@@ -7478,11 +7542,12 @@ export async function sortirHospitalisation(req: AuthenticatedRequest, res: Resp
 
       // Créer un événement de sortie
       const eventId = `hevt-${crypto.randomUUID().substring(0, 12)}`;
+      const derogationInfo = hospitalisation.has_derogation ? ' (autorisation dérogatoire)' : '';
       await execute(
         `INSERT INTO hospitalisation_evenements (
           id, hospitalisation_id, type_evenement, medecin_id, details, date_evenement, created_at
         ) VALUES (?, ?, 'SORTIE', ?, ?, ?, ?)`,
-        [eventId, id, user.id, `Sortie prononcée par Dr. ${user.nom_complet}. Instructions: ${instructions_sortie || 'Aucune'}`, now, now]
+        [eventId, id, user.id, `Sortie prononcée par Dr. ${user.nom_complet}. Instructions: ${instructions_sortie || 'Aucune'}${derogationInfo}`, now, now]
       );
 
       // Notification à la Caisse
@@ -7492,7 +7557,7 @@ export async function sortirHospitalisation(req: AuthenticatedRequest, res: Resp
         ) VALUES (?, 'usr-recep-01', 'Patient sorti de l\'hospitalisation', ?, 'HOSPITALISATION', ?, ?, 0, ?)`,
         [
           `notif-hosp-${Date.now()}`,
-          `Patientsorti de l'hospitalisation. ${daysResult.joursFacturables} jour(s) facturable(s), montant final: ${daysResult.montantEstimeUsd} USD.`,
+          `Patient sorti de l'hospitalisation. ${daysResult.joursFacturables} jour(s) facturable(s), montant final: ${daysResult.montantEstimeUsd} USD.${derogationInfo}`,
           hospitalisation.patient_id,
           hospitalisation.consultation_id,
           now
@@ -7505,12 +7570,12 @@ export async function sortirHospitalisation(req: AuthenticatedRequest, res: Resp
       action: 'HOSPITALISATION_SORTIE',
       ressourceType: 'HOSPITALISATION',
       ressourceId: id,
-      details: `Patientsorti. Jours facturés: ${daysResult.joursFacturables}, Montant: ${daysResult.montantEstimeUsd} USD`,
+      details: `Patient sorti. Jours facturés: ${daysResult.joursFacturables}, Montant: ${daysResult.montantEstimeUsd} USD${hospitalisation.has_derogation ? ' (dérogation)' : ''}`,
       ipAddress: req.ip || '127.0.0.1'
     });
 
     res.json({
-      message: 'Patientsorti avec succès.',
+      message: 'Patient sorti avec succès.',
       hospitalisation: {
         ...hospitalisation,
         statut: 'SORTIE',
@@ -7664,12 +7729,33 @@ export async function getHospitalisationDetails(req: AuthenticatedRequest, res: 
       hospitalisation.tarif_journalier_usd
     );
 
+    // Récupérer le statut de paiement si une facture est liée
+    let paiementInfo: any = null;
+    if (hospitalisation.facture_id) {
+      try {
+        const finDetails = await getFactureFinancialDetails(hospitalisation.facture_id);
+        if (finDetails) {
+          paiementInfo = {
+            facture_id: finDetails.id,
+            montant_total_usd: finDetails.montant_total_usd,
+            solde_usd: finDetails.solde_usd,
+            solde_fc: finDetails.solde_fc,
+            statut_paiement: finDetails.statut,
+            total_paye_usd: finDetails.total_paye_usd
+          };
+        }
+      } catch (payErr) {
+        console.error('Erreur paiement:', payErr);
+      }
+    }
+
     res.json({
       hospitalisation: {
         ...hospitalisation,
         notes,
         evenements,
-        facturation
+        facturation,
+        paiement: paiementInfo
       }
     });
   } catch (error: any) {
@@ -7828,6 +7914,137 @@ export async function updateHospitalisationResponsable(req: AuthenticatedRequest
     res.json({ success: true, message: 'Responsabilité transférée avec succès.' });
   } catch (error: any) {
     console.error('Erreur mise à jour responsable:', error);
+    res.status(500).json({ error: 'Erreur interne.' });
+  }
+}
+
+/**
+  * Demander une dérogation pour sortie hospitalisation (médecin responsable)
+  * POST /api/medical/hospitalisations/:id/derogation
+  */
+export async function demanderDerogationSortie(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const { id } = req.params;
+    const { motif } = req.body || {};
+
+    const hospitalisation = await queryOne<any>(
+      `SELECT * FROM hospitalisations WHERE id = ? AND actif = 1`,
+      [id]
+    );
+    if (!hospitalisation) {
+      res.status(404).json({ error: 'Hospitalisation introuvable.' });
+      return;
+    }
+
+    if (hospitalisation.medecin_responsable_id !== user.id) {
+      res.status(403).json({ error: 'Seul le médecin responsable peut demander une dérogation.' });
+      return;
+    }
+
+    if (hospitalisation.statut === 'SORTIE') {
+      res.status(400).json({ error: 'Ce patient a déjà été sorti.' });
+      return;
+    }
+
+    if (hospitalisation.has_derogation === 1 || hospitalisation.has_derogation === true) {
+      res.status(400).json({ error: 'Une demande de dérogation existe déjà pour cette hospitalisation.' });
+      return;
+    }
+
+    if (!motif || typeof motif !== 'string' || motif.trim().length < 5) {
+      res.status(400).json({ error: 'Le motif de la dérogation est obligatoire (min. 5 caractères).' });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    await execute(
+      `UPDATE hospitalisations SET has_derogation = 1, derogation_motif = ?, updated_at = ? WHERE id = ?`,
+      [motif.trim(), now, id]
+    );
+
+    await auditLogger.log({
+      userId: user.id,
+      action: 'HOSPITALISATION_DEROGATION_DEMANDE',
+      ressourceType: 'HOSPITALISATION',
+      ressourceId: id,
+      details: `Demande de dérogation pour sortie : ${motif.trim()}`,
+      ipAddress: req.ip || '127.0.0.1'
+    });
+
+    res.json({ success: true, message: 'Demande de dérogation enregistrée. Le médecin supérieur doit l\'approuver.' });
+  } catch (error: any) {
+    console.error('Erreur demande dérogation:', error);
+    res.status(500).json({ error: 'Erreur interne.' });
+  }
+}
+
+/**
+  * Approuver une dérogation de sortie hospitalisation (médecin supérieur)
+  * POST /api/medical/hospitalisations/:id/derogation/approuver
+  */
+export async function approuverDerogationSortie(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const { id } = req.params;
+
+    const hospitalisation = await queryOne<any>(
+      `SELECT * FROM hospitalisations WHERE id = ? AND actif = 1`,
+      [id]
+    );
+    if (!hospitalisation) {
+      res.status(404).json({ error: 'Hospitalisation introuvable.' });
+      return;
+    }
+
+    // Any doctor can approve a derogation (superior doctor concept)
+    if (hospitalisation.has_derogation !== 1 && hospitalisation.has_derogation !== true) {
+      res.status(400).json({ error: 'Aucune demande de dérogation en cours pour cette hospitalisation.' });
+      return;
+    }
+
+    if (hospitalisation.statut === 'SORTIE') {
+      res.status(400).json({ error: 'Ce patient a déjà été sorti.' });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    await execute(
+      `UPDATE hospitalisations SET has_derogation = 2, derogation_approuve_par = ?, derogation_approuvee_le = ? WHERE id = ?`,
+      [user.id, now, id]
+    );
+
+    // Event
+    const eventId = `hevt-${crypto.randomUUID().substring(0, 12)}`;
+    await execute(
+      `INSERT INTO hospitalisation_evenements (
+        id, hospitalisation_id, type_evenement, medecin_id, details, date_evenement, created_at
+      ) VALUES (?, ?, 'CRITICAL', ?, ?, ?, ?)`,
+      [eventId, id, user.id, `Dérégation de sortie approuvée par Dr. ${user.nom_complet}. Motif: ${hospitalisation.derogation_motif || 'N/A'}`, now, now]
+    );
+
+    await auditLogger.log({
+      userId: user.id,
+      action: 'HOSPITALISATION_DEROGATION_APPROUVEE',
+      ressourceType: 'HOSPITALISATION',
+      ressourceId: id,
+      details: `Dérégation approuvée par Dr. ${user.nom_complet}. Motif: ${hospitalisation.derogation_motif || 'N/A'}`,
+      ipAddress: req.ip || '127.0.0.1'
+    });
+
+    res.json({ success: true, message: 'Dérégation approuvée. La sortie peut maintenant être prononcée.' });
+  } catch (error: any) {
+    console.error('Erreur approbation dérogation:', error);
     res.status(500).json({ error: 'Erreur interne.' });
   }
 }

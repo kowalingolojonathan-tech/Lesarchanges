@@ -2548,7 +2548,7 @@ export const HospitalisationDetailView: React.FC<HospitalisationDetailViewProps>
   };
 
   const handleSortie = async () => {
-    if (!window.confirm('Êtes-vous sûr de vouloirprogrammer la sortie de ce patient ?')) return;
+    if (!window.confirm('Êtes-vous sûr de vouloir programmer la sortie de ce patient ?')) return;
     setLoading(true);
     setError(null);
     try {
@@ -2560,7 +2560,54 @@ export const HospitalisationDetailView: React.FC<HospitalisationDetailViewProps>
         onBack();
       }, 1500);
     } catch (err: any) {
-      setError(err.message || 'Impossible deprogrammer la sortie.');
+      setError(err.message || 'Impossible de programmer la sortie.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDemanderDerogation = async () => {
+    const motif = window.prompt('Motif de la dérogation (obligatoire, min. 5 caractères) :', '');
+    if (motif === null) return;
+    if (motif.trim().length < 5) {
+      setError('Le motif de la dérogation doit contenir au moins 5 caractères.');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await apiFetch(`/api/medical/hospitalisations/${hospData.id}/derogation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ motif: motif.trim() })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Demande de dérogation échouée');
+      setSuccess('Demande de dérogation enregistrée. Le médecin supérieur doit l\'approuver.');
+      await fetchHosp();
+      setTimeout(() => setSuccess(null), 5000);
+    } catch (err: any) {
+      setError(err.message || 'Impossible de demander la dérogation.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleApprouverDerogation = async () => {
+    if (!window.confirm('Approuver cette dérogation de sortie hospitalisation ?')) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await apiFetch(`/api/medical/hospitalisations/${hospData.id}/derogation/approuver`, {
+        method: 'POST'
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Approbation échouée');
+      setSuccess('Dérégation approuvée. La sortie peut maintenant être prononcée.');
+      await fetchHosp();
+      setTimeout(() => setSuccess(null), 5000);
+    } catch (err: any) {
+      setError(err.message || 'Impossible d\'approuver la dérogation.');
     } finally {
       setLoading(false);
     }
