@@ -2548,7 +2548,7 @@ export const HospitalisationDetailView: React.FC<HospitalisationDetailViewProps>
   };
 
   const handleSortie = async () => {
-    if (!window.confirm('Êtes-vous sûr de vouloir programmer la sortie de ce patient ?')) return;
+    if (!window.confirm('Êtes-vous sûr de vouloir Programmer la sortie de ce patient ?')) return;
     setLoading(true);
     setError(null);
     try {
@@ -2560,7 +2560,7 @@ export const HospitalisationDetailView: React.FC<HospitalisationDetailViewProps>
         onBack();
       }, 1500);
     } catch (err: any) {
-      setError(err.message || 'Impossible de programmer la sortie.');
+      setError(err.message || 'Impossible de Programmer la sortie.');
     } finally {
       setLoading(false);
     }
@@ -2643,8 +2643,60 @@ export const HospitalisationDetailView: React.FC<HospitalisationDetailViewProps>
           {error && (
             <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-700">{error}</div>
           )}
-          {success && (
+{success && (
             <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-700">{success}</div>
+          )}
+
+          {/* Paiement / Caisse d'hospitalisation */}
+          {hospData?.paiement && (
+            <div className={`rounded-lg p-3 text-xs space-y-2 border-2 ${
+              (hospData.paiement.solde_usd || 0) <= 0.005
+                ? 'bg-emerald-50 border-emerald-200'
+                : (hospData.has_derogation === 2 || hospData.has_derogation === true)
+                  ? 'bg-amber-50 border-amber-200'
+                  : 'bg-rose-50 border-rose-200'
+            }`}>
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-slate-700 flex items-center gap-1">
+                  <CreditCard className="w-3.5 h-3.5" />
+                  Caisse d'hospitalisation
+                </span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
+                  (hospData.paiement.solde_usd || 0) <= 0.005
+                    ? 'bg-emerald-100 text-emerald-800'
+                    : (hospData.has_derogation === 2 || hospData.has_derogation === true)
+                      ? 'bg-amber-100 text-amber-800'
+                      : 'bg-rose-100 text-rose-800'
+                }`}>
+                  {(hospData.paiement.solde_usd || 0) <= 0.005 ? 'SOLDÉ' :
+                   (hospData.has_derogation === 2 || hospData.has_derogation === true) ? 'DÉROGATION' : 'NON SOLDÉ'}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-3 text-[11px]">
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase tracking-wide">Montant total</span>
+                  <span className="font-bold text-slate-800">{hospData.paiement.montant_total_usd} USD</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase tracking-wide">Payé</span>
+                  <span className="font-bold text-emerald-700">{hospData.paiement.total_paye_usd || 0} USD</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase tracking-wide">Solde restant</span>
+                  <span className="font-black text-rose-700 text-sm">{hospData.paiement.solde_usd || 0} USD</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[10px] uppercase tracking-wide">Statut</span>
+                  <span className="font-semibold text-slate-800">{hospData.paiement.statut_paiement}</span>
+                </div>
+              </div>
+              {hospData.derogation_motif && (
+                <div className="pt-2 border-t border-amber-200">
+                  <span className="text-slate-400 block text-[10px] uppercase tracking-wide">Motif dérogation</span>
+                  <span className="text-amber-800 font-medium">{hospData.derogation_motif}</span>
+                </div>
+              )}
+            </div>
           )}
 
           {/* Informations générales */}
@@ -2652,7 +2704,7 @@ export const HospitalisationDetailView: React.FC<HospitalisationDetailViewProps>
             <div className="flex gap-4 flex-wrap">
               <span><strong>Consultation:</strong> {hospData?.consultation_id}</span>
               <span><strong>Visite:</strong> N°{hospData?.numero_visite}</span>
-              <span><strong>Catégorie:</strong> {hospData?.categorie_nom}</span>
+              <span><strong>Catégorie:</strong> {hospData?.categories_nom}</span>
               <span><strong>Tarif:</strong> {hospData?.tarif_journalier_usd} USD/jour</span>
             </div>
             {hospData?.motif && (
@@ -2729,7 +2781,7 @@ export const HospitalisationDetailView: React.FC<HospitalisationDetailViewProps>
               className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1.5"
             >
               <CheckCircle2 className="w-3.5 h-3.5" />
-             programmer la sortie
+             Programmer la sortie
             </button>
           )}
         </div>
