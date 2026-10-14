@@ -46,26 +46,6 @@ export async function seedDatabase(): Promise<void> {
     const hashMed = await bcrypt.hash('ArchangesMed2026!', 10);
     const hashLab = await bcrypt.hash('ArchangesLab2026!', 10);
 
-    await execute(`
-      INSERT INTO users (id, username, password_hash, nom_complet, role, actif, created_at, updated_at)
-      VALUES 
-        ('usr-admin-01', 'admin', ?, 'M. Éric Banza (Admin Système)', 'ADMINISTRATEUR', 1, ?, ?),
-        ('usr-recep-01', 'reception', ?, 'Mme Sarah Mwamba (Accueil & Caisse)', 'RÉCEPTION', 1, ?, ?),
-        ('usr-med-01', 'dr.sawadogo', ?, 'Dr. Marc Sawadogo (Médecin Généraliste)', 'MÉDECIN', 1, ?, ?),
-        ('usr-med-02', 'dr.mutombo', ?, 'Dr. Thérèse Mutombo (Médecin Pédiatre)', 'MÉDECIN', 1, ?, ?),
-        ('usr-lab-01', 'labo.biologiste', ?, 'Dr. Patrick Kalonji (Biologiste Médical)', 'LABORATOIRE', 1, ?, ?),
-        ('usr-lab-02', 'labo.technicien', ?, 'Mme Chantal Tshala (Technicienne Supérieure)', 'LABORATOIRE', 1, ?, ?),
-        ('usr-lab-inactive', 'labo.inactif', ?, 'M. Paul Mbayo (Laborantin Inactif)', 'LABORATOIRE', 0, ?, ?)
-    `, [
-      hashAdmin, now, now,
-      hashRecep, now, now,
-      hashMed, now, now,
-      hashMed, now, now,
-      hashLab, now, now,
-      hashLab, now, now,
-      hashLab, now, now
-    ]);
-
     // Enregistrement d'audit initial
     await execute(`
       INSERT INTO audit_logs (id, user_id, action, ressource_type, ressource_id, details, ip_address, timestamp)
@@ -101,6 +81,34 @@ export async function seedDatabase(): Promise<void> {
         INSERT INTO users (id, username, password_hash, nom_complet, role, actif, created_at, updated_at)
         VALUES ('usr-lab-inactive', 'labo.inactif', ?, 'M. Paul Mbayo (Laborantin Inactif)', 'LABORATOIRE', 0, ?, ?)
       `, [hashLab, now, now]);
+    }
+
+    // Utilisateurs service imagerie
+    const existingImg01 = await queryOne('SELECT id FROM users WHERE username = ?', ['img.radiologue']);
+    if (!existingImg01) {
+      const hashImg = await bcrypt.hash('ArchangesImg2026!', 10);
+      await execute(`
+        INSERT INTO users (id, username, password_hash, nom_complet, role, actif, created_at, updated_at)
+        VALUES ('usr-img-01', 'img.radiologue', ?, 'Dr. Joseph Kambulu (Radiologue)', 'IMAGERIE', 1, ?, ?)
+      `, [hashImg, now, now]);
+    }
+
+    const existingImg02 = await queryOne('SELECT id FROM users WHERE username = ?', ['img.technicien']);
+    if (!existingImg02) {
+      const hashImg = await bcrypt.hash('ArchangesImg2026!', 10);
+      await execute(`
+        INSERT INTO users (id, username, password_hash, nom_complet, role, actif, created_at, updated_at)
+        VALUES ('usr-img-02', 'img.technicien', ?, 'Mme Marie Lukusa (Technicienne en Imagerie)', 'IMAGERIE', 1, ?, ?)
+      `, [hashImg, now, now]);
+    }
+
+    const existingImgInactif = await queryOne('SELECT id FROM users WHERE username = ?', ['img.inactif']);
+    if (!existingImgInactif) {
+      const hashImg = await bcrypt.hash('ArchangesImg2026!', 10);
+      await execute(`
+        INSERT INTO users (id, username, password_hash, nom_complet, role, actif, created_at, updated_at)
+        VALUES ('usr-img-inactive', 'img.inactif', ?, 'M. Jean-Pierre Batuna (Radiologue Inactif)', 'IMAGERIE', 0, ?, ?)
+      `, [hashImg, now, now]);
     }
   }
 

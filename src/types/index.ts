@@ -643,6 +643,21 @@ export interface ImagerieDemande {
   medecin_nom?: string;
 }
 
+export interface AmendementImagerie {
+  id: string;
+  demande_imagerie_id: string;
+  ancien_compte_rendu_texte: string;
+  nouveau_compte_rendu_texte: string;
+  ancien_compte_rendu_url?: string | null;
+  nouveau_compte_rendu_url?: string | null;
+  ancien_compte_rendu_nom?: string | null;
+  nouveau_compte_rendu_nom?: string | null;
+  motif: string;
+  amende_par_id: string;
+  amende_par_nom?: string;
+  created_at: string;
+}
+
 export interface LaborantinUser {
   id: string;
   username: string;

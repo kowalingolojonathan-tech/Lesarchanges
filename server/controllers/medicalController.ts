@@ -8449,3 +8449,495 @@ export async function getImagerieOrders(req: AuthenticatedRequest, res: Response
     res.status(500).json({ error: 'Erreur interne.' });
   }
 }
+
+/**
+ * Prendre en charge une demande d'imagerie
+ * PATCH /api/medical/imagerie-demande/:id/take-charge
+ * Rôle strict : LABORATOIRE (service d'imagerie)
+ */
+export async function takeChargeImagerieDemande(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || user.role !== 'LABORATOIRE') {
+      res.status(403).json({ error: 'Accès strictement réservé au service d\'imagerie (LABORATOIRE).' });
+      return;
+    }
+
+    const { id } = req.params;
+
+    // Vérifier que la demande existe et est disponible
+    const demande = await queryOne<any>(
+      `SELECT * FROM demandes_imagerie WHERE id = ? AND statut = 'DEMANDE_CREEE' AND medecin_realisateur_id IS NULL`,
+      [id]
+    );
+    if (!demande) {
+      res.status(404).json({ error: 'Demande introuvable ou déjà prise en charge.' });
+      return;
+    }
+
+    await transaction(async () => {
+      await execute(
+        `UPDATE demandes_imagerie SET medecin_realisateur_id = ?, statut = 'PRISE_EN_CHARGE', updated_at = ? WHERE id = ?`,
+        [user.id, new Date().toISOString(), id]
+      );
+    });
+
+    // Notification au médecin prescripteur
+    try {
+      const consultation = await queryOne<any>(
+        `SELECT c.id, c.patient_id, v.numero_visite, p.nom as patient_nom, pat.prenom as patient_prenom
+         FROM consultations c
+         JOIN visites v ON c.visite_id = v.id
+         JOIN patients pat ON c.patient_id = pat.id
+         WHERE c.id = ?`,
+        [demande.consultation_id]
+      );
+      if (consultation) {
+        const notifId = 'notif-' + crypto.randomUUID().substring(0, 12);
+        await execute(
+          `INSERT INTO notifications (
+            id, user_id, emetteur_id, emetteur_nom, emetteur_role, destinataire_role,
+            titre, message, type, patient_id, consultation_id, visite_id, lu, created_at
+          ) VALUES (?, ?, ?, ?, ?, 'MÉDECIN', ?, ?, 'IMAGERIE_TAKEN_CHARGE', ?, ?, ?, 0, ?)`,
+          [
+            notifId,
+            consultation.medecin_id,
+            user.id,
+            user.nom_complet,
+            user.role,
+            'Demande d'imagerie prise en charge',
+            consultation.patient_id,
+            consultation.id,
+            consultation.visite_id,
+            new Date().toISOString()
+          ]
+        );
+      }
+    } catch (notifErr) {
+      console.error('Erreur notification take-charge:', notifErr);
+    }
+
+    res.json({
+      message: 'Demande d\'imagerie prise en charge avec succès.',
+      demande: await queryOne<any>(
+        `SELECT di.*, p.numero_dossier, pat.nom as patient_nom, pat.prenom as patient_prenom,
+                v.numero_visite, c.motif_consultation as consultation_motif
+         FROM demandes_imagerie di
+         JOIN patients pat ON di.patient_id = pat.id
+         JOIN visites v ON di.visite_id = v.id
+         JOIN consultations c ON di.consultation_id = c.id
+         WHERE di.id = ?`,
+        [id]
+      )
+    });
+  } catch (error: any) {
+    console.error('Erreur prise en charge demande imagerie:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la prise en charge.' });
+  }
+}
+
+/**
+ * Enregistrer la réalisation d'un examen
+ * PATCH /api/medical/imagerie-demande/:id/realize
+ * Rôle strict : LABORATOIRE
+ */
+export async function realizeImagerieDemande(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || user.role !== 'LABORATOIRE') {
+      res.status(403).json({ error: 'Accès strictement réservé au service d\'imagerie (LABORATOIRE).' });
+      return;
+    }
+
+    const { id } = req.params;
+    const {
+      commentaire,
+      document_url,
+      document_nom
+    } = req.body || {};
+
+    // Vérifier que la demande est en cours de prise en charge
+    const demande = await queryOne<any>(
+      `SELECT * FROM demandes_imagerie WHERE id = ? AND statut = 'PRISE_EN_CHARGE' AND medecin_realisateur_id = ?`,
+      [id, user.id]
+    );
+    if (!demande) {
+      res.status(400).json({ error: 'Demande non disponible pour réalisation (statut actuel ou propriétaire incorrect).' });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    await execute(
+      `UPDATE demandes_imagerie SET commentaire = ?, document_url = ?, document_nom = ?, date_realisation = ?, statut = 'RESULTATS_A_SAISIR', updated_at = ? WHERE id = ?`,
+      [commentaire?.trim() || null, document_url || null, document_nom || null, now, now, id]
+    );
+
+    res.json({
+      message: 'Réalisation de l\'examen enregistrée.',
+      demande: await queryOne<any>(
+        `SELECT di.*, p.numero_dossier, pat.nom as patient_nom, pat.prenom as patient_prenom,
+                v.numero_visite, c.motif_consultation as consultation_motif
+         FROM demandes_imagerie di
+         JOIN patients pat ON di.patient_id = pat.id
+         JOIN visites v ON di.visite_id = v.id
+         JOIN consultations c ON di.consultation_id = c.id
+         WHERE di.id = ?`,
+        [id]
+      )
+    });
+  } catch (error: any) {
+    console.error('Erreur réalisation demande imagerie:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la réalisation.' });
+  }
+}
+
+/**
+ * Rédiger le compte rendu
+ * PATCH /api/medical/imagerie-demande/:id/write-report
+ * Rôle strict : LABORATOIRE
+ */
+export async function writeReportImagerieDemande(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || user.role !== 'LABORATOIRE') {
+      res.status(403).json({ error: 'Accès strictement réservé au service d\'imagerie (LABORATOIRE).' });
+      return;
+    }
+
+    const { id } = req.params;
+    const {
+      compte_rendu_texte,
+      compte_rendu_url,
+      compte_rendu_nom
+    } = req.body || {};
+
+    // Vérifier que la demande est en attente de rapport
+    const demande = await queryOne<any>(
+      `SELECT * FROM demandes_imagerie WHERE id = ? AND statut = 'RESULTATS_A_SAISIR' AND document_url IS NOT NULL`,
+      [id]
+    );
+    if (!demande) {
+      res.status(400).json({ error: 'Demande non disponible pour la rédaction du rapport (statut actuel).' });
+      return;
+    }
+
+    await execute(
+      `UPDATE demandes_imagerie SET compte_rendu_texte = ?, compte_rendu_url = ?, compte_rendu_nom = ?, statut = 'RESULTATS_SAISIS', updated_at = ? WHERE id = ?`,
+      [compte_rendu_texte?.trim() || null, compte_rendu_url || null, compte_rendu_nom || null, new Date().toISOString(), id]
+    );
+
+    res.json({
+      message: 'Compte rendu rédigé avec succès.',
+      demande: await queryOne<any>(
+        `SELECT di.*, p.numero_dossier, pat.nom as patient_nom, pat.prenom as patient_prenom,
+                v.numero_visite, c.motif_consultation as consultation_motif
+         FROM demandes_imagerie di
+         JOIN patients pat ON di.patient_id = pat.id
+         JOIN visites v ON di.visite_id = v.id
+         JOIN consultations c ON di.consultation_id = c.id
+         WHERE di.id = ?`,
+        [id]
+      )
+    });
+  } catch (error: any) {
+    console.error('Erreur rédaction compte rendu:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la rédaction du compte rendu.' });
+  }
+}
+
+/**
+ * Soumettre pour validation
+ * POST /api/medical/imagerie-demande/:id/submit-for-validation
+ * Rôle strict : LABORATOIRE
+ */
+export async function submitForValidationImagerieDemande(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || user.role !== 'LABORATOIRE') {
+      res.status(403).json({ error: 'Accès strictement réservé au service d\'imagerie (LABORATOIRE).' });
+      return;
+    }
+
+    const { id } = req.params;
+
+    // Vérifier que le rapport est rédigé
+    const demande = await queryOne<any>(
+      `SELECT * FROM demandes_imagerie WHERE id = ? AND statut = 'RESULTATS_SAISIS'`,
+      [id]
+    );
+    if (!demande) {
+      res.status(400).json({ error: 'Demande non soumise pour validation (rapport non rédigé).' });
+      return;
+    }
+
+    await execute(
+      `UPDATE demandes_imagerie SET statut = 'RESULTAT_A_VALIDER', updated_at = ? WHERE id = ?`,
+      [new Date().toISOString(), id]
+    );
+
+    // Notification au médecin prescripteur
+    try {
+      const consultation = await queryOne<any>(
+        `SELECT c.id, c.patient_id, v.numero_visite, p.nom as patient_nom, pat.prenom as patient_prenom
+         FROM consultations c
+         JOIN visites v ON c.visite_id = v.id
+         JOIN patients pat ON c.patient_id = pat.id
+         WHERE c.id = ?`,
+        [demande.consultation_id]
+      );
+      if (consultation) {
+        const notifId = 'notif-' + crypto.randomUUID().substring(0, 12);
+        await execute(
+          `INSERT INTO notifications (
+            id, user_id, emetteur_id, emetteur_nom, emetteur_role, destinataire_role,
+            titre, message, type, patient_id, consultation_id, visite_id, lu, created_at
+          ) VALUES (?, ?, ?, ?, ?, 'MÉDECIN', ?, ?, 'IMAGERIE_SUBMIT_VALIDATION', ?, ?, ?, 0, ?)`,
+          [
+            notifId,
+            consultation.medecin_id,
+            user.id,
+            user.nom_complet,
+            user.role,
+            'Nouvelle demande d'imagerie en attente de validation',
+            consultation.patient_id,
+            consultation.id,
+            consultation.visite_id,
+            new Date().toISOString()
+          ]
+        );
+      }
+    } catch (notifErr) {
+      console.error('Erreur notification submit validation:', notifErr);
+    }
+
+    res.json({
+      message: 'Demande soumise pour validation.',
+      demande: { id: demande.id, statut: 'RESULTAT_A_VALIDER' }
+    });
+  } catch (error: any) {
+    console.error('Erreur soumission validation:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la soumission.' });
+  }
+}
+
+/**
+ * Valider le compte rendu
+ * POST /api/medical/imagerie-demande/:id/validate
+ * Rôle strict : LABORATOIRE (personnel du service d'imagerie qui valide)
+ */
+export async function validateImagerieDemande(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || user.role !== 'LABORATOIRE') {
+      res.status(403).json({ error: 'Accès strictement réservé au service d\'imagerie (LABORATOIRE).' });
+      return;
+    }
+
+    const { id } = req.params;
+
+    // Vérifier que la demande est en attente de validation
+    const demande = await queryOne<any>(
+      `SELECT * FROM demandes_imagerie WHERE id = ? AND statut = 'RESULTAT_A_VALIDER'`,
+      [id]
+    );
+    if (!demande) {
+      res.status(400).json({ error: 'Demande non en attente de validation.' });
+      return;
+    }
+
+    await transaction(async () => {
+      await execute(
+        `UPDATE demandes_imagerie SET medecin_validateur_id = ?, statut = 'RESULTAT_VALIDE', date_validation = ?, updated_at = ? WHERE id = ?`,
+        [user.id, new Date().toISOString(), new Date().toISOString(), id]
+      );
+    });
+
+    // Notification au médecin prescripteur
+    try {
+      const consultation = await queryOne<any>(
+        `SELECT c.id, c.patient_id, v.numero_visite, p.nom as patient_nom, pat.prenom as patient_prenom
+         FROM consultations c
+         JOIN visites v ON c.visite_id = v.id
+         JOIN patients pat ON c.patient_id = pat.id
+         WHERE c.id = ?`,
+        [demande.consultation_id]
+      );
+      if (consultation) {
+        const notifId = 'notif-' + crypto.randomUUID().substring(0, 12);
+        await execute(
+          `INSERT INTO notifications (
+            id, user_id, emetteur_id, emetteur_nom, emetteur_role, destinataire_role,
+            titre, message, type, patient_id, consultation_id, visite_id, lu, created_at
+          ) VALUES (?, ?, ?, ?, ?, 'MÉDECIN', ?, ?, 'IMAGERIE_VALIDATED', ?, ?, ?, 0, ?)`,
+          [
+            notifId,
+            consultation.medecin_id,
+            user.id,
+            user.nom_complet,
+            user.role,
+            'Résultat d'imagerie validé',
+            consultation.patient_id,
+            consultation.id,
+            consultation.visite_id,
+            new Date().toISOString()
+          ]
+        );
+      }
+    } catch (notifErr) {
+      console.error('Erreur notification validation:', notifErr);
+    }
+
+    res.json({
+      message: 'Résultat d\'imagerie validé avec succès.',
+      demande: await queryOne<any>(
+        `SELECT di.*, p.numero_dossier, pat.nom as patient_nom, pat.prenom as patient_prenom,
+                v.numero_visite, c.motif_consultation as consultation_motif,
+                u_val.nom_complet as medecin_validateur_nom
+         FROM demandes_imagerie di
+         JOIN patients pat ON di.patient_id = pat.id
+         JOIN visites v ON di.visite_id = v.id
+         JOIN consultations c ON di.consultation_id = c.id
+         LEFT JOIN users u_val ON di.medecin_validateur_id = u_val.id
+         WHERE di.id = ?`,
+        [id]
+      )
+    });
+  } catch (error: any) {
+    console.error('Erreur validation demande imagerie:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la validation.' });
+  }
+}
+
+/**
+ * Transmettre au médecin prescripteur
+ * POST /api/medical/imagerie-demande/:id/transmit
+ * Rôle strict : LABORATOIRE
+ */
+export async function transmitImagerieDemande(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || user.role !== 'LABORATOIRE') {
+      res.status(403).json({ error: 'Accès strictement réservé au service d\'imagerie (LABORATOIRE).' });
+      return;
+    }
+
+    const { id } = req.params;
+
+    // Vérifier que le résultat est validé
+    const demande = await queryOne<any>(
+      `SELECT * FROM demandes_imagerie WHERE id = ? AND statut = 'RESULTAT_VALIDE'`,
+      [id]
+    );
+    if (!demande) {
+      res.status(400).json({ error: 'Demande non transmissible (résultat non validé).' });
+      return;
+    }
+
+    await execute(
+      `UPDATE demandes_imagerie SET statut = 'TRANSMIS_AU_MEDECIN', updated_at = ? WHERE id = ?`,
+      [new Date().toISOString(), id]
+    );
+
+    res.json({
+      message: 'Résultat transmis au médecin prescripteur.',
+      demande: { id: demande.id, statut: 'TRANSMIS_AU_MEDECIN' }
+    });
+  } catch (error: any) {
+    console.error('Erreur transmission demande:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la transmission.' });
+  }
+}
+
+/**
+ * Amender un compte rendu (après validation)
+ * POST /api/medical/imagerie-demande/:id/amend
+ * Rôle strict : LABORATOIRE
+ */
+export async function amendImagerieDemande(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || user.role !== 'LABORATOIRE') {
+      res.status(403).json({ error: 'Accès strictement réservé au service d\'imagerie (LABORATOIRE).' });
+      return;
+    }
+
+    const { id } = req.params;
+    const {
+      nouveau_compte_rendu_texte,
+      nouveau_compte_rendu_url,
+      nouveau_compte_rendu_nom,
+      motif
+    } = req.body || {};
+
+    if (!motif || typeof motif !== 'string' || motif.trim().length < 5) {
+      res.status(400).json({ error: 'Le motif d\'amendement est obligatoire et doit contenir au moins 5 caractères.' });
+      return;
+    }
+
+    // Vérifier que la demande a été validée (on peut amendement après validation)
+    const demande = await queryOne<any>(
+      `SELECT * FROM demandes_imagerie WHERE id = ? AND statut IN ('RESULTAT_VALIDE', 'TRANSMIS_AU_MEDECIN')`,
+      [id]
+    );
+    if (!demande) {
+      res.status(400).json({ error: 'Impossible d\'amender cette demande (pas encore validée ou déjà archivée).' });
+      return;
+    }
+
+    // Enregistrer l'ancienne valeur en base
+    const ancienneValeur = await queryOne<any>(
+      `SELECT compte_rendu_texte, compte_rendu_url, compte_rendu_nom FROM demandes_imagerie WHERE id = ?`,
+      [id]
+    );
+
+    await transaction(async () => {
+      // 1. Insérer l'amendement
+      const amendId = 'amend-' + crypto.randomUUID().substring(0, 12);
+      await execute(
+        `INSERT INTO amendements_imagerie (
+          id, demande_imagerie_id, ancien_compte_rendu_texte, nouveau_compte_rendu_texte,
+          ancien_compte_rendu_url, nouveau_compte_rendu_url,
+          ancien_compte_rendu_nom, nouveau_compte_rendu_nom, motif, amende_par_id, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          amendId,
+          id,
+          ancienneValeur?.compte_rendu_texte || '',
+          nouveau_compte_rendu_texte?.trim() || '',
+          ancienneValeur?.compte_rendu_url || null,
+          nouveau_compte_rendu_url || null,
+          ancienneValeur?.compte_rendu_nom || null,
+          nouveau_compte_rendu_nom || null,
+          motif.trim(),
+          user.id,
+          new Date().toISOString()
+        ]
+      );
+
+      // 2. Mettre à jour la demande avec les nouvelles valeurs
+      await execute(
+        `UPDATE demandes_imagerie SET compte_rendu_texte = ?, compte_rendu_url = ?, compte_rendu_nom = ?, updated_at = ? WHERE id = ?`,
+        [nouveau_compte_rendu_texte?.trim() || null, nouveau_compte_rendu_url || null, nouveau_compte_rendu_nom || null, new Date().toISOString(), id]
+      );
+    });
+
+    res.json({
+      message: 'Compte rendu amendé avec succès.',
+      demande: await queryOne<any>(
+        `SELECT di.*, p.numero_dossier, pat.nom as patient_nom, pat.prenom as patient_prenom,
+                v.numero_visite, c.motif_consultation as consultation_motif,
+                u_val.nom_complet as medecin_validateur_nom
+         FROM demandes_imagerie di
+         JOIN patients pat ON di.patient_id = pat.id
+         JOIN visites v ON di.visite_id = v.id
+         JOIN consultations c ON di.consultation_id = c.id
+         LEFT JOIN users u_val ON di.medecin_validateur_id = u_val.id
+         WHERE di.id = ?`,
+        [id]
+      )
+    });
+  } catch (error: any) {
+    console.error('Erreur amendement demande imagerie:', error);
+    res.status(500).json({ error: 'Erreur interne lors de l\'amendement.' });
+  }
+}

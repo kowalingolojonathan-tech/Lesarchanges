@@ -13,7 +13,7 @@ export async function runMigrations(): Promise<void> {
       username TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
       nom_complet TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('ADMINISTRATEUR', 'RÉCEPTION', 'MÉDECIN', 'LABORATOIRE')),
+      role TEXT NOT NULL CHECK(role IN ('ADMINISTRATEUR', 'RÉCEPTION', 'MÉDECIN', 'LABORATOIRE', 'IMAGERIE')),
       must_change_password INTEGER NOT NULL DEFAULT 0 CHECK(must_change_password IN (0, 1)),
       actif INTEGER NOT NULL DEFAULT 1 CHECK(actif IN (0, 1)),
       created_at TEXT NOT NULL,
@@ -1960,6 +1960,31 @@ export async function runMigrations(): Promise<void> {
     `);
   } catch (err) {
     console.error('Erreur lors de la migration imagerie (Phase 7.1):', err);
+  }
+
+  // --- PHASE 7.1 ÉTAPE 3 : AMENDEMENTS IMAGERIE ---
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS amendements_imagerie (
+        id TEXT PRIMARY KEY,
+        demande_imagerie_id TEXT NOT NULL,
+        ancien_compte_rendu_texte TEXT NOT NULL,
+        nouveau_compte_rendu_texte TEXT NOT NULL,
+        ancien_compte_rendu_url TEXT,
+        nouveau_compte_rendu_url TEXT,
+        ancien_compte_rendu_nom TEXT,
+        nouveau_compte_rendu_nom TEXT,
+        motif TEXT NOT NULL,
+        amende_par_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (demande_imagerie_id) REFERENCES demandes_imagerie(id) ON DELETE CASCADE,
+        FOREIGN KEY (amende_par_id) REFERENCES users(id) ON DELETE RESTRICT
+      );
+      CREATE INDEX IF NOT EXISTS idx_amendement_imagerie_demande ON amendements_imagerie(demande_imagerie_id);
+      CREATE INDEX IF NOT EXISTS idx_amendement_imagerie_create ON amendements_imagerie(created_at);
+    `);
+  } catch (err) {
+    console.error('Erreur lors de la migration amendements imagerie (Phase 7.1):', err);
   }
 
   db.exec('PRAGMA foreign_keys = ON;');

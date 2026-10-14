@@ -225,6 +225,14 @@ app.post('/api/medical/lab-orders/:id/mark-viewed', requireAuth, requireRole(['M
   app.post('/api/medical/imagerie-demandes', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.createImagerieDemande);
   app.get('/api/medical/imagerie-demande/:id', requireAuth, requireRole(['MÉDECIN', 'LABORATOIRE']), medicalCtrl.getImagerieDemandeById);
   app.get('/api/medical/imagerie-demandes', requireAuth, requireRole(['MÉDECIN', 'LABORATOIRE', 'RÉCEPTION']), medicalCtrl.getImagerieOrders);
+  // --- ÉTAPE 3 : ACTIONS DU SERVICE D'IMAGERIE ---
+  app.patch('/api/medical/imagerie-demande/:id/take-charge', requireAuth, requireRole(['LABORATOIRE']), medicalCtrl.takeChargeImagerieDemande);
+  app.patch('/api/medical/imagerie-demande/:id/realize', requireAuth, requireRole(['LABORATOIRE']), medicalCtrl.realizeImagerieDemande);
+  app.patch('/api/medical/imagerie-demande/:id/write-report', requireAuth, requireRole(['LABORATOIRE']), medicalCtrl.writeReportImagerieDemande);
+  app.post('/api/medical/imagerie-demande/:id/submit-for-validation', requireAuth, requireRole(['LABORATOIRE']), medicalCtrl.submitForValidationImagerieDemande);
+  app.post('/api/medical/imagerie-demande/:id/validate', requireAuth, requireRole(['LABORATOIRE']), medicalCtrl.validateImagerieDemande);
+  app.post('/api/medical/imagerie-demande/:id/transmit', requireAuth, requireRole(['LABORATOIRE']), medicalCtrl.transmitImagerieDemande);
+  app.post('/api/medical/imagerie-demande/:id/amend', requireAuth, requireRole(['LABORATOIRE']), medicalCtrl.amendImagerieDemande);
 
   // --- NOTIFICATIONS SYSTÈME ---
   app.get('/api/notifications', requireAuth, medicalCtrl.getUserNotifications);
