@@ -8558,7 +8558,7 @@ export async function getImagerieOrders(req: AuthenticatedRequest, res: Response
 export async function takeChargeImagerieDemande(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const user = req.user;
-    if (!user || user.role !== 'LABORATOIRE') {
+if (!user || !['LABORATOIRE', 'IMAGERIE'].includes(user.role)) {
       res.status(403).json({ error: 'Accès strictement réservé au service d\'imagerie (LABORATOIRE).' });
       return;
     }
@@ -8644,7 +8644,7 @@ export async function takeChargeImagerieDemande(req: AuthenticatedRequest, res: 
 export async function realizeImagerieDemande(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const user = req.user;
-    if (!user || user.role !== 'LABORATOIRE') {
+if (!user || !['LABORATOIRE', 'IMAGERIE'].includes(user.role)) {
       res.status(403).json({ error: 'Accès strictement réservé au service d\'imagerie (LABORATOIRE).' });
       return;
     }
@@ -8699,7 +8699,7 @@ export async function realizeImagerieDemande(req: AuthenticatedRequest, res: Res
 export async function writeReportImagerieDemande(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const user = req.user;
-    if (!user || user.role !== 'LABORATOIRE') {
+if (!user || !['LABORATOIRE', 'IMAGERIE'].includes(user.role)) {
       res.status(403).json({ error: 'Accès strictement réservé au service d\'imagerie (LABORATOIRE).' });
       return;
     }
@@ -8753,7 +8753,7 @@ export async function writeReportImagerieDemande(req: AuthenticatedRequest, res:
 export async function submitForValidationImagerieDemande(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const user = req.user;
-    if (!user || user.role !== 'LABORATOIRE') {
+if (!user || !['LABORATOIRE', 'IMAGERIE'].includes(user.role)) {
       res.status(403).json({ error: 'Accès strictement réservé au service d\'imagerie (LABORATOIRE).' });
       return;
     }
@@ -8828,7 +8828,7 @@ export async function submitForValidationImagerieDemande(req: AuthenticatedReque
 export async function validateImagerieDemande(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const user = req.user;
-    if (!user || user.role !== 'LABORATOIRE') {
+if (!user || !['LABORATOIRE', 'IMAGERIE'].includes(user.role)) {
       res.status(403).json({ error: 'Accès strictement réservé au service d\'imagerie (LABORATOIRE).' });
       return;
     }
@@ -8916,7 +8916,7 @@ export async function validateImagerieDemande(req: AuthenticatedRequest, res: Re
 export async function transmitImagerieDemande(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const user = req.user;
-    if (!user || user.role !== 'LABORATOIRE') {
+if (!user || !['LABORATOIRE', 'IMAGERIE'].includes(user.role)) {
       res.status(403).json({ error: 'Accès strictement réservé au service d\'imagerie (LABORATOIRE).' });
       return;
     }
@@ -8956,7 +8956,7 @@ export async function transmitImagerieDemande(req: AuthenticatedRequest, res: Re
 export async function amendImagerieDemande(req: AuthenticatedRequest, res: Response): Promise<void> {
   try {
     const user = req.user;
-    if (!user || user.role !== 'LABORATOIRE') {
+if (!user || !['LABORATOIRE', 'IMAGERIE'].includes(user.role)) {
       res.status(403).json({ error: 'Accès strictement réservé au service d\'imagerie (LABORATOIRE).' });
       return;
     }
