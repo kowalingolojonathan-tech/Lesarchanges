@@ -597,6 +597,52 @@ export interface DemandeLaboratoire {
 
 export type LabOrder = DemandeLaboratoire;
 
+export type ImagerieDemandeStatut =
+  | 'DEMANDE_CREEE' | 'PRISE_EN_CHARGE' | 'EN_REALISATION'
+  | 'RESULTATS_A_SAISIR' | 'RESULTATS_SAISIS' | 'RESULTAT_A_VALIDER'
+  | 'RESULTATS_VALIDES' | 'RESULTAT_VALIDE' | 'TRANSMIS_AU_MEDECIN'
+  | 'TERMINEE' | 'ANNULEE';
+
+export type ImagerieDemandeUrgence = 'NORMALE' | 'URGENTE';
+
+export interface ImagerieDemande {
+  id: string;
+  numero_demande: string;
+  consultation_id: string;
+  patient_id: string;
+  visite_id: string;
+  medecin_id: string;
+  date_demande: string;
+  statut: ImagerieDemandeStatut;
+  urgence: ImagerieDemandeUrgence;
+  indication_clinique?: string | null;
+  commentaire?: string | null;
+  amendement_motif?: string | null;
+  facture_id?: string | null;
+  medecin_realisateur_id?: string | null;
+  medecin_validateur_id?: string | null;
+  medecin_realisateur_nom?: string | null;
+  medecin_validateur_nom?: string | null;
+  date_realisation?: string | null;
+  date_validation?: string | null;
+  compte_rendu_texte?: string | null;
+  compte_rendu_url?: string | null;
+  compte_rendu_nom?: string | null;
+  document_url?: string | null;
+  document_nom?: string | null;
+  created_at: string;
+  updated_at: string;
+  // Joint fields
+  patient_nom?: string;
+  patient_prenom?: string;
+  patient_date_naissance?: string;
+  patient_sexe?: 'M' | 'F';
+  numero_dossier?: string;
+  numero_visite?: string;
+  consultation_motif?: string | null;
+  medecin_nom?: string;
+}
+
 export interface LaborantinUser {
   id: string;
   username: string;

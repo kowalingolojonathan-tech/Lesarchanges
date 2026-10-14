@@ -1909,6 +1909,59 @@ export async function runMigrations(): Promise<void> {
     console.error('Erreur lors de la migration hospitalisations (Phase 6.3):', err);
   }
 
+  // --- PHASE 7.1 : IMAGERIE MÉDICALE ---
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS demandes_imagerie (
+        id TEXT PRIMARY KEY,
+        numero_demande TEXT UNIQUE NOT NULL,
+        consultation_id TEXT NOT NULL,
+        patient_id TEXT NOT NULL,
+        visite_id TEXT NOT NULL,
+        medecin_id TEXT NOT NULL,
+        date_demande TEXT NOT NULL,
+        statut TEXT NOT NULL DEFAULT 'DEMANDE_CREEE' CHECK(statut IN (
+          'DEMANDE_CREEE', 'PRISE_EN_CHARGE', 'EN_REALISATION',
+          'RESULTATS_A_SAISIR', 'RESULTATS_SAISIS', 'RESULTAT_A_VALIDER',
+          'RESULTATS_VALIDES', 'RESULTAT_VALIDE', 'TRANSMIS_AU_MEDECIN',
+          'TERMINEE', 'ANNULEE'
+        )),
+        urgence TEXT NOT NULL DEFAULT 'NORMALE' CHECK(urgence IN ('NORMALE', 'URGENTE')),
+        indication_clinique TEXT,
+        commentaire TEXT,
+        amendement_motif TEXT,
+        facture_id TEXT,
+        medecin_realisateur_id TEXT,
+        medecin_validateur_id TEXT,
+        medecin_realisateur_nom TEXT,
+        medecin_validateur_nom TEXT,
+        date_realisation TEXT,
+        date_validation TEXT,
+        compte_rendu_texte TEXT,
+        compte_rendu_url TEXT,
+        compte_rendu_nom TEXT,
+        document_url TEXT,
+        document_nom TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (consultation_id) REFERENCES consultations(id) ON DELETE RESTRICT,
+        FOREIGN KEY (visite_id) REFERENCES visites(id) ON DELETE RESTRICT,
+        FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE RESTRICT,
+        FOREIGN KEY (medecin_id) REFERENCES users(id) ON DELETE RESTRICT,
+        FOREIGN KEY (medecin_realisateur_id) REFERENCES users(id) ON DELETE SET NULL,
+        FOREIGN KEY (medecin_validateur_id) REFERENCES users(id) ON DELETE SET NULL,
+        FOREIGN KEY (facture_id) REFERENCES factures(id) ON DELETE RESTRICT
+      );
+      CREATE INDEX IF NOT EXISTS idx_imagerie_consultation ON demandes_imagerie(consultation_id);
+      CREATE INDEX IF NOT EXISTS idx_imagerie_patient ON demandes_imagerie(patient_id);
+      CREATE INDEX IF NOT EXISTS idx_imagerie_medecin ON demandes_imagerie(medecin_id);
+      CREATE INDEX IF NOT EXISTS idx_imagerie_statut ON demandes_imagerie(statut);
+      CREATE INDEX IF NOT EXISTS idx_imagerie_visite ON demandes_imagerie(visite_id);
+    `);
+  } catch (err) {
+    console.error('Erreur lors de la migration imagerie (Phase 7.1):', err);
+  }
+
   db.exec('PRAGMA foreign_keys = ON;');
   saveDb();
 }

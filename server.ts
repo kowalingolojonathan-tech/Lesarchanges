@@ -221,6 +221,10 @@ app.post('/api/medical/lab-orders/:id/mark-viewed', requireAuth, requireRole(['M
   app.get('/api/medical/hospitalisations/:id/bill', requireAuth, requireRole(['MÉDECIN', 'RÉCEPTION']), medicalCtrl.getHospitalisationBill);
   app.post('/api/medical/hospitalisations/:id/derogation', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.demanderDerogationSortie);
   app.post('/api/medical/hospitalisations/:id/derogation/approuver', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.approuverDerogationSortie);
+  // --- IMagerie MÉDICALE (Phase 7.1) ---
+  app.post('/api/medical/imagerie-demandes', requireAuth, requireRole(['MÉDECIN']), medicalCtrl.createImagerieDemande);
+  app.get('/api/medical/imagerie-demande/:id', requireAuth, requireRole(['MÉDECIN', 'LABORATOIRE']), medicalCtrl.getImagerieDemandeById);
+  app.get('/api/medical/imagerie-demandes', requireAuth, requireRole(['MÉDECIN', 'LABORATOIRE', 'RÉCEPTION']), medicalCtrl.getImagerieOrders);
 
   // --- NOTIFICATIONS SYSTÈME ---
   app.get('/api/notifications', requireAuth, medicalCtrl.getUserNotifications);

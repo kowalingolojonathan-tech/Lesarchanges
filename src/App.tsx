@@ -19,6 +19,7 @@ import { DoctorDashboardView } from './components/medical/DoctorDashboardView.js
 import { DoctorReportsView } from './components/medical/DoctorReportsView.js';
 import { LaboratoryQueueView } from './components/medical/LaboratoryQueueView.js';
 import { RelaisMedicalView } from './components/medical/RelaisMedicalView.js';
+import { ImagerieQueueView } from './components/medical/ImagerieQueueView.js';
 import { MobileBottomNav } from './components/layout/MobileBottomNav.js';
 import { Visite } from './types/index.js';
 import { Loader2 } from 'lucide-react';
@@ -148,6 +149,9 @@ const MainApp: React.FC = () => {
 
       case 'doctor-relais':
         return <RelaisMedicalView onNavigate={setCurrentTab} />;
+
+      case 'imagerie-worklist':
+        return <ImagerieQueueView />;
 
       default:
         return <RoleDashboard onNavigate={setCurrentTab} />;

@@ -19,6 +19,7 @@ import {
   PanelLeftOpen,
   X,
   RefreshCw,
+  Scan,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -97,6 +98,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Relais Médical',
       badge: '6.1',
       icon: RefreshCw,
+      roles: ['MÉDECIN'],
+    },
+    // Menus pour IMAGERIE MÉDICALE
+    {
+      id: 'imagerie-worklist',
+      label: 'Imagerie Médicale',
+      badge: '7.1',
+      icon: Scan,
       roles: ['MÉDECIN'],
     },
     // Menus pour LABORATOIRE

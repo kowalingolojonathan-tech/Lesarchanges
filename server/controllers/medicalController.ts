@@ -8176,3 +8176,276 @@ export async function getHospitalisationBill(req: AuthenticatedRequest, res: Res
     res.status(500).json({ error: 'Erreur interne.' });
   }
 }
+
+/**
+ * CRÉER UNE DEMANDE D'IMAGERIE DEPUIS UNE CONSULTATION
+ * POST /api/medical/imagerie-demandes
+ * Rôle strict : MÉDECIN
+ */
+export async function createImagerieDemande(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user || !isDoctorRole(user)) {
+      res.status(403).json({ error: 'Accès strictement réservé au corps médical (MÉDECIN).' });
+      return;
+    }
+
+    const {
+      consultation_id,
+      indication_clinique,
+      commentaire,
+      urgence
+    } = req.body || {};
+
+    if (!consultation_id || typeof consultation_id !== 'string') {
+      res.status(400).json({ error: 'L\'identifiant de consultation (consultation_id) est obligatoire.' });
+      return;
+    }
+
+    // 1. Vérifier que la consultation existe
+    const consultation = await queryOne<any>(
+      `SELECT * FROM consultations WHERE id = ? AND actif = 1`,
+      [consultation_id]
+    );
+    if (!consultation) {
+      res.status(404).json({ error: 'Consultation introuvable.' });
+      return;
+    }
+
+    // 2. Vérifier que la consultation appartient bien au médecin connecté
+    if (consultation.medecin_id !== user.id) {
+      await auditLogger.log({
+        userId: user.id,
+        action: 'ACCESS_DENIED',
+        ressourceType: 'DEMANDE_IMAGERIE',
+        ressourceId: consultation_id,
+        details: 'Dr. ' + user.nom_complet + ' a tenté de créer une demande d\'imagerie pour une consultation d\'un confrère',
+        ipAddress: req.ip || '127.0.0.1'
+      });
+      res.status(403).json({ error: 'Vous ne pouvez pas prescrire d\'examen d\'imagerie pour une consultation qui ne vous appartient pas.' });
+      return;
+    }
+
+    // 3. Vérifier la cohérence si patient_id ou visite_id sont fournis (validation de sécurité)
+    if (req.body.patient_id && req.body.patient_id !== consultation.patient_id) {
+      res.status(400).json({ error: 'Incohérence entre le patient indiqué et la consultation.' });
+      return;
+    }
+    if (req.body.visite_id && req.body.visite_id !== consultation.visite_id) {
+      res.status(400).json({ error: 'Incohérence entre la visite indiquée et la consultation.' });
+      return;
+    }
+
+    // 4. Consultation finalisée : exiger un motif d'amendement explicite
+    if (consultation.statut === 'FINALISEE') {
+      if (!req.body.is_amendment || !req.body.amendement_motif || typeof req.body.amendement_motif !== 'string' || req.body.amendement_motif.trim().length < 5) {
+        res.status(409).json({ error: 'Cette consultation est finalisée. Un motif explicite d\'amendement est requis pour ajouter une demande d\'imagerie.' });
+        return;
+      }
+    }
+
+    // 5. Validation de l'urgence
+    const targetUrgence = (urgence === 'URGENTE') ? 'URGENTE' : 'NORMALE';
+
+    // 6. Vérifier doublon : existe-t-il déjà une demande active pour cette consultation ?
+    const existing = await queryOne<any>(
+      `SELECT id, statut, numero_demande FROM demandes_imagerie WHERE consultation_id = ? AND statut NOT IN ('TERMINEE', 'ANNULEE') LIMIT 1`,
+      [consultation_id]
+    );
+    if (existing) {
+      res.status(409).json({ error: 'Une demande d\'imagerie existe déjà pour cette consultation (n° ' + existing.numero_demande + ').', existing_demande: existing.id });
+      return;
+    }
+
+    // 7. Générer les clés et insérer
+    const now = new Date().toISOString();
+    const orderId = 'dli-' + crypto.randomUUID().substring(0, 12);
+    const randSuffix = crypto.randomBytes(3).toString('hex').toUpperCase();
+    const numeroDemande = 'IMG-' + new Date().getFullYear() + '-' + randSuffix;
+
+    await transaction(async () => {
+      await execute(
+        `INSERT INTO demandes_imagerie (
+          id, numero_demande, consultation_id, patient_id, visite_id, medecin_id,
+          date_demande, statut, urgence, indication_clinique, commentaire,
+          medecin_realisateur_id, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          orderId, numeroDemande, consultation.id, consultation.patient_id,
+          consultation.visite_id, user.id,
+          now, 'DEMANDE_CREEE', targetUrgence,
+          indication_clinique?.trim() || null,
+          commentaire?.trim() || null,
+          user.id, now, now
+        ]
+      );
+    });
+
+    // 8. Récupérer la demande créée avec jointures
+    const createdDemande = await queryOne<any>(
+      `SELECT di.*, p.numero_dossier, pat.nom as patient_nom, pat.prenom as patient_prenom,
+              pat.date_naissance as patient_date_naissance, pat.sexe as patient_sexe,
+              v.numero_visite, c.motif_consultation as consultation_motif,
+              u_med.nom_complet as medecin_nom
+       FROM demandes_imagerie di
+       JOIN patients pat ON di.patient_id = pat.id
+       JOIN visites v ON di.visite_id = v.id
+       JOIN consultations c ON di.consultation_id = c.id
+       JOIN users u_med ON di.medecin_id = u_med.id
+       WHERE di.id = ?`,
+      [orderId]
+    );
+
+    // 9. Notification à la réception
+    try {
+      const receptionUsers = await query<any>(
+        `SELECT u.id FROM users u WHERE (u.role = 'RÉCEPTION' OR u.role = 'RECEPTION') AND u.actif = 1`
+      );
+      for (const recUser of receptionUsers) {
+        const notifId = 'notif-' + crypto.randomUUID().substring(0, 12);
+        await execute(
+          `INSERT INTO notifications (
+            id, user_id, emetteur_id, emetteur_nom, emetteur_role, destinataire_role,
+            titre, message, type, patient_id, consultation_id, visite_id, lu, created_at
+          ) VALUES (?, ?, ?, ?, ?, 'RÉCEPTION', ?, ?, 'IMAGERIE_DEMANDE', ?, ?, ?, 0, ?)`,
+          [
+            notifId, recUser.id, user.id, user.nom_complet, user.role,
+            'Nouvelle demande d\'imagerie : ' + (createdDemande?.patient_nom || 'Patient'),
+            'Demande n° ' + numeroDemande + ' par Dr. ' + user.nom_complet + '. Patient : ' + (createdDemande?.patient_nom || '') + ' ' + (createdDemande?.patient_prenom || ''),
+            consultation.patient_id, consultation.id, consultation.visite_id, now
+          ]
+        );
+      }
+    } catch (notifErr) {
+      console.error('Erreur notification réception imagerie:', notifErr);
+    }
+
+    res.status(201).json({
+      message: 'Demande d\'imagerie créée avec succès.',
+      demande: createdDemande
+    });
+  } catch (error: any) {
+    console.error('Erreur création demande imagerie:', error);
+    res.status(500).json({ error: 'Erreur interne lors de la création de la demande d\'imagerie.' });
+  }
+}
+
+/**
+ * Récupérer le détail d'une demande d'imagerie
+ * GET /api/medical/imagerie-demande/:id
+ */
+export async function getImagerieDemandeById(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user) {
+      res.status(401).json({ error: 'Non authentifié.' });
+      return;
+    }
+
+    // RBAC : MÉDECIN ou LABORATOIRE autorisé
+    if (!['MÉDECIN', 'LABORATOIRE'].includes(user.role)) {
+      await auditLogger.log({
+        userId: user.id,
+        action: 'ACCESS_DENIED',
+        ressourceType: 'DEMANDE_IMAGERIE',
+        ressourceId: req.params.id,
+        details: 'Tentative d\'accès non autorisée au rôle ' + user.role,
+        ipAddress: req.ip || '127.0.0.1'
+      });
+      res.status(403).json({ error: 'Accès réservé au médecin et au laboratoire.' });
+      return;
+    }
+
+    const { id } = req.params;
+
+    const demande = await queryOne<any>(
+      `SELECT di.*, p.numero_dossier, pat.nom as patient_nom, pat.prenom as patient_prenom,
+              pat.date_naissance as patient_date_naissance, pat.sexe as patient_sexe,
+              v.numero_visite, c.motif_consultation as consultation_motif,
+              u_med.nom_complet as medecin_nom
+       FROM demandes_imagerie di
+       JOIN patients pat ON di.patient_id = pat.id
+       JOIN visites v ON di.visite_id = v.id
+       JOIN consultations c ON di.consultation_id = c.id
+       JOIN users u_med ON di.medecin_id = u_med.id
+       WHERE di.id = ?`,
+      [id]
+    );
+
+    if (!demande) {
+      res.status(404).json({ error: 'Demande d\'imagerie introuvable.' });
+      return;
+    }
+
+    // Contrôle d'accès : le médecin prescripteur ou un rôle Laboratoire peut voir
+    if (user.role === 'MÉDECIN' && demande.medecin_id !== user.id) {
+      res.status(403).json({ error: 'Vous ne pouvez pas accéder à la demande d\'imagerie d\'un confrère.' });
+      return;
+    }
+
+    res.json({ demande });
+  } catch (error: any) {
+    console.error('Erreur récupération demande imagerie:', error);
+    res.status(500).json({ error: 'Erreur interne.' });
+  }
+}
+
+/**
+ * Lister les demandes d'imagerie selon les permissions de l'utilisateur
+ * GET /api/medical/imagerie-demandes
+ */
+export async function getImagerieOrders(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const user = req.user;
+    if (!user) {
+      res.status(401).json({ error: 'Non authentifié.' });
+      return;
+    }
+
+    // Construire la requête selon le rôle
+    let whereClause = 'di.statut IS NOT NULL';
+    const params: any[] = [];
+
+    if (user.role === 'MÉDECIN') {
+      // Médecin : ne voit que ses propres demandes
+      whereClause += ' AND di.medecin_id = ?';
+      params.push(user.id);
+    } else if (user.role === 'LABORATOIRE') {
+      // Laboratoire : voit toutes les demandes (pour le traitement)
+      // Peut filtrer par statut si demandé via query param
+      if (req.query && (req.query as any).statut) {
+        const statuts = Array.isArray((req.query as any).statut)
+          ? (req.query as any).statut
+          : [(req.query as any).statut];
+        const placeholders = statuts.map(() => '?').join(',');
+        whereClause += ' AND di.statut IN (' + placeholders + ')';
+        params.push(...statuts);
+      }
+    } else if (user.role === 'RÉCEPTION' || user.role === 'RECEPTION') {
+      // Réception : voit toutes les demandes (pour suivi facturation)
+    } else {
+      res.status(403).json({ error: 'Accès non autorisé.' });
+      return;
+    }
+
+    const demandes = await query<any>(
+      `SELECT di.*, p.numero_dossier, pat.nom as patient_nom, pat.prenom as patient_prenom,
+              pat.date_naissance as patient_date_naissance, pat.sexe as patient_sexe,
+              v.numero_visite, c.motif_consultation as consultation_motif,
+              u_med.nom_complet as medecin_nom
+       FROM demandes_imagerie di
+       JOIN patients pat ON di.patient_id = pat.id
+       JOIN visites v ON di.visite_id = v.id
+       JOIN consultations c ON di.consultation_id = c.id
+       JOIN users u_med ON di.medecin_id = u_med.id
+       WHERE ${whereClause}
+       ORDER BY di.date_demande DESC`,
+      params
+    );
+
+    res.json({ demandes });
+  } catch (error: any) {
+    console.error('Erreur liste demandes imagerie:', error);
+    res.status(500).json({ error: 'Erreur interne.' });
+  }
+}
