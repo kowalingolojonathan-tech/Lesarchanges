@@ -239,7 +239,7 @@ app.get('/api/medical/imagerie-demande/:id', requireAuth, requireRole(['MÉDECIN
    app.post('/api/medical/imagerie-demande/:id/transmit', requireAuth, requireRole(['IMAGERIE']), medicalCtrl.transmitImagerieDemande);
    app.post('/api/medical/imagerie-demande/:id/amend', requireAuth, requireRole(['IMAGERIE']), medicalCtrl.amendImagerieDemande);
 
-  // --- ROUTES API PHASE 7.2 : PHARMACIE HOSPITALIERE ---
+// --- ROUTES API PHASE 7.2 : PHARMACIE HOSPITALIERE ---
   // Catalogue des médicaments (consultation pour PHARMACIEN + ADMINISTRATEUR)
   app.get('/api/pharmacie/catalogue', requireAuth, requireRole(['PHARMACIEN', 'ADMINISTRATEUR']), pharmacieCtrl.getCatalogueMedicaments);
   app.post('/api/pharmacie/catalogue', requireAuth, requireRole(['PHARMACIEN', 'ADMINISTRATEUR']), pharmacieCtrl.createMedicament);
@@ -257,6 +257,9 @@ app.get('/api/medical/imagerie-demande/:id', requireAuth, requireRole(['MÉDECIN
   // Alertes et vue d'ensemble stock
   app.get('/api/pharmacie/alertes', requireAuth, requireRole(['PHARMACIEN', 'ADMINISTRATEUR']), pharmacieCtrl.getAlertes);
   app.get('/api/pharmacie/stocks', requireAuth, requireRole(['PHARMACIEN', 'ADMINISTRATEUR']), pharmacieCtrl.getStockVue);
+
+  // POS pharmacie : ouverture d'une vente liée à une prescription
+  app.post('/api/pharmacie/pos', requireAuth, requireRole(['PHARMACIEN', 'ADMINISTRATEUR']), pharmacieCtrl.createPharmaciePos);
 
   // Protection RBAC : Pharmacien
   app.get('/api/pharmacie/protected-test', requireAuth, requireRole(['PHARMACIEN']), (req: express.Request, res: express.Response) => {

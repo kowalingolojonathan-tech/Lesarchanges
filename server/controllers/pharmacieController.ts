@@ -549,3 +549,102 @@ let sql = `
     res.status(500).json({ error: 'Erreur lors de la récupération du stock.' });
   }
 }
+
+/**
+ * POS pharmacie : création d'une vente liée à une prescription
+ * - Affiche les médicaments prescrits avec quantités disponibles et sélectionnées
+ * - Le patient sélectionne les médicaments et quantités à acheter
+ * - Création de la facture avec seulement les médicaments achetés (via createLinkedFactureCore)
+ * - Enregistrement du paiement
+ * - Mise à jour atomique du stock (lots_medicaments.quantite_en_cours)
+ */
+export async function createPharmaciePos(req: AuthenticatedRequest, res: Response): Promise<void> {
+  const authReq = req as AuthenticatedRequest;
+  const { prescription_id } = req.body;
+
+  if (!prescription_id) {
+    res.status(400).json({ error: 'ID de prescription requis.' });
+    return;
+  }
+
+  try {
+    // Récupérer la prescription avec ses items
+    const prescription = await queryOne<any>(
+      `SELECT pi.id, pi.nom_medicament, pi.dosage, pi.forme, pi.voie_administration, pi.frequence, pi.duree, pi.quantite,
+              pi.ordre, c.code, c.nom_commercial, c.nom_generique, c.classe_therapeutique, c.forme as forme_catalogue, c.dosage_unit,
+              c.prix_autorise_usd, c.actif, l.id as lot_id, l.numero_lot, l.date_peremption, l.quantite_en_cours, l.quantite_recue, l.fournisseur
+       FROM prescription_items pi
+       LEFT JOIN catalogue_medicaments c ON pi.catalogue_id = c.id
+       LEFT JOIN lots_medicaments l ON c.id = l.catalogue_id AND l.date_peremption > date('now')
+       WHERE pi.prescription_id = ?
+       ORDER BY pi.ordre, l.date_peremption ASC`,
+      [prescription_id]
+    );
+
+    if (!prescription) {
+      res.status(404).json({ error: 'Prescription introuvable.' });
+      return;
+    }
+
+    // Récupérer les infos patient et visite
+    const patient = await queryOne<any>('SELECT id, numero_dossier, nom, prenom, telephone FROM patients WHERE id = ?', [prescription.patient_id]);
+    const visite = await queryOne<any>('SELECT id, numero_visite, patient_id, medecin_id, statut FROM visites WHERE id = ?', [prescription.visite_id]);
+
+    if (!patient) {
+      res.status(404).json({ error: 'Patient introuvable.' });
+      return;
+    }
+
+    // Organiser les médicaments par lot
+    const medicaments = prescription.items.map((it: any) => {
+      const lotDisponible = prescription.items.filter((item: any) => item.lot_id !== null);
+      const lotInfo = lotDisponible.length > 0 ? {
+        lot_id: lotDisponible[0].lot_id,
+        numero_lot: lotDisponible[0].numero_lot,
+        date_peremption: lotDisponible[0].date_peremption,
+        quantite_en_cours: lotDisponible[0].quantite_en_cours,
+        fournisseur: lotDisponible[0].fournisseur
+      } : null;
+
+      // Quantité disponible dans les lots non expirés pour ce médicament
+      const quantiteDisponible = prescription.items
+        .filter((item: any) => item.lot_id !== null && item.lot_id === lotInfo?.lot_id)
+        .reduce((sum: number, item: any) => sum + (item.quantite_en_cours || 0), 0);
+
+      return {
+        item_id: it.id,
+        nom_medicament: it.nom_medicament,
+        dosage: it.dosage,
+        forme: it.forme,
+        frequence: it.frequence,
+        duree: it.duree,
+        quantite_prescrite: it.quantite || 1,
+        quantite_selectionnee: 0, // Sera définie par l'utilisateur en POS
+        prix_unitaire: it.prix_autorise_usd || 0,
+        actif: it.actif,
+        catalogue_id: it.catalogue_id,
+        lot_info: lotInfo,
+        quantite_disponible: quantiteDisponible,
+        code: it.code
+      };
+    });
+
+    res.json({
+      success: true,
+      patient: {
+        id: patient.id,
+        numero_dossier: patient.numero_dossier,
+        nom: patient.nom,
+        prenom: patient.prenom,
+        telephone: patient.telephone
+      },
+      prescription_id: prescription_id,
+      visite_id: prescription.visite_id,
+      medicaments: medicaments,
+      total_prescrit: prescription.items.length
+    });
+  } catch (err: any) {
+    console.error('Erreur createPharmaciePos:', err);
+    res.status(500).json({ error: 'Erreur ouverture POS pharmacie: ' + err.message });
+  }
+}

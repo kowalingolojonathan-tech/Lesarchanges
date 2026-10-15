@@ -97,7 +97,30 @@ export const ReceptionPrescriptionsModal: React.FC<ReceptionPrescriptionsModalPr
     }
   };
 
-  const filteredPrescriptions = prescriptions.filter(p => {
+  // Vendre à la pharmacie de l'hôpital (POS pharmacie)
+  const handleSellToPharmacy = async (p: Prescription) => {
+    try {
+      setProcessingId(p.id);
+      setError(null);
+      const res = await apiFetch('/api/pharmacie/pos', {
+        method: 'POST',
+        body: JSON.stringify({ prescription_id: p.id }),
+        headers: { 'Content-Type': 'application/json' }
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Erreur ouverture POS pharmacie');
+      }
+      const data = await res.json();
+      setProcessingId(null);
+      onClose();
+      // Navigation vers la POS pharmacie avec la prescription préremplie
+      // setCurrentTab('pharmacie-pos');
+    } catch (err: any) {
+      setError(err.message || 'Erreur ouverture POS pharmacie');
+      setProcessingId(null);
+    }
+  };
     if (initialVisiteId && p.visite_id !== initialVisiteId) return false;
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
@@ -333,6 +356,19 @@ export const ReceptionPrescriptionsModal: React.FC<ReceptionPrescriptionsModalPr
                       >
                         <Send className="w-3.5 h-3.5 mr-1.5" />
                         Remettre au patient
+                      </button>
+                    )}
+
+                    {p.statut === 'VALIDEE' && (
+                      <button
+                        type="button"
+                        disabled={processingId === p.id}
+                        onClick={() => handleSellToPharmacy(p)}
+                        className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-semibold rounded-lg transition-colors flex items-center shadow-xs"
+                        title="Vendre à la pharmacie de l'hôpital"
+                      >
+                        <Package className="w-3.5 h-3.5 mr-1.5" />
+                        Vendre à la pharmacie
                       </button>
                     )}
 
