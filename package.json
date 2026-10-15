@@ -26,7 +26,8 @@
     "test:etape7": "tsx server/tests/etape7_rendez_vous.test.ts",
     "test:etape8": "tsx server/tests/etape8_facturation.test.ts",
     "test:etape9": "tsx server/tests/etape9_administration.test.ts",
-    "test:phase72": "tsx server/tests/phase72_1_socle_donnees.test.ts"
+    "test:phase72": "tsx server/tests/phase72_1_socle_donnees.test.ts",
+    "test:phase72b": "tsx server/tests/phase72_2_backoffice.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

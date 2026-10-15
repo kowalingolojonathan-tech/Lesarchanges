@@ -397,8 +397,8 @@ export async function createMouvement(req: AuthenticatedRequest, res: Response):
         throw new Error('Le lot ne correspond pas au catalogue sélectionné.');
       }
 
-      // Pour SORTIE et PEREMPTION, vérifier la quantité disponible
-      if ((type === 'SORTIE' || type === 'PEREMPTION') && lot.quantite_en_cours < qty) {
+// Pour SORTIE, PEREMPTION et RETOUR, vérifier la quantité disponible
+      if ((type === 'SORTIE' || type === 'PEREMPTION' || type === 'RETOUR') && lot.quantite_en_cours < qty) {
         throw new Error(`Stock insuffisant : ${lot.quantite_en_cours} disponible, ${qty} demandé.`);
       }
 
@@ -409,13 +409,22 @@ export async function createMouvement(req: AuthenticatedRequest, res: Response):
       );
 
       // Mettre à jour quantite_en_cours du lot
-      if (type === 'ENTREE' || type === 'RETOUR') {
+      if (type === 'ENTREE') {
         await execute('UPDATE lots_medicaments SET quantite_en_cours = quantite_en_cours + ?, updated_at = ? WHERE id = ?', [qty, now, lot_id]);
-      } else if (type === 'SORTIE' || type === 'PEREMPTION') {
+      } else if (type === 'SORTIE' || type === 'PEREMPTION' || type === 'RETOUR') {
         await execute('UPDATE lots_medicaments SET quantite_en_cours = quantite_en_cours - ?, updated_at = ? WHERE id = ?', [qty, now, lot_id]);
       } else if (type === 'AJUSTEMENT') {
         await execute('UPDATE lots_medicaments SET quantite_en_cours = quantite_en_cours + ?, updated_at = ? WHERE id = ?', [qty, now, lot_id]);
       }
+    });
+
+    await auditLogger.log({
+      userId: user.id,
+      action: 'PHARMACIE_MOUVEMENT_CREATE',
+      ressourceType: 'MOUVEMENT_STOCK',
+      ressourceId: mouvementId,
+      details: `Mouvement ${type} de ${qty} unité(s) — lot ${lot_id}`,
+      ipAddress: req.ip || '127.0.0.1',
     });
 
     const mouvement = await queryOne<any>('SELECT * FROM mouvements_stock WHERE id = ?', [mouvementId]);
@@ -516,14 +525,14 @@ export async function getAlertes(req: AuthenticatedRequest, res: Response): Prom
 export async function getStockVue(req: AuthenticatedRequest, res: Response): Promise<void> {
   const { actif } = req.query;
   try {
-    let sql = `
+let sql = `
       SELECT c.id, c.code, c.nom_commercial, c.nom_generique, c.classe_therapeutique, c.categorie,
              c.forme, c.dosage_unit, c.actif, c.prix_autorise_usd,
              COALESCE(SUM(CASE WHEN l.date_peremption > date('now') THEN l.quantite_en_cours ELSE 0 END), 0) as stock_disponible,
              COALESCE(SUM(l.quantite_en_cours), 0) as stock_total_incl_expires,
-             COUNT(DISTINCT l.id) as nb_lots_actifs
-      FROM catalogue_medicaments c
-      LEFT JOIN lots_medicaments l ON c.id = l.catalogue_id
+             COUNT(DISTINCT CASE WHEN l.date_peremption > date('now') THEN l.id END) as nb_lots_actifs
+       FROM catalogue_medicaments c
+       LEFT JOIN lots_medicaments l ON c.id = l.catalogue_id
       WHERE 1=1
     `;
     const params: any[] = [];
