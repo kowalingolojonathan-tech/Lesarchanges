@@ -219,6 +219,13 @@ export function isDoctorRole(user: AuthUser | undefined | { role?: string; role_
   );
 }
 
+export function isPharmacistRole(user: AuthUser | undefined | { role?: string; role_categorie?: string }): boolean {
+  if (!user) return false;
+  const role = user.role || '';
+  const cat = user.role_categorie || role;
+  return role === 'PHARMACIEN' || cat === 'PHARMACIE';
+}
+
 export function requireRole(allowedRoles: (Role | string)[]) {
   return async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
     if (!req.user) {
@@ -248,10 +255,15 @@ export function requireRole(allowedRoles: (Role | string)[]) {
       ['LABORATOIRE', 'LABO'].includes(uRole) || uCat === 'LABORATOIRE'
     );
 
+    // Catégorie pharmacie
+    const isPharmCategory = allowedRoles.includes('PHARMACIEN') && (
+      ['PHARMACIEN'].includes(uRole) || uCat === 'PHARMACIE'
+    );
+
     // Administrateur système
     const isAdmin = uRole === 'ADMINISTRATEUR' || uCat === 'ADMINISTRATEUR';
 
-    if (directMatch || isMedCategory || isRecepCategory || isLabCategory || isAdmin) {
+    if (directMatch || isMedCategory || isRecepCategory || isLabCategory || isPharmCategory || isAdmin) {
       return next();
     }
 

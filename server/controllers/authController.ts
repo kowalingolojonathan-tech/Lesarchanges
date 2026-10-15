@@ -277,22 +277,27 @@ export async function getMe(req: AuthenticatedRequest, res: Response): Promise<v
 
   const role = req.user.role;
   
-  // Matrice de permissions calculée côté backend
-  const permissions = {
-    role,
-    canManageUsers: role === 'ADMINISTRATEUR',
-    canViewTechnicalAudit: role === 'ADMINISTRATEUR',
-    canManagePatientsReception: role === 'RÉCEPTION' || role === 'ADMINISTRATEUR',
-    canRecordVitals: role === 'RÉCEPTION',
-    canProcessPayments: role === 'RÉCEPTION',
-    canAccessConsultations: role === 'MÉDECIN',
-    canPrescribeMedicines: role === 'MÉDECIN',
-    canOrderLabTests: role === 'MÉDECIN',
-    canReferExternal: role === 'MÉDECIN',
-    canProcessLabSamples: role === 'LABORATOIRE',
-    canValidateLabResults: role === 'LABORATOIRE',
-    canAccessPrivateMedicalNotes: role === 'MÉDECIN', // STRICT : ni Réception, ni Labo, ni Admin technique
-  };
+// Matrice de permissions calculée côté backend
+   const isPharm = role === 'PHARMACIEN';
+   const permissions = {
+     role,
+     canManageUsers: role === 'ADMINISTRATEUR',
+     canViewTechnicalAudit: role === 'ADMINISTRATEUR',
+     canManagePatientsReception: role === 'RÉCEPTION' || role === 'ADMINISTRATEUR',
+     canRecordVitals: role === 'RÉCEPTION',
+     canProcessPayments: role === 'RÉCEPTION',
+     canAccessConsultations: role === 'MÉDECIN',
+     canPrescribeMedicines: role === 'MÉDECIN',
+     canOrderLabTests: role === 'MÉDECIN',
+     canReferExternal: role === 'MÉDECIN',
+     canProcessLabSamples: role === 'LABORATOIRE',
+     canValidateLabResults: role === 'LABORATOIRE',
+     canAccessPrivateMedicalNotes: role === 'MÉDECIN', // STRICT : ni Réception, ni Labo, ni Admin technique
+     canManagePharmacy: isPharm || role === 'ADMINISTRATEUR',
+     canViewPharmacyStock: isPharm || role === 'ADMINISTRATEUR',
+     canManagePharmacyStock: isPharm || role === 'ADMINISTRATEUR',
+     canViewPharmacyAlerts: isPharm || role === 'ADMINISTRATEUR',
+   };
 
   res.json({
     user: {

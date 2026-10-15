@@ -1,26 +1,27 @@
 import React from 'react';
 import { useAuth } from '../../context/AuthContext.js';
 import {
-  LayoutDashboard,
-  Users,
-  FileText,
-  ShieldAlert,
-  UserPlus,
-  HeartPulse,
-  CreditCard,
-  Stethoscope,
-  FlaskConical,
-  Settings,
-  Tag,
-  ShieldCheck,
-  ChevronLeft,
-  ChevronRight,
-  PanelLeftClose,
-  PanelLeftOpen,
-  X,
-  RefreshCw,
-  Scan,
-} from 'lucide-react';
+   LayoutDashboard,
+   Users,
+   FileText,
+   ShieldAlert,
+   UserPlus,
+   HeartPulse,
+   CreditCard,
+   Stethoscope,
+   FlaskConical,
+   Settings,
+   Tag,
+   ShieldCheck,
+   ChevronLeft,
+   ChevronRight,
+   PanelLeftClose,
+   PanelLeftOpen,
+   X,
+   RefreshCw,
+   Scan,
+   Package,
+ } from 'lucide-react';
 
 interface SidebarProps {
   currentTab: string;
@@ -148,6 +149,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Devises & Configuration',
       icon: Settings,
       roles: ['ADMINISTRATEUR'],
+    },
+    // Menu pour PHARMACIEN
+    {
+      id: 'pharmacie-management',
+      label: 'Gestion Pharmacie',
+      icon: Package,
+      roles: ['PHARMACIEN', 'ADMINISTRATEUR'],
     },
     // Menu de vérification technique de la sécurité RBAC (réservé strictement à l'ADMINISTRATEUR)
     {

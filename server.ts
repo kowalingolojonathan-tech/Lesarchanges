@@ -14,6 +14,7 @@ import * as visiteCtrl from './server/controllers/visiteController.js';
 import * as medicalCtrl from './server/controllers/medicalController.js';
 import * as appointmentCtrl from './server/controllers/appointmentController.js';
 import * as billingCtrl from './server/controllers/billingController.js';
+import * as pharmacieCtrl from './server/controllers/pharmacieController.js';
 
 async function startServer() {
   const app = express();
@@ -237,6 +238,31 @@ app.get('/api/medical/imagerie-demande/:id', requireAuth, requireRole(['MÉDECIN
    app.post('/api/medical/imagerie-demande/:id/validate', requireAuth, requireRole(['IMAGERIE']), medicalCtrl.validateImagerieDemande);
    app.post('/api/medical/imagerie-demande/:id/transmit', requireAuth, requireRole(['IMAGERIE']), medicalCtrl.transmitImagerieDemande);
    app.post('/api/medical/imagerie-demande/:id/amend', requireAuth, requireRole(['IMAGERIE']), medicalCtrl.amendImagerieDemande);
+
+  // --- ROUTES API PHASE 7.2 : PHARMACIE HOSPITALIERE ---
+  // Catalogue des médicaments (consultation pour PHARMACIEN + ADMINISTRATEUR)
+  app.get('/api/pharmacie/catalogue', requireAuth, requireRole(['PHARMACIEN', 'ADMINISTRATEUR']), pharmacieCtrl.getCatalogueMedicaments);
+  app.post('/api/pharmacie/catalogue', requireAuth, requireRole(['PHARMACIEN', 'ADMINISTRATEUR']), pharmacieCtrl.createMedicament);
+  app.put('/api/pharmacie/catalogue/:id', requireAuth, requireRole(['PHARMACIEN', 'ADMINISTRATEUR']), pharmacieCtrl.updateMedicament);
+  app.patch('/api/pharmacie/catalogue/:id/toggle-active', requireAuth, requireRole(['PHARMACIEN', 'ADMINISTRATEUR']), pharmacieCtrl.toggleMedicamentActif);
+
+  // Lots de médicaments
+  app.get('/api/pharmacie/lots', requireAuth, requireRole(['PHARMACIEN', 'ADMINISTRATEUR']), pharmacieCtrl.getLots);
+  app.post('/api/pharmacie/lots', requireAuth, requireRole(['PHARMACIEN', 'ADMINISTRATEUR']), pharmacieCtrl.createLot);
+
+  // Mouvements de stock
+  app.get('/api/pharmacie/mouvements', requireAuth, requireRole(['PHARMACIEN', 'ADMINISTRATEUR']), pharmacieCtrl.getMouvements);
+  app.post('/api/pharmacie/mouvements', requireAuth, requireRole(['PHARMACIEN', 'ADMINISTRATEUR']), pharmacieCtrl.createMouvement);
+
+  // Alertes et vue d'ensemble stock
+  app.get('/api/pharmacie/alertes', requireAuth, requireRole(['PHARMACIEN', 'ADMINISTRATEUR']), pharmacieCtrl.getAlertes);
+  app.get('/api/pharmacie/stocks', requireAuth, requireRole(['PHARMACIEN', 'ADMINISTRATEUR']), pharmacieCtrl.getStockVue);
+
+  // Protection RBAC : Pharmacien
+  app.get('/api/pharmacie/protected-test', requireAuth, requireRole(['PHARMACIEN']), (req: express.Request, res: express.Response) => {
+    const authReq = req as AuthenticatedRequest;
+    res.json({ message: 'Accès autorisé à l\'espace pharmacien.', role: authReq.user?.role });
+  });
 
   // --- NOTIFICATIONS SYSTÈME ---
   app.get('/api/notifications', requireAuth, medicalCtrl.getUserNotifications);

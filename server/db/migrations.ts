@@ -2001,6 +2001,133 @@ export async function runMigrations(): Promise<void> {
     console.error('Erreur lors de la migration amendements imagerie (Phase 7.1):', err);
   }
 
+  // --- PHASE 7.2 : SOCLE DE DONNEES PHARMACIE HOSPITALIERE ---
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS catalogue_medicaments (
+        id TEXT PRIMARY KEY,
+        code TEXT UNIQUE NOT NULL,
+        nom_commercial TEXT NOT NULL,
+        nom_generique TEXT,
+        classe_therapeutique TEXT,
+        forme TEXT,
+        dosage_unit TEXT,
+        actif INTEGER NOT NULL DEFAULT 1 CHECK(actif IN (0, 1)),
+        prix_autorise_usd REAL NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS lots_medicaments (
+        id TEXT PRIMARY KEY,
+        catalogue_id TEXT NOT NULL,
+        numero_lot TEXT NOT NULL,
+        date_peremption TEXT NOT NULL,
+        quantite_recue INTEGER NOT NULL DEFAULT 0 CHECK(quantite_recue >= 0),
+        quantite_en_cours INTEGER NOT NULL DEFAULT 0 CHECK(quantite_en_cours >= 0),
+        fournisseur TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (catalogue_id) REFERENCES catalogue_medicaments(id) ON DELETE RESTRICT
+      );
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS mouvements_stock (
+        id TEXT PRIMARY KEY,
+        lot_id TEXT NOT NULL,
+        catalogue_id TEXT NOT NULL,
+        type TEXT NOT NULL CHECK(type IN ('ENTREE', 'SORTIE', 'AJUSTEMENT', 'PEREMPTION', 'RETOUR')),
+        quantite INTEGER NOT NULL CHECK(quantite > 0),
+        reference_id TEXT,
+        commentaire TEXT,
+        utilisateur_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (lot_id) REFERENCES lots_medicaments(id) ON DELETE RESTRICT,
+        FOREIGN KEY (catalogue_id) REFERENCES catalogue_medicaments(id) ON DELETE RESTRICT,
+        FOREIGN KEY (utilisateur_id) REFERENCES users(id) ON DELETE RESTRICT
+      );
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS delivre_medicaments (
+        id TEXT PRIMARY KEY,
+        prescription_id TEXT NOT NULL,
+        patient_id TEXT NOT NULL,
+        pharmacien_id TEXT NOT NULL,
+        statut TEXT NOT NULL DEFAULT 'EN_COURS' CHECK(statut IN ('EN_COURS', 'COMPLETEE', 'ANNULEE')),
+        facture_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (prescription_id) REFERENCES prescriptions(id) ON DELETE RESTRICT,
+        FOREIGN KEY (patient_id) REFERENCES patients(id) ON DELETE RESTRICT,
+        FOREIGN KEY (pharmacien_id) REFERENCES users(id) ON DELETE RESTRICT,
+        FOREIGN KEY (facture_id) REFERENCES factures(id) ON DELETE SET NULL
+      );
+    `);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS delivre_items (
+        id TEXT PRIMARY KEY,
+        delivre_id TEXT NOT NULL,
+        prescription_item_id TEXT NOT NULL,
+        catalogue_id TEXT,
+        lot_id TEXT,
+        quantite_demande INTEGER NOT NULL CHECK(quantite_demande > 0),
+        quantite_delivree INTEGER NOT NULL DEFAULT 0 CHECK(quantite_delivree >= 0),
+        prix_unitaire_usd REAL NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (delivre_id) REFERENCES delivre_medicaments(id) ON DELETE CASCADE,
+        FOREIGN KEY (prescription_item_id) REFERENCES prescription_items(id) ON DELETE RESTRICT,
+        FOREIGN KEY (catalogue_id) REFERENCES catalogue_medicaments(id) ON DELETE SET NULL,
+        FOREIGN KEY (lot_id) REFERENCES lots_medicaments(id) ON DELETE SET NULL
+      );
+    `);
+
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_lot_catalogue ON lots_medicaments(catalogue_id);
+      CREATE INDEX IF NOT EXISTS idx_lot_peremption ON lots_medicaments(date_peremption);
+      CREATE INDEX IF NOT EXISTS idx_mouv_lot ON mouvements_stock(lot_id);
+      CREATE INDEX IF NOT EXISTS idx_mouv_catalogue ON mouvements_stock(catalogue_id);
+      CREATE INDEX IF NOT EXISTS idx_mouv_type ON mouvements_stock(type);
+      CREATE INDEX IF NOT EXISTS idx_delivre_prescription ON delivre_medicaments(prescription_id);
+      CREATE INDEX IF NOT EXISTS idx_delivre_patient ON delivre_medicaments(patient_id);
+      CREATE INDEX IF NOT EXISTS idx_delivre_statut ON delivre_medicaments(statut);
+      CREATE INDEX IF NOT EXISTS idx_delivre_facture ON delivre_medicaments(facture_id);
+      CREATE INDEX IF NOT EXISTS idx_delivre_item_delivre ON delivre_items(delivre_id);
+      CREATE INDEX IF NOT EXISTS idx_delivre_item_presc ON delivre_items(prescription_item_id);
+      CREATE INDEX IF NOT EXISTS idx_delivre_item_lot ON delivre_items(lot_id);
+    `);
+
+    const catColsRes = db.exec("PRAGMA table_info(catalogue_medicaments);");
+    if (catColsRes.length > 0 && catColsRes[0].values.length > 0) {
+      const catCols = catColsRes[0].values.map((v: any[]) => String(v[1]));
+      if (!catCols.includes('categorie')) {
+        db.exec("ALTER TABLE catalogue_medicaments ADD COLUMN categorie TEXT;");
+      }
+    }
+  } catch (err) {
+    console.error('Erreur lors de la migration pharmacie (Phase 7.2):', err);
+  }
+
+  try {
+    const piColsRes = db.exec("PRAGMA table_info(prescription_items);");
+    if (piColsRes.length > 0 && piColsRes[0].values.length > 0) {
+      const piCols = piColsRes[0].values.map((v: any[]) => String(v[1]));
+      if (!piCols.includes('catalogue_id')) {
+        db.exec("ALTER TABLE prescription_items ADD COLUMN catalogue_id TEXT;");
+      }
+      if (!piCols.includes('categorie')) {
+        db.exec("ALTER TABLE prescription_items ADD COLUMN categorie TEXT;");
+      }
+    }
+  } catch (err) {
+    console.error('Erreur lors de la migration colonne catalogue_id prescription_items (Phase 7.2):', err);
+  }
+
   db.exec('PRAGMA foreign_keys = ON;');
   saveDb();
 }

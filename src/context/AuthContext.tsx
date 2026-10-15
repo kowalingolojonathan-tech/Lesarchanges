@@ -2,20 +2,24 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { User, Role } from '../types/index.js';
 
 interface Permissions {
-  role: Role;
-  canManageUsers: boolean;
-  canViewTechnicalAudit: boolean;
-  canManagePatientsReception: boolean;
-  canRecordVitals: boolean;
-  canProcessPayments: boolean;
-  canAccessConsultations: boolean;
-  canPrescribeMedicines: boolean;
-  canOrderLabTests: boolean;
-  canReferExternal: boolean;
-  canProcessLabSamples: boolean;
-  canValidateLabResults: boolean;
-  canAccessPrivateMedicalNotes: boolean;
-}
+   role: Role;
+   canManageUsers: boolean;
+   canViewTechnicalAudit: boolean;
+   canManagePatientsReception: boolean;
+   canRecordVitals: boolean;
+   canProcessPayments: boolean;
+   canAccessConsultations: boolean;
+   canPrescribeMedicines: boolean;
+   canOrderLabTests: boolean;
+   canReferExternal: boolean;
+   canProcessLabSamples: boolean;
+   canValidateLabResults: boolean;
+   canAccessPrivateMedicalNotes: boolean;
+   canManagePharmacy: boolean;
+   canViewPharmacyStock: boolean;
+   canManagePharmacyStock: boolean;
+   canViewPharmacyAlerts: boolean;
+ }
 
 interface AuthContextType {
   user: User | null;

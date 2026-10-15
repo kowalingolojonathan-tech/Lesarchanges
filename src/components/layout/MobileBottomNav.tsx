@@ -1,18 +1,19 @@
 import React from 'react';
 import { useAuth } from '../../context/AuthContext';
 import {
-  LayoutDashboard,
-  UserPlus,
-  Stethoscope,
-  CreditCard,
-  FlaskConical,
-  Users,
-  HeartPulse,
-  Menu,
-  Clock,
-  Printer,
-  FileText
-} from 'lucide-react';
+   LayoutDashboard,
+   UserPlus,
+   Stethoscope,
+   CreditCard,
+   FlaskConical,
+   Users,
+   HeartPulse,
+   Menu,
+   Clock,
+   Printer,
+   FileText,
+   Package
+ } from 'lucide-react';
 
 interface MobileBottomNavProps {
   currentTab: string;
@@ -33,6 +34,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   const isReception = ['RÉCEPTION', 'RECEPTION'].includes(user.role) || user.role_categorie === 'RÉCEPTION';
   const isLab = ['LABORATOIRE', 'LABO'].includes(user.role) || user.role_categorie === 'LABORATOIRE';
   const isDirector = user.role === 'DIRECTEUR' || user.role_categorie === 'DIRECTEUR';
+  const isPharmacien = user.role === 'PHARMACIEN' || user.role_categorie === 'PHARMACIE';
 
   // Items rapides selon le profil
   const getNavItems = () => {
@@ -62,6 +64,12 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
         { id: 'admin-users', label: 'Équipe', icon: Users },
         { id: 'reception-cashier', label: 'Caisse', icon: CreditCard },
         { id: 'reception-patients', label: 'Patients', icon: UserPlus },
+      ];
+    }
+    if (isPharmacien) {
+      return [
+        { id: 'dashboard', label: 'Accueil', icon: LayoutDashboard },
+        { id: 'pharmacie-management', label: 'Pharmacie', icon: Package },
       ];
     }
     return [

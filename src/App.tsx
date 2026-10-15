@@ -10,6 +10,7 @@ import { ClinicSettingsView } from './components/admin/ClinicSettingsView.js';
 import { TarifsManagementView } from './components/admin/TarifsManagementView.js';
 import { RbacTester } from './components/common/RbacTester.js';
 import { Phase2Placeholder } from './components/common/Phase2Placeholder.js';
+import { PharmacyManagementView } from './components/pharmacy/PharmacyManagementView.js';
 import { ReceptionDashboardView } from './components/reception/ReceptionDashboardView.js';
 import { PatientSearchView } from './components/reception/PatientSearchView.js';
 import { BillingCashierView } from './components/reception/BillingCashierView.js';
@@ -100,6 +101,9 @@ const MainApp: React.FC = () => {
           return <RoleDashboard onNavigate={setCurrentTab} />;
         }
         return <RbacTester />;
+      case 'pharmacie-management':
+        return <PharmacyManagementView onClose={() => setCurrentTab('dashboard')} />;
+      // Menus Administrateur
 
       // Menus Réception — Phase 2A Opérationnelle
       case 'reception-patients':

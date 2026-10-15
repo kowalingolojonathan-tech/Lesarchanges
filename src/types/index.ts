@@ -1080,10 +1080,106 @@ export interface Hospitalisation {
 }
 
 export interface HospitalisationEligibility {
-  eligible: boolean;
-  consultation?: Consultation | null;
-  existing_hospitalisation?: Hospitalisation | null;
-  categories: HospitalisationCategory[];
-  error?: string;
-  reason?: string;
-}
+   eligible: boolean;
+   consultation?: Consultation | null;
+   existing_hospitalisation?: Hospitalisation | null;
+   categories: HospitalisationCategory[];
+   error?: string;
+   reason?: string;
+ }
+
+ // ========================================================
+ // TYPES PHARMACIE (Phase 7.2)
+ // ========================================================
+
+ export interface CatalogueMedicament {
+   id: string;
+   code: string;
+   nom_commercial: string;
+   nom_generique?: string | null;
+   classe_therapeutique?: string | null;
+   categorie?: string | null;
+   forme?: string | null;
+   dosage_unit?: string | null;
+   actif: number | boolean;
+   prix_autorise_usd: number;
+   stock_disponible?: number;
+   alerte?: string | null;
+   created_at?: string;
+   updated_at?: string;
+ }
+
+ export interface LotMedicament {
+   id: string;
+   catalogue_id: string;
+   numero_lot: string;
+   date_peremption: string;
+   quantite_recue: number;
+   quantite_en_cours: number;
+   fournisseur?: string | null;
+   created_at?: string;
+   updated_at?: string;
+   // Données jointes
+   nom_commercial?: string;
+   code?: string;
+ }
+
+ export interface MouvementStock {
+   id: string;
+   lot_id: string;
+   catalogue_id: string;
+   type: 'ENTREE' | 'SORTIE' | 'AJUSTEMENT' | 'PEREMPTION' | 'RETOUR';
+   quantite: number;
+   reference_id?: string | null;
+   commentaire?: string | null;
+   utilisateurs_id: string;
+   created_at: string;
+   // Données jointes
+   numero_lot?: string;
+   date_peremption?: string;
+   nom_commercial?: string;
+   code?: string;
+   utilisateurs_nom?: string;
+ }
+
+ export interface StockVue {
+   id: string;
+   code: string;
+   nom_commercial: string;
+   nom_generique?: string | null;
+   classe_therapeutique?: string | null;
+   categorie?: string | null;
+   forme?: string | null;
+   dosage_unit?: string | null;
+   actif: number | boolean;
+   prix_autorise_usd: number;
+   stock_disponible: number;
+   stock_total_incl_expires: number;
+   nb_lots_actifs: number;
+ }
+
+ export interface AlertePharmacie {
+   stock_faible: Array<{
+     catalogue_id: string;
+     code: string;
+     nom_commercial: string;
+     nom_generique?: string | null;
+     stock_disponible: number;
+   }>;
+   peremption_proche: Array<{
+     lot_id: string;
+     numero_lot: string;
+     nom_commercial: string;
+     code: string;
+     date_peremption: string;
+     quantite_en_cours: number;
+   }>;
+   peremption_expiree: Array<{
+     lot_id: string;
+     numero_lot: string;
+     nom_commercial: string;
+     code: string;
+     date_peremption: string;
+     quantite_en_cours: number;
+   }>;
+ }

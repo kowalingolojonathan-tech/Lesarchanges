@@ -35,81 +35,77 @@ export async function seedDatabase(): Promise<void> {
     ]);
   }
 
-  // 2. Initialisation des comptes utilisateurs par défaut pour les 4 rôles V1
-  const existingAdmin = await queryOne('SELECT id FROM users WHERE username = ?', ['admin']);
-  if (!existingAdmin) {
-    const now = new Date().toISOString();
-    
-    // Mots de passe chiffrés par bcrypt
-    const hashAdmin = await bcrypt.hash('ArchangesAdmin2026!', 10);
-    const hashRecep = await bcrypt.hash('ArchangesRecep2026!', 10);
-    const hashMed = await bcrypt.hash('ArchangesMed2026!', 10);
-    const hashLab = await bcrypt.hash('ArchangesLab2026!', 10);
+// 2. Initialisation des comptes utilisateurs par défaut pour les 4 rôles V1
+   const existingAdmin = await queryOne('SELECT id FROM users WHERE username = ?', ['admin']);
+   // Mots de passe chiffrés par bcrypt (portée externe pour réutilisation)
+   const hashAdmin = await bcrypt.hash('ArchangesAdmin2026!', 10);
+   const hashRecep = await bcrypt.hash('ArchangesRecep2026!', 10);
+   const hashMed = await bcrypt.hash('ArchangesMed2026!', 10);
+   const hashLab = await bcrypt.hash('ArchangesLab2026!', 10);
+   const hashPharm = await bcrypt.hash('ArchangesPharm2026!', 10);
+   const hashImg = await bcrypt.hash('ArchangesImg2026!', 10);
 
-    // Enregistrement d'audit initial
-    await execute(`
-      INSERT INTO audit_logs (id, user_id, action, ressource_type, ressource_id, details, ip_address, timestamp)
-      VALUES ('audit-init-01', 'usr-admin-01', 'SYSTEM_INITIALIZATION', 'SYSTEM', 'DB_INIT', 'Initialisation du socle V1 et des 4 rôles fondamentaux', '127.0.0.1', ?)
-    `, [now]);
-  } else {
-    const now = new Date().toISOString();
-    // Vérification présence second médecin usr-med-02
-    const existingMed2 = await queryOne('SELECT id FROM users WHERE username = ?', ['dr.mutombo']);
-    if (!existingMed2) {
-      const hashMed = await bcrypt.hash('ArchangesMed2026!', 10);
-      await execute(`
-        INSERT INTO users (id, username, password_hash, nom_complet, role, actif, created_at, updated_at)
-        VALUES ('usr-med-02', 'dr.mutombo', ?, 'Dr. Thérèse Mutombo (Médecin Pédiatre)', 'MÉDECIN', 1, ?, ?)
-      `, [hashMed, now, now]);
-    }
+   if (!existingAdmin) {
+     const now = new Date().toISOString();
 
-    // Vérification présence second laborantin usr-lab-02
-    const existingLab2 = await queryOne('SELECT id FROM users WHERE username = ?', ['labo.technicien']);
-    if (!existingLab2) {
-      const hashLab = await bcrypt.hash('ArchangesLab2026!', 10);
+      // Enregistrement d'audit initial
       await execute(`
-        INSERT INTO users (id, username, password_hash, nom_complet, role, actif, created_at, updated_at)
-        VALUES ('usr-lab-02', 'labo.technicien', ?, 'Mme Chantal Tshala (Technicienne Supérieure)', 'LABORATOIRE', 1, ?, ?)
-      `, [hashLab, now, now]);
-    }
+        INSERT OR IGNORE INTO audit_logs (id, user_id, action, ressource_type, ressource_id, details, ip_address, timestamp)
+        VALUES ('audit-init-01', 'usr-admin-01', 'SYSTEM_INITIALIZATION', 'SYSTEM', 'DB_INIT', 'Initialisation du socle V1 et des 4 rôles fondamentaux', '127.0.0.1', ?)
+      `, [now]);
+} else {
+     const now = new Date().toISOString();
+     // Vérification présence second médecin usr-med-02
+     const existingMed2 = await queryOne('SELECT id FROM users WHERE username = ?', ['dr.mutombo']);
+     if (!existingMed2) {
+       await execute(`
+         INSERT INTO users (id, username, password_hash, nom_complet, role, actif, created_at, updated_at)
+         VALUES ('usr-med-02', 'dr.mutombo', ?, 'Dr. Thérèse Mutombo (Médecin Pédiatre)', 'MÉDECIN', 1, ?, ?)
+       `, [hashMed, now, now]);
+     }
 
-    // Laborantin inactif pour tests RBAC
-    const existingLabInactif = await queryOne('SELECT id FROM users WHERE username = ?', ['labo.inactif']);
-    if (!existingLabInactif) {
-      const hashLab = await bcrypt.hash('ArchangesLab2026!', 10);
-      await execute(`
-        INSERT INTO users (id, username, password_hash, nom_complet, role, actif, created_at, updated_at)
-        VALUES ('usr-lab-inactive', 'labo.inactif', ?, 'M. Paul Mbayo (Laborantin Inactif)', 'LABORATOIRE', 0, ?, ?)
-      `, [hashLab, now, now]);
-    }
+     // Vérification présence second laborantin usr-lab-02
+     const existingLab2 = await queryOne('SELECT id FROM users WHERE username = ?', ['labo.technicien']);
+     if (!existingLab2) {
+       await execute(`
+         INSERT INTO users (id, username, password_hash, nom_complet, role, actif, created_at, updated_at)
+         VALUES ('usr-lab-02', 'labo.technicien', ?, 'Mme Chantal Tshala (Technicienne Supérieure)', 'LABORATOIRE', 1, ?, ?)
+       `, [hashLab, now, now]);
+     }
+
+     // Laborantin inactif pour tests RBAC
+     const existingLabInactif = await queryOne('SELECT id FROM users WHERE username = ?', ['labo.inactif']);
+     if (!existingLabInactif) {
+       await execute(`
+         INSERT INTO users (id, username, password_hash, nom_complet, role, actif, created_at, updated_at)
+         VALUES ('usr-lab-inactive', 'labo.inactif', ?, 'M. Paul Mbayo (Laborantin Inactif)', 'LABORATOIRE', 0, ?, ?)
+       `, [hashLab, now, now]);
+     }
 
     // Utilisateurs service imagerie
-    const existingImg01 = await queryOne('SELECT id FROM users WHERE username = ?', ['img.radiologue']);
-    if (!existingImg01) {
-      const hashImg = await bcrypt.hash('ArchangesImg2026!', 10);
-      await execute(`
-        INSERT INTO users (id, username, password_hash, nom_complet, role, actif, created_at, updated_at)
-        VALUES ('usr-img-01', 'img.radiologue', ?, 'Dr. Joseph Kambulu (Radiologue)', 'IMAGERIE', 1, ?, ?)
-      `, [hashImg, now, now]);
-    }
+const existingImg01 = await queryOne('SELECT id FROM users WHERE username = ?', ['img.radiologue']);
+     if (!existingImg01) {
+       await execute(`
+         INSERT INTO users (id, username, password_hash, nom_complet, role, actif, created_at, updated_at)
+         VALUES ('usr-img-01', 'img.radiologue', ?, 'Dr. Joseph Kambulu (Radiologue)', 'IMAGERIE', 1, ?, ?)
+       `, [hashImg, now, now]);
+     }
 
-    const existingImg02 = await queryOne('SELECT id FROM users WHERE username = ?', ['img.technicien']);
-    if (!existingImg02) {
-      const hashImg = await bcrypt.hash('ArchangesImg2026!', 10);
-      await execute(`
-        INSERT INTO users (id, username, password_hash, nom_complet, role, actif, created_at, updated_at)
-        VALUES ('usr-img-02', 'img.technicien', ?, 'Mme Marie Lukusa (Technicienne en Imagerie)', 'IMAGERIE', 1, ?, ?)
-      `, [hashImg, now, now]);
-    }
+     const existingImg02 = await queryOne('SELECT id FROM users WHERE username = ?', ['img.technicien']);
+     if (!existingImg02) {
+       await execute(`
+         INSERT INTO users (id, username, password_hash, nom_complet, role, actif, created_at, updated_at)
+         VALUES ('usr-img-02', 'img.technicien', ?, 'Mme Marie Lukusa (Technicienne en Imagerie)', 'IMAGERIE', 1, ?, ?)
+       `, [hashImg, now, now]);
+     }
 
-    const existingImgInactif = await queryOne('SELECT id FROM users WHERE username = ?', ['img.inactif']);
-    if (!existingImgInactif) {
-      const hashImg = await bcrypt.hash('ArchangesImg2026!', 10);
-      await execute(`
-        INSERT INTO users (id, username, password_hash, nom_complet, role, actif, created_at, updated_at)
-        VALUES ('usr-img-inactive', 'img.inactif', ?, 'M. Jean-Pierre Batuna (Radiologue Inactif)', 'IMAGERIE', 0, ?, ?)
-      `, [hashImg, now, now]);
-    }
+     const existingImgInactif = await queryOne('SELECT id FROM users WHERE username = ?', ['img.inactif']);
+     if (!existingImgInactif) {
+       await execute(`
+         INSERT INTO users (id, username, password_hash, nom_complet, role, actif, created_at, updated_at)
+         VALUES ('usr-img-inactive', 'img.inactif', ?, 'M. Jean-Pierre Batuna (Radiologue Inactif)', 'IMAGERIE', 0, ?, ?)
+       `, [hashImg, now, now]);
+     }
   }
 
   // 3. Initialisation du Taux USD -> FC officiel
@@ -266,6 +262,17 @@ export async function seedDatabase(): Promise<void> {
           'laboratoire:voir', 'laboratoire:traiter', 'laboratoire:valider', 'laboratoire:imprimer',
           'patients:voir'
         ]
+      },
+      {
+        id: 'role-pharm',
+        code: 'PHARMACIEN',
+        nom: 'Pharmacien hospitalier',
+        description: 'Gestion du catalogue des médicaments, suivi des lots et péremptions, mouvements de stock, inventaires et délivrances.',
+        categorie: 'PHARMACIE',
+        is_system: 1,
+        permissions: [
+          'pharmacie:voir', 'pharmacie:gerer', 'pharmacie:stock', 'pharmacie:inventaire', 'pharmacie:délivrer'
+        ]
       }
     ];
 
@@ -315,9 +322,24 @@ export async function seedDatabase(): Promise<void> {
     `);
 
     await execute(`
-      UPDATE users SET 
+      UPDATE users SET
         nom = 'Tshala', prenom = 'Chantal', fonction = 'Technicienne de Laboratoire', telephone = '+243 81 000 0006', email = 'technique.labo@lesarchanges.cd', role_id = 'role-labo'
       WHERE username = 'labo.technicien';
+    `);
+
+    // Vérification présence pharmacien usr-pharm-01
+    const existingPharm = await queryOne('SELECT id FROM users WHERE username = ?', ['pharma.pharmacien']);
+    if (!existingPharm) {
+      await execute(`
+        INSERT INTO users (id, username, password_hash, nom_complet, role, actif, created_at, updated_at)
+        VALUES ('usr-pharm-01', 'pharma.pharmacien', ?, 'M. Jean-Pierre Mukendi (Pharmacien)', 'PHARMACIEN', 1, ?, ?)
+      `, [hashPharm, now, now]);
+    }
+
+    await execute(`
+      UPDATE users SET
+        nom = 'Mukendi', prenom = 'Jean-Pierre', fonction = 'Pharmacien Hospitalier', telephone = '+243 81 000 0007', email = 'pharmacie@lesarchanges.cd', role_id = 'role-pharm'
+      WHERE username = 'pharma.pharmacien';
     `);
   }
 
