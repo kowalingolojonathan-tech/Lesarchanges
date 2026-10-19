@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { X, Package, CheckCircle2, CloseCircle, DollarSign, TrendingUp, Calendar, AlertTriangle, ShieldCheck, User, Search, RefreshCw } from 'lucide-react';
+import { X, Package, CheckCircle2, DollarSign, TrendingUp, Calendar, AlertTriangle, ShieldCheck, User, Search, RefreshCw } from 'lucide-react';
 import { apiFetch } from '../../lib/api';
 import { CatalogueMedicament, LotMedicament } from '../../types/index';
+import { useAuth } from '../../context/AuthContext.js';
 
 type ActiveTab = 'DETAILS' | 'SELECTION' | 'RESUME' | 'HISTORIQUE';
 
@@ -17,6 +18,7 @@ interface PharmacyPosPrescription {
   prix_autorise_usd: number;
   stock_disponible: number;
   alerte?: string | null;
+  lot_info?: PharmacyPosLot | null;
 }
 
 interface PharmacyPosLot {
@@ -83,7 +85,12 @@ const calculateFC = (usd: number, rate: number): number => {
   return Math.round(usd * rate);
 };
 
-export const PharmacyPosView: React.FC = () => {
+interface PharmacyPosViewProps {
+  prescriptionId: string;
+  onNavigate: (tab: string) => void;
+}
+
+export const PharmacyPosView: React.FC<PharmacyPosViewProps> = ({ prescriptionId, onNavigate }) => {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<ActiveTab>('DETAILS');
   const [posData, setPosData] = useState<PharmacyPosState | null>(null);
@@ -93,6 +100,7 @@ export const PharmacyPosView: React.FC = () => {
   const [showConfirmation, setShowConfirmation] = useState<boolean>(false);
   const [showSuccess, setShowSuccess] = useState<boolean>(false);
   const [cultureRate, setCultureRate] = useState<number>(2850);
+  const [lastFactureId, setLastFactureId] = useState<string | null>(null);
 
   // Charger le taux de change
   useEffect(() => {
@@ -105,21 +113,45 @@ export const PharmacyPosView: React.FC = () => {
         }
       })
       .catch((err) => console.error('Erreur taux de change:', err));
-  }, [cultureRate]);
+  }, []);
 
   // Charger les données POS lorsqu'une prescription est sélectionnée
-  const loadPosData = useEffect(async (prescriptionId: string) => {
+  const loadPosData = async (presId: string) => {
     setLoading(true);
     setError(null);
     try {
       const res = await apiFetch('/api/pharmacie/pos', {
         method: 'POST',
-        body: JSON.stringify({ prescription_id }),
+        body: JSON.stringify({ prescription_id: presId }),
         headers: { 'Content-Type': 'application/json' }
       });
       const data = await res.json();
       if (res.ok && data.success) {
-        setPosData(data);
+        const initialSelections: SelectionItem[] = (data.medicaments || []).map((med: any) => ({
+          item_id: med.item_id || med.id,
+          nom_medicament: med.nom_medicament || med.nom_commercial,
+          quantite_prescrite: med.quantite_prescrite || 1,
+          quantite_selectionnee: 0,
+          prix_unitaire: med.prix_unitaire || med.prix_autorise_usd || 0,
+          sous_total: 0,
+          lot_info: med.lot_info ? {
+            id: med.lot_info.lot_id || med.lot_info.id,
+            numero_lot: med.lot_info.numero_lot,
+            date_peremption: med.lot_info.date_peremption,
+            quantite_recue: med.lot_info.quantite_recue,
+            quantite_en_cours: med.lot_info.quantite_en_cours,
+            fournisseur: med.lot_info.fournisseur
+          } : null,
+          actif: med.actif !== false
+        }));
+        setPosData({
+          ...data,
+          selections: initialSelections,
+          total_usd: 0,
+          total_fc: 0,
+          loading: false,
+          error: null
+        });
       } else {
         setError(data.error || 'Erreur chargement POS pharmacie');
       }
@@ -128,7 +160,13 @@ export const PharmacyPosView: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  };
+
+  useEffect(() => {
+    if (prescriptionId) {
+      loadPosData(prescriptionId);
+    }
+  }, [prescriptionId]);
 
   // Mettre à jour la sélection d'un médicament
   const handleSelectMedicament = (itemId: string, quantite: number) => {
@@ -136,9 +174,9 @@ export const PharmacyPosView: React.FC = () => {
       if (!prev) return prev;
 
       const newSelections = prev.selections.map((sel) => {
-        if sel.item_id === itemId {
+        if (sel.item_id === itemId) {
           const nouvelleQuantite = Math.max(0, Math.min(
-            parseInt(sel.quantite_prescrite, 10),
+            sel.quantite_prescrite,
             quantite
           ));
           const sous_total = Math.round(nouvelleQuantite * sel.prix_unitaire * 100) / 100;
@@ -191,10 +229,11 @@ export const PharmacyPosView: React.FC = () => {
           tarif_id: s.item_id
         }));
 
-      const factureResult = await apiFetch('/api/billing/create-linked-facture-core', {
+      const factureResult = await apiFetch('/api/pharmacie/pos/facture', {
         method: 'POST',
         body: JSON.stringify({
           patient_id: posData.patient.id,
+          visite_id: posData.visite_id,
           type_prestation: 'PHARMACIE',
           items: itemsASigner,
           emise_par_id: user?.id || 'usr-recep-01'
@@ -207,61 +246,62 @@ export const PharmacyPosView: React.FC = () => {
         throw new Error(factureData.error || 'Erreur création facture');
       }
 
+      if (factureData.isDuplicate) {
+        throw new Error('Une facture identique existe déjà pour cette vente.');
+      }
+
+      const nouvelleFacture = factureData.facture;
+      setLastFactureId(nouvelleFacture?.id || null);
+
       // 2. Enregistrer le paiement (montant en USD)
-      const montantUsd = factureData.facture.montant_total || 0;
-      const resPaiement = await apiFetch('/api/billing/record-paiement', {
+      const montantUsd = nouvelleFacture?.montant_total || 0;
+      const resPaiement = await apiFetch('/api/pharmacie/pos/paiement', {
         method: 'POST',
         body: JSON.stringify({
-          id: factureData.facture.id,
+          id: nouvelleFacture.id,
           montant_paye: montantUsd,
           devise: 'USD',
           mode_paiement: 'ESPECES'
         }),
         headers: { 'Content-Type': 'application/json' }
-      };
+      });
 
       const paiementResult = await resPaiement.json();
       if (!resPaiement.ok) {
         throw new Error(paiementResult.error || 'Erreur enregistrement paiement');
       }
 
-      // 3. Mise à jour atomique du stock
-      const lotMisesAJour: any[] = [];
-
+      // 3. Mise à jour atomique du stock via les mouvements
       for (const selection of posData.selections) {
         if (selection.quantite_selectionnee > 0 && selection.lot_info) {
-          const nouvelleQuantite = Math.max(
-            0,
-            selection.lot_info.quantite_en_cours - selection.quantite_selectionnee
-          );
-          lotMisesAJour.push({
-            lot_id: selection.lot_info.id,
-            nouvelle_quantite: nouvelleQuantite
-          });
-        }
-      }
+          const lotId = selection.lot_info.id;
+          const catalogueId = selection.item_id;
+          const qty = selection.quantite_selectionnee;
 
-      if (lotMisesAJour.length > 0) {
-        for (const miseAJour of lotMisesAJour) {
-          await apiFetch(`/api/lots_medicaments/${miseAJour.lot_id}`, {
-            method: 'PATCH',
-            body: JSON.stringify({ quantite_en_cours: miseAJour.nouvelle_quantite }),
-            headers: { 'Content-Type': 'application/json' }
-          });
-        }
-      }
+          // Vérifier que le lot n'est pas expiré et a assez de stock
+          const lotRes = await apiFetch(`/api/pharmacie/lots?catalogue_id=${catalogueId}`);
+          const lotData = await lotRes.json();
+          const lotActuel = (lotData.lots || []).find((l: any) => l.id === lotId);
 
-      // 4. Mettre à jour l'historique des mouvements
-      for (const selection of posData.selections) {
-        if (selection.quantite_selectionnee > 0) {
+          if (!lotActuel) {
+            throw new Error(`Lot introuvable pour ${selection.nom_medicament}`);
+          }
+          if (new Date(lotActuel.date_peremption) <= new Date()) {
+            throw new Error(`Lot expiré pour ${selection.nom_medicament}`);
+          }
+          if (lotActuel.quantite_en_cours < qty) {
+            throw new Error(`Stock insuffisant pour ${selection.nom_medicament}: ${lotActuel.quantite_en_cours} disponible, ${qty} demandé`);
+          }
+
+          // Créer un mouvement SORTIE
           await apiFetch('/api/pharmacie/mouvements', {
             method: 'POST',
             body: JSON.stringify({
-              lot_id: selection.lot_info?.id || '',
-              catalogue_id: selection.item_id,
-              type: 'ENTREE',
-              quantite: -selection.quantite_selectionnee,
-              reference_id: factureData.facture.id,
+              lot_id: lotId,
+              catalogue_id: catalogueId,
+              type: 'SORTIE',
+              quantite: qty,
+              reference_id: nouvelleFacture.id,
               commentaire: `Délivrance pharmacie - ordonnance ${posData.prescription_id}`
             }),
             headers: { 'Content-Type': 'application/json' }
@@ -275,6 +315,7 @@ export const PharmacyPosView: React.FC = () => {
 
       setTimeout(() => {
         setShowSuccess(false);
+        onNavigate('dashboard');
       }, 3000);
     } catch (err: any) {
       console.error('Erreur confirmation POS:', err);
@@ -289,10 +330,12 @@ export const PharmacyPosView: React.FC = () => {
     setError(null);
     setQuantiteSelectionnee(1);
     setShowConfirmation(false);
+    setLastFactureId(null);
+    onNavigate('dashboard');
   };
 
   useEffect(() => {
-    // Le chargement se fera quand on ouvre depuis la reception
+    // Le chargement se fait via useEffect sur prescriptionId
   }, []);
 
   return (
@@ -325,7 +368,7 @@ export const PharmacyPosView: React.FC = () => {
               <div>
                 <div className="font-bold text-slate-900">Ordonnance :</div>
                 <div className="text-slate-700">
-                  {posData.medecin_nom} - {posData.statut}
+                  {posData.prescription_id} — {posData.statut || 'EN_COURS'}
                 </div>
               </div>
             </div>
@@ -334,17 +377,17 @@ export const PharmacyPosView: React.FC = () => {
           <div className="bg-slate-50 rounded-xl border border-slate-200 p-3 mb-4">
             <button onClick={() => setActiveTab('DETAILS')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
               activeTab === 'DETAILS' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-100'
-            }}>
+            }`}>
               Détails des médicaments
             </button>
             <button onClick={() => setActiveTab('SELECTION')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
               activeTab === 'SELECTION' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-100'
-            }}>
+            }`}>
               Sélection médicaments
             </button>
             <button onClick={() => setActiveTab('RESUME')} className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
               activeTab === 'RESUME' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-100'
-            }}>
+            }`}>
               Résumé & Paiement
             </button>
           </div>
@@ -367,7 +410,7 @@ export const PharmacyPosView: React.FC = () => {
                     </div>
                   </div>
                   <p className="text-xs text-slate-500">
-                    Quantité prescrite: {med.quantite_prescrite} unité(s)
+                    Quantité prescrite: {med.stock_disponible} unité(s)
                     {med.forme && `, Forme: ${med.forme}`}
                     {med.dosage_unit && `, Dosage: ${med.dosage_unit}`}
                   </p>
@@ -388,7 +431,7 @@ export const PharmacyPosView: React.FC = () => {
                 const selectionExistante = posData.selections.find(
                   (s) => s.item_id === med.id
                 );
-                const quantitePrescrite = med.quantite_prescrite || 1;
+                const quantitePrescrite = med.stock_disponible || 1;
                 const quantiteDisponible = med.stock_disponible || 0;
 
                 return (
@@ -399,37 +442,37 @@ export const PharmacyPosView: React.FC = () => {
                         {med.alerte && (
                           <span className="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
                             {med.alerte}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-right text-sm">
+                        <span className="font-mono text-emerald-600">
+                          {quantitePrescrite} prescrite
                         </span>
-                      )}
+                      </div>
                     </div>
-                    <div className="text-right text-sm">
-                      <span className="font-mono text-emerald-600">
-                        {quantitePrescrite} prescrite
-                      </span>
+
+                    <div className="mt-3">
+                      <label className="block text-xs font-bold text-slate-700 mb-2">
+                        Qté à sélectionner (max {quantitePrescrite})
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        max={quantitePrescrite}
+                        value={quantiteSelectionnee}
+                        onChange={(e) => setQuantiteSelectionnee(parseInt(e.target.value, 10))}
+                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                      <p className="text-xs text-slate-500">
+                        Disponible: {quantiteDisponible} unité(s)
+                      </p>
                     </div>
-                  </div>
 
-                  <div className="mt-3">
-                    <label className="block text-xs font-bold text-slate-700 mb-2">
-                      Qté à sélectionner (max {quantitePrescrite})
-                    </label>
-                    <input
-                      type="number"
-                      min="0"
-                      max={quantitePrescrite}
-                      value={quantiteSelectionnee}
-                      onChange={(e) => setQuantiteSelectionnee(parseInt(e.target.value, 10))}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    />
-                    <p className="text-xs text-slate-500">
-                      Disponible: {quantiteDisponible} unité(s)
-                    </p>
-                  </div>
-
-                  <button
-                    onClick={() => handleSelectMedicament(med.id, quantiteSelectionnee)}
-                    disabled={quantiteSelectionnee > quantitePrescrite}
-                    className="mt-3 w-full px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-lg transition-colors"
+                    <button
+                      onClick={() => handleSelectMedicament(med.id, quantiteSelectionnee)}
+                      disabled={quantiteSelectionnee > quantitePrescrite}
+                      className="mt-3 w-full px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-lg transition-colors"
                     >
                       {quantiteSelectionnee > 0
                         ? `Ajouter ${quantiteSelectionnee} unité(s) au panier`
@@ -463,7 +506,7 @@ export const PharmacyPosView: React.FC = () => {
                                 max={sel.quantite_prescrite}
                                 value={sel.quantite_selectionnee}
                                 onChange={(e) => handleSelectMedicament(sel.item_id, parseInt(e.target.value, 10))}
-                                className="w-25 pl-1 py-1 text-center text-sm border rounded"
+                                className="w-20 pl-1 py-1 text-center text-sm border rounded"
                               />
                             </td>
                             <td className="px-4 py-3 text-right font-mono">
@@ -503,13 +546,13 @@ export const PharmacyPosView: React.FC = () => {
                   Résumé de la vente
                 </h3>
                 <p className="text-slate-700">
-                  Cette vente sera liée à l'ordonnance n° {posData.visite_id || '?'} pour le patient
+                  Cette vente sera liée à l'ordonnance n° {posData.prescription_id} pour le patient
                   {posData.patient.prenom} {posData.patient.nom}.
                 </p>
                 <p className="text-slate-700 mb-2">
                   Médicaments sélectionnés : {posData.selections.filter(
                     (s) => s.quantite_selectionnee > 0
-                  ).length} sur {posData.total_prescrit} prescrits.
+                  ).length} sur {posData.medicaments.length} prescrits.
                 </p>
                 <p className="text-slate-700">
                   Montant USD : {posData.total_usd?.toFixed(2)} $ — Total FC : {posData.total_fc?.toLocaleString('fr-FR')} FC
@@ -550,10 +593,22 @@ export const PharmacyPosView: React.FC = () => {
                     • Stock mis à jour atomiquement
                   </p>
                   <p className="text-slate-700 mt-2">
-                    Facture ID: {posData?.facture?.id || 'N/A'}
+                    Facture ID: {lastFactureId || posData?.prescription_id || 'N/A'}
                   </p>
                   <button onClick={handleAnnuler} className="mt-3 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg font-semibold">
                     Fermer
+                  </button>
+                </div>
+              )}
+
+              {!showSuccess && (
+                <div className="flex justify-end">
+                  <button
+                    onClick={() => setShowConfirmation(true)}
+                    disabled={loading}
+                    className="px-6 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg transition-colors"
+                  >
+                    {loading ? 'Traitement en cours...' : 'Finaliser la vente'}
                   </button>
                 </div>
               )}
@@ -576,16 +631,6 @@ export const PharmacyPosView: React.FC = () => {
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-xl p-4">
           <span className="text-red-700">{error}</span>
-        </div>
-      )}
-
-      {showSuccess && (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-6 text-center">
-          <CheckCircle2 className="w-8 h-8 text-emerald-600 mb-3" />
-          <h3 className="text-xl text-emerald-800">Vente enregistrée avec succès !</h3>
-          <p className="text-slate-700">
-            La vente a été finalisée. La facture a été créée, le paiement enregistré et le stock mis à jour.
-          </p>
         </div>
       )}
     </div>

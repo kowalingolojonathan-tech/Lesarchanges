@@ -21,9 +21,10 @@ import { apiFetch } from '../../lib/api';
 interface ReceptionDashboardViewProps {
   onGoToSearch: () => void;
   onGoToCashier?: () => void;
+  onNavigate?: (tab: string) => void;
 }
 
-export const ReceptionDashboardView: React.FC<ReceptionDashboardViewProps> = ({ onGoToSearch, onGoToCashier }) => {
+export const ReceptionDashboardView: React.FC<ReceptionDashboardViewProps> = ({ onGoToSearch, onGoToCashier, onNavigate }) => {
   const [stats, setStats] = useState<ReceptionDashboardStats>({
     total_visites_jour: 0,
     attente_triage: 0,
@@ -955,6 +956,7 @@ export const ReceptionDashboardView: React.FC<ReceptionDashboardViewProps> = ({ 
             setShowPrescriptionsModal(false);
             loadData();
           }}
+          onNavigate={onNavigate}
         />
       )}
 

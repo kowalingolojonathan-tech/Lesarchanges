@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { query, queryOne, queryAll, execute, transaction } from '../db/database.js';
 import { auditLogger } from '../utils/auditLogger.js';
 import { AuthenticatedRequest, isPharmacistRole } from '../middleware/auth.js';
+import { createLinkedFactureCore, getFactureFinancialDetails } from './billingController.js';
 
 /**
  * GET /api/pharmacie/catalogue
@@ -568,16 +569,10 @@ export async function createPharmaciePos(req: AuthenticatedRequest, res: Respons
   }
 
   try {
-    // Récupérer la prescription avec ses items
+    // Récupérer la prescription
     const prescription = await queryOne<any>(
-      `SELECT pi.id, pi.nom_medicament, pi.dosage, pi.forme, pi.voie_administration, pi.frequence, pi.duree, pi.quantite,
-              pi.ordre, c.code, c.nom_commercial, c.nom_generique, c.classe_therapeutique, c.forme as forme_catalogue, c.dosage_unit,
-              c.prix_autorise_usd, c.actif, l.id as lot_id, l.numero_lot, l.date_peremption, l.quantite_en_cours, l.quantite_recue, l.fournisseur
-       FROM prescription_items pi
-       LEFT JOIN catalogue_medicaments c ON pi.catalogue_id = c.id
-       LEFT JOIN lots_medicaments l ON c.id = l.catalogue_id AND l.date_peremption > date('now')
-       WHERE pi.prescription_id = ?
-       ORDER BY pi.ordre, l.date_peremption ASC`,
+      `SELECT id, consultation_id, patient_id, visite_id, medecin_id, statut, date_prescription
+       FROM prescriptions WHERE id = ?`,
       [prescription_id]
     );
 
@@ -586,46 +581,77 @@ export async function createPharmaciePos(req: AuthenticatedRequest, res: Respons
       return;
     }
 
-    // Récupérer les infos patient et visite
-    const patient = await queryOne<any>('SELECT id, numero_dossier, nom, prenom, telephone FROM patients WHERE id = ?', [prescription.patient_id]);
-    const visite = await queryOne<any>('SELECT id, numero_visite, patient_id, medecin_id, statut FROM visites WHERE id = ?', [prescription.visite_id]);
+    // Récupérer les items de prescription avec catalogue et lots non expirés
+    const items = await queryAll<any>(
+      `SELECT pi.id, pi.nom_medicament, pi.dosage, pi.forme, pi.voie_administration, pi.frequence, pi.duree, pi.quantite,
+              pi.ordre, pi.catalogue_id,
+              c.code, c.nom_commercial, c.nom_generique, c.classe_therapeutique, c.forme as forme_catalogue, c.dosage_unit,
+              c.prix_autorise_usd, c.actif,
+              l.id as lot_id, l.numero_lot, l.date_peremption, l.quantite_en_cours, l.quantite_recue, l.fournisseur
+       FROM prescription_items pi
+       LEFT JOIN catalogue_medicaments c ON pi.catalogue_id = c.id
+       LEFT JOIN lots_medicaments l ON c.id = l.catalogue_id AND l.date_peremption > date('now')
+       WHERE pi.prescription_id = ?
+       ORDER BY pi.ordre, l.date_peremption ASC`,
+      [prescription_id]
+    );
 
+    if (items.length === 0) {
+      res.status(404).json({ error: 'Aucun médicament trouvé pour cette prescription.' });
+      return;
+    }
+
+    // Récupérer les infos patient
+    const patient = await queryOne<any>('SELECT id, numero_dossier, nom, prenom, telephone FROM patients WHERE id = ?', [prescription.patient_id]);
     if (!patient) {
       res.status(404).json({ error: 'Patient introuvable.' });
       return;
     }
 
-    // Organiser les médicaments par lot
-    const medicaments = prescription.items.map((it: any) => {
-      const lotDisponible = prescription.items.filter((item: any) => item.lot_id !== null);
-      const lotInfo = lotDisponible.length > 0 ? {
-        lot_id: lotDisponible[0].lot_id,
-        numero_lot: lotDisponible[0].numero_lot,
-        date_peremption: lotDisponible[0].date_peremption,
-        quantite_en_cours: lotDisponible[0].quantite_en_cours,
-        fournisseur: lotDisponible[0].fournisseur
+    // Récupérer le nom du médecin
+    const medecin = await queryOne<any>('SELECT nom_complet FROM users WHERE id = ?', [prescription.medecin_id]);
+
+    // Récupérer la visite
+    const visite = await queryOne<any>('SELECT id, numero_visite, statut FROM visites WHERE id = ?', [prescription.visite_id]);
+
+    // Organiser les médicaments avec les lots disponibles
+    const medicaments = items.map((it: any) => {
+      // Trouver le lot le plus proche de péremption disponible
+      const lotsDisponibles = items.filter((item: any) => item.lot_id !== null);
+      const lotInfo = lotsDisponibles.length > 0 ? {
+        id: lotsDisponibles[0].lot_id,
+        lot_id: lotsDisponibles[0].lot_id,
+        numero_lot: lotsDisponibles[0].numero_lot,
+        date_peremption: lotsDisponibles[0].date_peremption,
+        quantite_recue: lotsDisponibles[0].quantite_recue,
+        quantite_en_cours: lotsDisponibles[0].quantite_en_cours,
+        fournisseur: lotsDisponibles[0].fournisseur
       } : null;
 
-      // Quantité disponible dans les lots non expirés pour ce médicament
-      const quantiteDisponible = prescription.items
+      const quantiteDisponible = items
         .filter((item: any) => item.lot_id !== null && item.lot_id === lotInfo?.lot_id)
         .reduce((sum: number, item: any) => sum + (item.quantite_en_cours || 0), 0);
 
       return {
+        id: it.id,
         item_id: it.id,
-        nom_medicament: it.nom_medicament,
+        code: it.code,
+        nom_commercial: it.nom_commercial || it.nom_medicament,
+        nom_generique: it.nom_generique,
+        classe_therapeutique: it.classe_therapeutique,
+        forme: it.forme || it.forme_catalogue,
+        dosage_unit: it.dosage_unit,
+        actif: it.actif ?? 1,
+        prix_autorise_usd: it.prix_autorise_usd || 0,
+        stock_disponible: quantiteDisponible,
+        alerte: null,
+        quantite_prescrite: it.quantite || 1,
         dosage: it.dosage,
-        forme: it.forme,
+        forme_item: it.forme,
         frequence: it.frequence,
         duree: it.duree,
-        quantite_prescrite: it.quantite || 1,
-        quantite_selectionnee: 0, // Sera définie par l'utilisateur en POS
-        prix_unitaire: it.prix_autorise_usd || 0,
-        actif: it.actif,
-        catalogue_id: it.catalogue_id,
         lot_info: lotInfo,
-        quantite_disponible: quantiteDisponible,
-        code: it.code
+        catalogue_id: it.catalogue_id
       };
     });
 
@@ -639,12 +665,166 @@ export async function createPharmaciePos(req: AuthenticatedRequest, res: Respons
         telephone: patient.telephone
       },
       prescription_id: prescription_id,
-      visite_id: prescription.visite_id,
+      visite_id: visite?.id || prescription.visite_id,
+      medecin_nom: medecin?.nom_complet || 'N/A',
+      statut: prescription.statut || 'EN_COURS',
       medicaments: medicaments,
-      total_prescrit: prescription.items.length
+      total_prescrit: items.length
     });
   } catch (err: any) {
     console.error('Erreur createPharmaciePos:', err);
     res.status(500).json({ error: 'Erreur ouverture POS pharmacie: ' + err.message });
+  }
+}
+
+/**
+ * POST /api/pharmacie/pos/facture
+ * Crée une facture liée via createLinkedFactureCore avec protection anti-doublon
+ */
+export async function createPosFacture(req: AuthenticatedRequest, res: Response): Promise<void> {
+  try {
+    const result = await createLinkedFactureCore({
+      ...req.body,
+      emise_par_id: req.user?.id || 'usr-recep-01',
+      ip_address: req.ip || '127.0.0.1'
+    });
+
+    if (result.isDuplicate) {
+      res.status(200).json({
+        success: true,
+        isDuplicate: true,
+        message: 'Une facture existe déjà pour cette prestation (doublon évité).',
+        facture: result.facture
+      });
+      return;
+    }
+
+    res.status(201).json({ success: true, facture: result.facture });
+  } catch (err: any) {
+    console.error('Erreur createPosFacture:', err);
+    res.status(400).json({ error: err.message || 'Erreur création facture.' });
+  }
+}
+
+/**
+ * POST /api/pharmacie/pos/paiement
+ * Enregistre un paiement pour une facture POS
+ */
+export async function recordPosPaiement(req: AuthenticatedRequest, res: Response): Promise<void> {
+  const { id } = req.body;
+  if (!id) {
+    res.status(400).json({ error: 'Facture ID requis.' });
+    return;
+  }
+  try {
+    const details = await getFactureFinancialDetails(id);
+    if (!details) {
+      res.status(404).json({ error: 'Facture introuvable.' });
+      return;
+    }
+    if (details.solde_usd <= 0.005) {
+      res.status(400).json({ error: 'Cette facture est déjà intégralement payée.' });
+      return;
+    }
+
+    const { montant_paye, devise, mode_paiement, reference_transaction, notes } = req.body;
+    const verser = parseFloat(String(montant_paye));
+    if (isNaN(verser) || verser <= 0) {
+      res.status(400).json({ error: 'Le montant payé doit être un nombre strictement positif.' });
+      return;
+    }
+
+    const devisePaiement = devise === 'CDF' ? 'FC' : devise;
+    if (devisePaiement !== 'USD' && devisePaiement !== 'FC') {
+      res.status(400).json({ error: 'Devise non autorisée. Choisissez USD ou FC.' });
+      return;
+    }
+
+    // Protection anti-doublon (double-clic ou requête répétée dans les 5 secondes)
+    const recentPayment = await queryOne<any>(
+      `SELECT * FROM paiements WHERE facture_id = ? AND montant_paye = ? AND devise = ? ORDER BY date_paiement DESC LIMIT 1`,
+      [id, verser, devisePaiement]
+    );
+    if (recentPayment) {
+      const diffMs = Date.now() - new Date(recentPayment.date_paiement).getTime();
+      if (diffMs < 5000) {
+        res.status(200).json({
+          success: true,
+          isDuplicate: true,
+          message: 'Paiement déjà validé (protection double-clic appliquée).',
+          recu: recentPayment.numero_recu,
+          paiement: recentPayment,
+          facture: details
+        });
+        return;
+      }
+    }
+
+    // Taux actuel
+    const settingRate = await queryOne("SELECT value FROM clinic_settings WHERE key = 'EXCHANGE_RATE_USD_FC' OR key = 'EXCHANGE_RATE_USD_CDF' LIMIT 1");
+    const tauxActuel = settingRate && settingRate.value ? parseFloat(settingRate.value) : 2850;
+
+    let equivalentUsd = 0;
+    let equivalentFc = 0;
+
+    if (devisePaiement === 'USD') {
+      equivalentUsd = Math.round(verser * 100) / 100;
+      equivalentFc = Math.round(verser * tauxActuel);
+    } else {
+      equivalentFc = Math.round(verser);
+      equivalentUsd = Math.round((verser / tauxActuel) * 100) / 100;
+    }
+
+    if (equivalentUsd > details.solde_usd + 0.05) {
+      const maxFc = Math.round(details.solde_usd * tauxActuel);
+      res.status(400).json({
+        error: `Le montant versé (${verser} ${devisePaiement}) excède le solde restant dû (${details.solde_usd} USD ou ~${maxFc} FC).`
+      });
+      return;
+    }
+
+    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const countRecuRes = await queryOne("SELECT count(*) as count FROM paiements WHERE numero_recu LIKE ?", [`REC-${dateStr}-%`]);
+    const countRecu = countRecuRes ? Number(countRecuRes.count) + 1 : 1;
+    const numeroRecu = `REC-${dateStr}-${String(countRecu).padStart(4, '0')}`;
+
+    const paiementId = `pmt-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const now = new Date().toISOString();
+    const mode = ['ESPECES', 'MOBILE_MONEY', 'CARTE_BANCAIRE'].includes(mode_paiement) ? mode_paiement : 'ESPECES';
+
+    await execute(
+      `INSERT INTO paiements (id, numero_recu, facture_id, montant_paye, devise, taux_usd_fc, equivalent_usd, equivalent_fc, mode_paiement, reference_transaction, notes, date_paiement, encaisse_par_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        paiementId, numeroRecu, id, verser, devisePaiement, tauxActuel,
+        equivalentUsd, equivalentFc, mode,
+        reference_transaction?.trim() || null, notes?.trim() || null, now,
+        req.user?.id || 'usr-recep-01'
+      ]
+    );
+
+    const updatedDetails = await getFactureFinancialDetails(id);
+    const newStatus = updatedDetails!.statut;
+    await execute('UPDATE factures SET statut = ?, updated_at = ? WHERE id = ?', [newStatus, now, id]);
+
+    res.json({
+      success: true,
+      recu: numeroRecu,
+      paiement: {
+        id: paiementId,
+        numero_recu: numeroRecu,
+        montant_paye: verser,
+        devise: devisePaiement,
+        taux_usd_fc: tauxActuel,
+        equivalent_usd: equivalentUsd,
+        equivalent_fc: equivalentFc,
+        mode_paiement: mode,
+        date_paiement: now
+      },
+      facture: updatedDetails
+    });
+  } catch (err: any) {
+    console.error('Erreur recordPosPaiement:', err);
+    res.status(500).json({ error: 'Erreur lors de l\'enregistrement du paiement.' });
   }
 }

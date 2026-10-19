@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   X, Printer, FileText, CheckCircle2, Search, RefreshCw, 
-  Send, User, Calendar, ShieldCheck, Pill, AlertCircle, Clock
+  Send, User, Calendar, ShieldCheck, Pill, AlertCircle, Clock, Package
 } from 'lucide-react';
 import { Prescription, PrescriptionStatut } from '../../types';
 import { apiFetch } from '../../lib/api';
@@ -9,11 +9,13 @@ import { apiFetch } from '../../lib/api';
 interface ReceptionPrescriptionsModalProps {
   onClose: () => void;
   initialVisiteId?: string;
+  onNavigate?: (tab: string) => void;
 }
 
 export const ReceptionPrescriptionsModal: React.FC<ReceptionPrescriptionsModalProps> = ({
   onClose,
-  initialVisiteId
+  initialVisiteId,
+  onNavigate
 }) => {
   const [prescriptions, setPrescriptions] = useState<Prescription[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -115,12 +117,16 @@ export const ReceptionPrescriptionsModal: React.FC<ReceptionPrescriptionsModalPr
       setProcessingId(null);
       onClose();
       // Navigation vers la POS pharmacie avec la prescription préremplie
-      // setCurrentTab('pharmacie-pos');
+      if (onNavigate) {
+        onNavigate('pharmacie-pos');
+      }
     } catch (err: any) {
       setError(err.message || 'Erreur ouverture POS pharmacie');
       setProcessingId(null);
     }
   };
+
+  const filteredPrescriptions = prescriptions.filter((p: Prescription) => {
     if (initialVisiteId && p.visite_id !== initialVisiteId) return false;
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();

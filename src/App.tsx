@@ -11,6 +11,7 @@ import { TarifsManagementView } from './components/admin/TarifsManagementView.js
 import { RbacTester } from './components/common/RbacTester.js';
 import { Phase2Placeholder } from './components/common/Phase2Placeholder.js';
 import { PharmacyManagementView } from './components/pharmacy/PharmacyManagementView.js';
+import { PharmacyPosView } from './components/pharmacy/PharmacyPosView.js';
 import { ReceptionDashboardView } from './components/reception/ReceptionDashboardView.js';
 import { PatientSearchView } from './components/reception/PatientSearchView.js';
 import { BillingCashierView } from './components/reception/BillingCashierView.js';
@@ -38,6 +39,7 @@ const MainApp: React.FC = () => {
       return false;
     }
   });
+  const [pharmacyPrescriptionId, setPharmacyPrescriptionId] = useState<string | null>(null);
 
   const toggleSidebar = () => {
     setIsSidebarCollapsed(prev => {
@@ -68,9 +70,17 @@ const MainApp: React.FC = () => {
       case 'dashboard':
         if (user.role === 'RÉCEPTION' || user.role_categorie === 'RÉCEPTION') {
           return (
-            <ReceptionDashboardView 
-              onGoToSearch={() => setCurrentTab('reception-patients')} 
+            <ReceptionDashboardView
+              onGoToSearch={() => setCurrentTab('reception-patients')}
               onGoToCashier={() => setCurrentTab('reception-cashier')}
+              onNavigate={(tab) => {
+                if (tab === 'pharmacie-pos') {
+                  setPharmacyPrescriptionId('');
+                  setCurrentTab(tab);
+                } else {
+                  setCurrentTab(tab);
+                }
+              }}
             />
           );
         }
@@ -103,6 +113,8 @@ const MainApp: React.FC = () => {
         return <RbacTester />;
       case 'pharmacie-management':
         return <PharmacyManagementView onClose={() => setCurrentTab('dashboard')} />;
+      case 'pharmacie-pos':
+        return <PharmacyPosView prescriptionId={pharmacyPrescriptionId || ''} onNavigate={setCurrentTab} />;
       // Menus Administrateur
 
       // Menus Réception — Phase 2A Opérationnelle
