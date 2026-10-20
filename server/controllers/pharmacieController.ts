@@ -708,10 +708,10 @@ export async function createPosFacture(req: AuthenticatedRequest, res: Response)
 
 /**
  * POST /api/pharmacie/pos/paiement
- * Enregistre un paiement pour une facture POS
+ * Enregistre un paiement pour une facture POS ET décrémente le stock atomiquement
  */
 export async function recordPosPaiement(req: AuthenticatedRequest, res: Response): Promise<void> {
-  const { id } = req.body;
+  const { id, prescription_id } = req.body;
   if (!id) {
     res.status(400).json({ error: 'Facture ID requis.' });
     return;
@@ -783,45 +783,98 @@ export async function recordPosPaiement(req: AuthenticatedRequest, res: Response
       return;
     }
 
-    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    const countRecuRes = await queryOne("SELECT count(*) as count FROM paiements WHERE numero_recu LIKE ?", [`REC-${dateStr}-%`]);
-    const countRecu = countRecuRes ? Number(countRecuRes.count) + 1 : 1;
-    const numeroRecu = `REC-${dateStr}-${String(countRecu).padStart(4, '0')}`;
+    await transaction(async () => {
+      // 1. Enregistrer le paiement
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const countRecuRes = await queryOne("SELECT count(*) as count FROM paiements WHERE numero_recu LIKE ?", [`REC-${dateStr}-%`]);
+      const countRecu = countRecuRes ? Number(countRecuRes.count) + 1 : 1;
+      const recuNum = `REC-${dateStr}-${String(countRecu).padStart(4, '0')}`;
 
-    const paiementId = `pmt-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-    const now = new Date().toISOString();
-    const mode = ['ESPECES', 'MOBILE_MONEY', 'CARTE_BANCAIRE'].includes(mode_paiement) ? mode_paiement : 'ESPECES';
+      const pmtId = `pmt-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      const txnNow = new Date().toISOString();
+      const payMode = ['ESPECES', 'MOBILE_MONEY', 'CARTE_BANCAIRE'].includes(mode_paiement) ? mode_paiement : 'ESPECES';
 
-    await execute(
-      `INSERT INTO paiements (id, numero_recu, facture_id, montant_paye, devise, taux_usd_fc, equivalent_usd, equivalent_fc, mode_paiement, reference_transaction, notes, date_paiement, encaisse_par_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        paiementId, numeroRecu, id, verser, devisePaiement, tauxActuel,
-        equivalentUsd, equivalentFc, mode,
-        reference_transaction?.trim() || null, notes?.trim() || null, now,
-        req.user?.id || 'usr-recep-01'
-      ]
-    );
+      await execute(
+        `INSERT INTO paiements (id, numero_recu, facture_id, montant_paye, devise, taux_usd_fc, equivalent_usd, equivalent_fc, mode_paiement, reference_transaction, notes, date_paiement, encaisse_par_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          pmtId, recuNum, id, verser, devisePaiement, tauxActuel,
+          equivalentUsd, equivalentFc, payMode,
+          reference_transaction?.trim() || null, notes?.trim() || null, txnNow,
+          req.user?.id || 'usr-recep-01'
+        ]
+      );
 
-    const updatedDetails = await getFactureFinancialDetails(id);
-    const newStatus = updatedDetails!.statut;
-    await execute('UPDATE factures SET statut = ?, updated_at = ? WHERE id = ?', [newStatus, now, id]);
+      // 2. Décrémenter le stock si prescription_id fourni
+      if (prescription_id) {
+        const prescriptionItems = await queryAll<any>(
+          `SELECT pi.id, pi.catalogue_id, pi.quantite, c.nom_commercial,
+                  l.id as lot_id, l.numero_lot, l.date_peremption, l.quantite_en_cours
+           FROM prescription_items pi
+           JOIN catalogue_medicaments c ON pi.catalogue_id = c.id
+           LEFT JOIN lots_medicaments l ON c.id = l.catalogue_id AND l.date_peremption > date('now')
+           WHERE pi.prescription_id = ?`,
+          [prescription_id]
+        );
+
+        const invoiceItems = await queryAll<any>(
+          `SELECT description, quantite, tarif_id FROM facture_items WHERE facture_id = ?`,
+          [id]
+        );
+
+        for (const invItem of invoiceItems) {
+          const matchingPrescItem = prescriptionItems.find((pi: any) =>
+            pi.catalogue_id === invItem.tarif_id || pi.nom_commercial === invItem.description
+          );
+          if (!matchingPrescItem) continue;
+
+          if (!matchingPrescItem.lot_id) {
+            throw new Error(`Aucun lot non expiré disponible pour ${matchingPrescItem.nom_commercial}`);
+          }
+          if (new Date(matchingPrescItem.date_peremption) <= new Date()) {
+            throw new Error(`Lot expiré pour ${matchingPrescItem.nom_commercial}`);
+          }
+          if (matchingPrescItem.quantite_en_cours < invItem.quantite) {
+            throw new Error(`Stock insuffisant pour ${matchingPrescItem.nom_commercial}: ${matchingPrescItem.quantite_en_cours} disponible, ${invItem.quantite} demandé`);
+          }
+
+          const mouvementId = `mov-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+          await execute(
+            `INSERT INTO mouvements_stock (id, lot_id, catalogue_id, type, quantite, reference_id, commentaire, utilisateur_id, created_at)
+             VALUES (?, ?, ?, 'SORTIE', ?, ?, ?, ?, datetime('now'))`,
+            [mouvementId, matchingPrescItem.lot_id, matchingPrescItem.catalogue_id,
+             invItem.quantite, id, `Délivrance pharmacie - ordonnance ${prescription_id}`, req.user?.id || 'usr-recep-01']
+          );
+
+          await execute(
+            `UPDATE lots_medicaments SET quantite_en_cours = quantite_en_cours - ?, updated_at = datetime('now') WHERE id = ?`,
+            [invItem.quantite, matchingPrescItem.lot_id]
+          );
+        }
+      }
+
+      // 3. Mettre à jour le statut de la facture
+      const updatedDetails = await getFactureFinancialDetails(id);
+      const newStatus = updatedDetails!.statut;
+      await execute(`UPDATE factures SET statut = ?, updated_at = datetime('now') WHERE id = ?`, [newStatus, id]);
+    });
+
+    const finalDetails = await getFactureFinancialDetails(id);
 
     res.json({
       success: true,
-      recu: numeroRecu,
+      recu: `REC-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-0001`,
       paiement: {
-        id: paiementId,
-        numero_recu: numeroRecu,
+        id: `pmt-${Date.now()}`,
         montant_paye: verser,
         devise: devisePaiement,
         taux_usd_fc: tauxActuel,
         equivalent_usd: equivalentUsd,
         equivalent_fc: equivalentFc,
-        mode_paiement: mode,
-        date_paiement: now
+        mode_paiement: ['ESPECES', 'MOBILE_MONEY', 'CARTE_BANCAIRE'].includes(mode_paiement) ? mode_paiement : 'ESPECES',
+        date_paiement: new Date().toISOString()
       },
-      facture: updatedDetails
+      facture: finalDetails
     });
   } catch (err: any) {
     console.error('Erreur recordPosPaiement:', err);

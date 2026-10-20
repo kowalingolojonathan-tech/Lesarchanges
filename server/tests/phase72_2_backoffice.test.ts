@@ -356,32 +356,41 @@ export async function runPhase72Step2Tests(): Promise<TestResult[]> {
   // TEST G : Alertes — stock faible
   // ============================================
   try {
-    // Créer un lot avec stock très faible (1 unité)
+    // Créer un nouveau catalogue avec seulement 3 unités pour tester l'alerte
+    const catFaibleId = `cat-faible-${suffix}`;
+    await execute(
+      `INSERT INTO catalogue_medicaments (id, code, nom_commercial, classe_therapeutique, actif, prix_autorise_usd, created_at, updated_at)
+       VALUES (?, ?, 'Test Stock Faible', 'TEST', 1, 10.00, datetime('now'), datetime('now'))`,
+      [catFaibleId, `CODE-FAIBLE-${suffix}`]
+    );
+
+    // Ajouter un seul lot avec 3 unités
     const lotFaibleId = `lot-faible-${suffix}`;
     await execute(
       `INSERT INTO lots_medicaments (id, catalogue_id, numero_lot, date_peremption, quantite_recue, quantite_en_cours, created_at, updated_at)
-       VALUES (?, ?, 'LOT-FAIBLE', '2028-01-01', 1, 1, datetime('now'), datetime('now'))`,
-      [lotFaibleId, catId]
+       VALUES (?, ?, 'LOT-FAIBLE-TEST', '2028-01-01', 3, 3, datetime('now'), datetime('now'))`,
+      [lotFaibleId, catFaibleId]
     );
 
-    // Vérifier via la requête d'alerte avec seuil à 5
-    // Utiliser une sous-requête pour s'assurer qu'on teste le bon catalogue
+    // Vérifier via la même logique que getAlertes
     const alertesFaible = await query<any>(
       `WITH cat_stock AS (
-         SELECT c.id as catalogue_id, COALESCE(SUM(l.quantite_en_cours), 0) as stock_disponible
-         FROM catalogue_medicaments c
-         LEFT JOIN lots_medicaments l ON c.id = l.catalogue_id AND l.date_peremption > date('now')
-         WHERE c.id = ?
-         GROUP BY c.id
-       )
-       SELECT * FROM cat_stock WHERE stock_disponible <= 5`,
-      [catId]
+          SELECT c.id as catalogue_id, COALESCE(SUM(l.quantite_en_cours), 0) as stock_disponible
+          FROM catalogue_medicaments c
+          LEFT JOIN lots_medicaments l ON c.id = l.catalogue_id AND l.date_peremption > date('now')
+          WHERE c.id = ?
+          GROUP BY c.id
+        )
+        SELECT * FROM cat_stock WHERE stock_disponible <= 5`,
+      [catFaibleId]
     );
     const faiblePresent = alertesFaible.length > 0 && alertesFaible[0].stock_disponible !== undefined && Number(alertesFaible[0].stock_disponible) <= 5;
     record(19, 'Alertes : stock faible détecté', faiblePresent,
       faiblePresent ? `Stock=${alertesFaible[0]?.stock_disponible}` : `Stock=${alertesFaible[0]?.stock_disponible ?? 'undefined'}`);
 
+    // Nettoyer
     await execute(`DELETE FROM lots_medicaments WHERE id = ?`, [lotFaibleId]).catch(() => {});
+    await execute(`DELETE FROM catalogue_medicaments WHERE id = ?`, [catFaibleId]).catch(() => {});
   } catch (err: any) {
     record(19, 'Alertes : détection stock faible', false, err.message);
   }

@@ -1451,6 +1451,9 @@ export async function runMigrations(): Promise<void> {
       if (!facCols.includes('patient_telephone_temp')) {
         db.exec("ALTER TABLE factures ADD COLUMN patient_telephone_temp TEXT;");
       }
+      if (!facCols.includes('prescription_id')) {
+        db.exec("ALTER TABLE factures ADD COLUMN prescription_id TEXT;");
+      }
     }
 
     // Aligne la table existante : patient_id devient nullable (support RDV sans dossier médical)

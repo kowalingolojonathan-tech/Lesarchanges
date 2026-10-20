@@ -431,6 +431,7 @@ export interface CreateLinkedFactureParams {
   patient_id?: string | null;
   visite_id?: string | null;
   rendez_vous_id?: string | null;
+  prescription_id?: string | null;
   patient_nom_temp?: string | null;
   patient_prenom_temp?: string | null;
   patient_telephone_temp?: string | null;
@@ -455,6 +456,7 @@ export async function createLinkedFactureCore(params: CreateLinkedFactureParams)
     patient_id,
     visite_id,
     rendez_vous_id,
+    prescription_id,
     patient_nom_temp,
     patient_prenom_temp,
     patient_telephone_temp,
@@ -554,23 +556,26 @@ export async function createLinkedFactureCore(params: CreateLinkedFactureParams)
 
   await execute(
     `INSERT INTO factures (
-      id, numero_facture, patient_id, visite_id, rendez_vous_id,
+      id, numero_facture, patient_id, visite_id, rendez_vous_id, prescription_id,
       patient_nom_temp, patient_prenom_temp, patient_telephone_temp,
       type_prestation, montant_total,
       devise, taux_usd_fc, statut, emise_par_id, notes, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'USD', ?, 'NON PAYÉ', ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       factureId,
       numeroFacture,
       patient_id || null,
       visite_id || null,
       rendez_vous_id || null,
+      prescription_id || null,
       patient_nom_temp?.trim() || null,
       patient_prenom_temp?.trim() || null,
       patient_telephone_temp?.trim() || null,
       type_prestation,
       montantTotalUsd,
+      'USD',
       tauxActuel,
+      'NON PAYÉ',
       emise_par_id,
       notes?.trim() || null,
       now,
@@ -622,7 +627,7 @@ export async function createLinkedFactureCore(params: CreateLinkedFactureParams)
 }
 
 /**
- * Création d'une facture multi-prestations (RÉCEPTION & ADMINISTRATEUR)
+ * Creation d'une facture multi-prestations (RÉCEPTION & ADMINISTRATEUR)
  */
 export async function createFacture(req: Request, res: Response): Promise<void> {
   const authReq = req as AuthenticatedRequest;
@@ -679,6 +684,54 @@ export async function createFacture(req: Request, res: Response): Promise<void> 
   } catch (err: any) {
     console.error('Erreur createFacture:', err);
     res.status(500).json({ error: err.message || 'Erreur lors de l\'émission de la facture.' });
+  }
+}
+
+/**
+ * Creation d'une facture via l'endpoint interne core (même protection RBAC que /api/factures)
+ */
+export async function createLinkedFactureCoreHandler(req: Request, res: Response): Promise<void> {
+  const authReq = req as AuthenticatedRequest;
+  const { patient_id, visite_id, rendez_vous_id, prescription_id, patient_nom_temp, patient_prenom_temp, patient_telephone_temp, items, notes, type_prestation } = req.body;
+
+  if (!items || !Array.isArray(items) || items.length === 0) {
+    res.status(400).json({ error: 'Une facture doit contenir au moins une prestation.' });
+    return;
+  }
+
+  try {
+    const result = await createLinkedFactureCore({
+      patient_id,
+      visite_id,
+      rendez_vous_id,
+      prescription_id,
+      patient_nom_temp,
+      patient_prenom_temp,
+      patient_telephone_temp,
+      type_prestation: type_prestation || 'MULTI_PRESTATIONS',
+      items,
+      emise_par_id: authReq.user?.id || 'usr-recep-01',
+      notes,
+      ip_address: req.ip || '127.0.0.1'
+    });
+
+    if (result.isDuplicate) {
+      res.status(200).json({
+        success: true,
+        isDuplicate: true,
+        message: 'Une facture existe déjà pour cette prestation (doublon évité).',
+        facture: result.facture
+      });
+      return;
+    }
+
+    res.status(201).json({
+      success: true,
+      facture: result.facture
+    });
+  } catch (err: any) {
+    console.error('Erreur createLinkedFactureCoreHandler:', err);
+    res.status(400).json({ error: err.message || 'Erreur lors de l\'émission de la facture.' });
   }
 }
 

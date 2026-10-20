@@ -259,6 +259,7 @@ export const PharmacyPosView: React.FC<PharmacyPosViewProps> = ({ prescriptionId
         method: 'POST',
         body: JSON.stringify({
           id: nouvelleFacture.id,
+          prescription_id: posData.prescription_id,
           montant_paye: montantUsd,
           devise: 'USD',
           mode_paiement: 'ESPECES'
@@ -269,44 +270,6 @@ export const PharmacyPosView: React.FC<PharmacyPosViewProps> = ({ prescriptionId
       const paiementResult = await resPaiement.json();
       if (!resPaiement.ok) {
         throw new Error(paiementResult.error || 'Erreur enregistrement paiement');
-      }
-
-      // 3. Mise à jour atomique du stock via les mouvements
-      for (const selection of posData.selections) {
-        if (selection.quantite_selectionnee > 0 && selection.lot_info) {
-          const lotId = selection.lot_info.id;
-          const catalogueId = selection.item_id;
-          const qty = selection.quantite_selectionnee;
-
-          // Vérifier que le lot n'est pas expiré et a assez de stock
-          const lotRes = await apiFetch(`/api/pharmacie/lots?catalogue_id=${catalogueId}`);
-          const lotData = await lotRes.json();
-          const lotActuel = (lotData.lots || []).find((l: any) => l.id === lotId);
-
-          if (!lotActuel) {
-            throw new Error(`Lot introuvable pour ${selection.nom_medicament}`);
-          }
-          if (new Date(lotActuel.date_peremption) <= new Date()) {
-            throw new Error(`Lot expiré pour ${selection.nom_medicament}`);
-          }
-          if (lotActuel.quantite_en_cours < qty) {
-            throw new Error(`Stock insuffisant pour ${selection.nom_medicament}: ${lotActuel.quantite_en_cours} disponible, ${qty} demandé`);
-          }
-
-          // Créer un mouvement SORTIE
-          await apiFetch('/api/pharmacie/mouvements', {
-            method: 'POST',
-            body: JSON.stringify({
-              lot_id: lotId,
-              catalogue_id: catalogueId,
-              type: 'SORTIE',
-              quantite: qty,
-              reference_id: nouvelleFacture.id,
-              commentaire: `Délivrance pharmacie - ordonnance ${posData.prescription_id}`
-            }),
-            headers: { 'Content-Type': 'application/json' }
-          });
-        }
       }
 
       setPosData(null);

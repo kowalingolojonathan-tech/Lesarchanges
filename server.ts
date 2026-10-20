@@ -118,8 +118,8 @@ async function startServer() {
   app.get('/api/factures/:id', requireAuth, requirePermission('factures:voir'), billingCtrl.getFactureById);
   app.post('/api/factures', requireAuth, requirePermission('factures:ajouter'), billingCtrl.createFacture);
   app.post('/api/factures/:id/paiements', requireAuth, requirePermission('paiements:ajouter'), billingCtrl.recordPaiement);
-  app.post('/api/billing/create-linked-facture-core', requireAuth, billingCtrl.createLinkedFactureCore);
-  app.post('/api/billing/record-paiement', requireAuth, billingCtrl.recordPaiement);
+  app.post('/api/billing/create-linked-facture-core', requireAuth, requirePermission('factures:ajouter'), billingCtrl.createLinkedFactureCoreHandler);
+  app.post('/api/billing/record-paiement/:id', requireAuth, requirePermission('paiements:ajouter'), billingCtrl.recordPaiement);
   app.post('/api/pharmacie/pos/facture', requireAuth, requireRole(['PHARMACIEN', 'ADMINISTRATEUR']), pharmacieCtrl.createPosFacture);
   app.post('/api/pharmacie/pos/paiement', requireAuth, requireRole(['PHARMACIEN', 'ADMINISTRATEUR']), pharmacieCtrl.recordPosPaiement);
 
