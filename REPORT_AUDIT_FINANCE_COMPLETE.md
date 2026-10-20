@@ -1,6 +1,25 @@
 # AUDIT COMPLET - MODULE FINANCES ET COMPTABILITÉ EN PARTIE DOUBLE
 ## Clinique Les Archanges
 
+**Dernière mise à jour :** 20 octobre 2026  
+**Statut du rapport :** ✅ Document principal de référence — En cours de validation
+
+---
+
+## DOCUMENTATION ASSOCIÉE
+
+> ⚠️ Ce rapport est le document principal. Les informations détaillées sont dans les documents suivants :
+>
+> | Document | Description | Statut |
+> |----------|-------------|--------|
+> | [PLAN_COMPTABLE.md](PLAN_COMPTABLE.md) | Plan comptable SYSCOHADA avec comptes, libellés, catégories | ⚠️ PROPOSITION TECHNIQUE |
+> | [PLAN_COMPTABLE.csv](PLAN_COMPTABLE.csv) | Plan comptable au format CSV (modifiable dans tableur) | ⚠️ PROPOSITION TECHNIQUE |
+> | [DECISIONS_COMPTABLES.md](DECISIONS_COMPTABLES.md) | Décisions approuvées vs à valider | ⚠️ EN ATTENTE VALIDATION EXPERT |
+> | [PLAN_IMPLEMENTATION_FINANCE.md](PLAN_IMPLEMENTATION_FINANCE.md) | Plan d'implémentation étape par étape | ⚠️ PROPOSITION TECHNIQUE |
+> | [CHANGELOG_FINANCE.md](CHANGELOG_FINANCE.md) | Historique des modifications documentaires | ✅ ACTIF |
+>
+> **Règle de maintenance :** Toute modification importante doit être répercutée dans le document concerné avec sa date et son motif. Mise à jour → modifier CHANGELOG_FINANCE.md → mettre à jour les références croisées.
+
 ---
 
 ## A. FONCTIONNALITÉS EXISTANTES AVEC PREUVES DANS LE CODE
@@ -334,14 +353,17 @@ Table à créer : `journal_auxiliaire`__` ` (id, journal_id, solde_debit, solde_
 View SQL : Voir → journaux auxiliaires et balances
 
 ### 12. STOCK VARIAUX FINANCIERS
+*(SECTION CORRIGÉE — Voir PLAN_COMPTABLE.md pour la version détaillée)*
 
-**Structure de compte :**
-- Compte Actif : "Variation du stock" (603)
-- Compte Produit : "Stock final" (703)
+**Structure de compte SYSCOHADA corrigée :**
+- Compte **481** — Stocks de médicaments (Actif circulant, classe 4)
+- Compte **601** — Achats de médicaments (Charge, classe 6)
+- Compte **707** — Vente de médicaments (Produit, classe 7)
 
 **À provisionner :**
-- Périodiquement extraction des comptes de stock
-- Consiliation avec inventaire physique
+- Méthode de valorisation validée par un expert-comptable *(À VALIDER — voir DECISIONS_COMPTABLES.md #3)*
+- Périodicité extraction des comptes de stock
+- Conciliation avec inventaire physique
 
 ---
 
@@ -349,26 +371,21 @@ View SQL : Voir → journaux auxiliaires et balances
 
 | Événement | Traitement Actuel | Écritures Comptables (ÉTAPE 2 - À CRÉER) | Risques |
 |-----------|-------------------|-------------------------------------------|----------|
-| **Facture créée** | `CREATE` facture | • Crédit 70xxxx - Chiffre d'affaires<br>• Débit 41xxxx - Clients | Aucun si pas de comptes |
-| **Paiement reçu** | `CREATE` paiement | • Débit 51xxxx - Caisse / Banque<br>• Crédit 41xxxx - Clients soldés | Ajustement manuel si ni cria ni solde |
-| **Paiement partiel** | Mise à jour statut | • Remontée des débits clients partielle<br>• Pas de correctif automatique | Pas de solde client réel suivi |
-| **Remboursement** | Non implémenté | • Débit 41xxxx - Clients remboursés<br>• Crédit 51xxxx - Caisse | Pas d'interface ni d'interface BR |
-| **Dérogation** | Field `notes_facture` | • Ignoré en comptabilité | Risque de service sans compte |
-| **Facture annulée** | Mise à jour `statut` | • Contre-passation comptable intégrale | Valeur 1,2 simple protégée |
-| **Stock entrée** | `CREATE` mouvement `ENTREE` | • Débit 603xxxx - Variation de stock<br>• Crédit 60x - Achats de medicines | ❌ À VALIDER (COÛT D'ACQUISITION) |
-| **Stock sortie (POS)** | `CREATE` `SORTIE` + auto | • Débit 603xxxx - Stock final<sup>1</sup><br>• Crédit 703 - Ventes médiaments | Solde 606<sup>2</sup> non Débité |
-| **Achat à crédit** | Non implémenté | • Débit 60x - Achats fournisseur<br>• Crédit 40x - Dettes fournisseurs | Peut créer des dettes sans trace |
-| **Règlement dette** | Non implémenté | • Débit 40x - Dettes fournisseurs soldés<br>• Crédit 51xxxx - Caisse | À valider |
-| **Délivrance exclusive** | Pression périodique | • Doit appartenir à une facture<br>• DOIT ÊTRE CONTAUTABILISÉ | Soit sécurisation à l'avenir |
-| **Dons, réparations** | Pas de traitement | • Crédit 607 - Magasins et approvisionnements<br>• Crédit 603 - Variation | Valeur 603 non Débitée |
-| **Virement interne** | Non implémenté | • Débit 51... - Source<br>• Crédit 51... - Cible | Peut créer des écarts d'inventaire |
-| **Salaires / Charges** | Non implémenté | • Débit 61xxxx - Salaires & charges<br>• Crédit 51xxxx - Caisse | Pas de comptabilité salariale |
-| **Conversion USD/FC** | Conservation simple | • Valeur monétaire scellée<br>• Pas de nets de variation d'encours | À valider |
-| **Date de paiement** | Mats | • CNCATES PERIODICALS | MONTRE L'ENDAO 1,2 |
-| **Imputer les bras** | Dans transaction | • Protection anti-x | Valeur régulée |
+| **Facture créée** | `CREATE` facture | • Débit **411** - Patients<br>• Crédit **706** - Prestations (ou 707 pharmacie) | Aucun | ✅ CORRIGÉ |
+| **Paiement reçu** | `CREATE` paiement | • Débit **512/521** - Caisse USD / Banque<br>• Crédit **411** - Patients | Écarts de change | ✅ CORRIGÉ |
+| **Paiement partiel** | Mise à jour statut | • Même écriture, solde client restant dû | Traçabilité | ✅ CORRIGÉ |
+| **Remboursement** | Non implémenté | • Débit **512/521** - Caisse<br>• Crédit **411** - Patients | À implémenter | ⚠️ À IMPLÉMENTER |
+| **Dérogation** | Field `notes_facture` | À valider par expert *(voir DECISIONS #11)* | À valider | ⚠️ À VALIDER |
+| **Facture annulée** | Mise à jour `statut` | • Contre-passation intégrale | Traçabilité | ✅ CORRIGÉ |
+| **Stock entrée (pharma)** | `CREATE` mouvement `ENTREE` | • Débit **481** - Stocks<br>• Crédit **601** ou **401** - Achats/Fournisseurs | Coût d'acquisition | ✅ CORRIGÉ |
+| **Stock sortie (POS)** | `CREATE` `SORTIE` + paiement | • Débit **601** - Coût des ventes<br>• Crédit **481** - Stocks | Double comptage si manuel | ✅ PROTÉGÉ |
+| **Achat à crédit** | Non implémenté | • Débit **601** - Achats<br>• Crédit **401** - Fournisseurs | Créer dette | ⚠️ À IMPLÉMENTER |
+| **Règlement dette** | Non implémenté | • Débit **401** - Fournisseurs<br>• Crédit **512/521** - Caisse | À valider | ⚠️ À IMPLÉMENTER |
+| **Virement interne** | Non implémenté | • Débit **512** → Crédit **521** (USD) | Éviter écarts | ⚠️ À IMPLÉMENTER |
+| **Salaires / Charges** | Non implémenté | • Débit **621** - Salaires<br>• Crédit **512/521** - Caisse | À valider | ⚠️ À IMPLÉMENTER |
+| **Conversion USD/FC** | Conservation simple | • Taux scellé<br>• Écarts → **665/765** | À valider | ⚠️ À VALIDER (#5) |
 
-<sup>1</sup> Seule en période comptable de santé pour services (compte 7083+7083+7083)
-<sup>2</sup> Nonquis sans facturation salariale
+> **Note :** Les numéros de comptes sont basés sur le SYSCOHADA/OHADA standard. Chaque numéro doit être validé par un expert-comptable avant l'implémentation.
 
 ---
 
@@ -871,7 +888,7 @@ const REGLES_COMPTABLES = {
 
 | Étape | Travaux Approximés | Livrable | Validation |
 |-------|-------------------|----------|-----------|
-| 9.1 | Plan comptable | 5 classes + 17 sous-détails | ✅ Plan à valider |
+| 9.1 | Plan comptable | 5 classes + 17 sous-détails | ⚠️ À VALIDER PAR EXPERT |
 | 9.2 | Journaux (général, clients, fournisseurs) | 3 journaux code | ⏸️ À programmer |
 | 9.3 | Écritures comptables | Synchronisation facture/paiement | ⏸️ À programmer |
 | 9.4 | Balances | Tables calculées annuellement | ⏸️ À programmer |
@@ -883,16 +900,36 @@ const REGLES_COMPTABLES = {
 | 9.10 | Interface UI Model | Pages complètes | ⏸️ À programmer |
 | 9.11 | Règles retenues | Gestion sens | ⏸️ À programmer |
 
+**Détails :** Voir [PLAN_IMPLEMENTATION_FINANCE.md](PLAN_IMPLEMENTATION_FINANCE.md) pour le plan détaillé.
+
 ---
 
 ## NOTE ÉNERGETIQUE IMPORTANT
 
-❗ Dans le système actuel, la gestion `delivre_medicaments` existe dans la base mais NE PAS UTILISÉ. L'implémenter serait une surcharge. Pour une comptabilité solide, il vaudrait mieux se concentrer sur l'intégration des stocks via `mouvements_stock` dans un journal comptable dédié à la pharmacie, sans introduire un nouveau dic : cela supprimerait l'ambiguïté comptable.
+❗ Dans le système actuel, la gestion `delivre_medicaments` existe dans la base mais ne pas utilisée. L'implémenter serait une surcharge. Pour une comptabilité solide, il vaudrait mieux se concentrer sur l'intégration des stocks via `mouvements_stock` dans un journal comptable dédié à la pharmacie, sans introduire un nouveau dic : cela supprimerait l'ambiguïté comptable.
 
 ---
 
-## DATE DU RAPPORT : [20 OCT 2026]
+## DOCUMENTS ASSOCIÉS — DÉTAILS
+
+> Ce rapport est le document principal de référence. Les informations détaillées sont dans les documents suivants :
+>
+> | Document | Description | Statut |
+> |----------|-------------|--------|
+> | [PLAN_COMPTABLE.md](PLAN_COMPTABLE.md) | Plan comptable SYSCOHADA avec comptes, libellés, catégories | ⚠️ PROPOSITION TECHNIQUE |
+> | [PLAN_COMPTABLE.csv](PLAN_COMPTABLE.csv) | Plan comptable au format CSV (modifiable dans tableur) | ⚠️ PROPOSITION TECHNIQUE |
+> | [DECISIONS_COMPTABLES.md](DECISIONS_COMPTABLES.md) | Décisions approuvées vs à valider | ⚠️ EN ATTENTE VALIDATION EXPERT |
+> | [PLAN_IMPLEMENTATION_FINANCE.md](PLAN_IMPLEMENTATION_FINANCE.md) | Plan d'implémentation étape par étape | ⚠️ PROPOSITION TECHNIQUE |
+> | [CHANGELOG_FINANCE.md](CHANGELOG_FINANCE.md) | Historique des modifications documentaires | ✅ ACTIF |
+
+**Règle de maintenance :** Toute modification importante doit être répercutée dans le document concerné avec sa date et son motif. Mise à jour → modifier CHANGELOG_FINANCE.md → mettre à jour les références croisées.
+
+---
+
+## DATE DU RAPPORT : 20 OCTOBRE 2026
 
 ## AUDITEUR : [PHASE 7]
 
 ## VALIDÉ PAR : EN ATTENTE D'AUTORISATION D'IMPLÉMENTATION
+
+## STATUT FINAL : ✅ RAPPORT CORRIGÉ — EN ATTENTE DE VALIDATION COMPTABLE PAR UN EXPERT-COMPTABLE SYSCOHADA
