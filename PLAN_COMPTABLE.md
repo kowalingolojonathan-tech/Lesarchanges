@@ -62,13 +62,14 @@
 | 411 | Clients | Actif | Créances sur les patients | ✅ Confirmé OHADA |
 | 416 | Clients douteux ou litigieux | Actif | Créances en instance | ✅ Confirmé OHADA |
 | **42** | **Fournisseurs** | **Actif** | **Dettes fournisseurs** | **✅ Confirmé** |
-| 421 | Fournisseurs | Actif | Dettes sur achats de médicaments/fournitures | ✅ Confirmé OHADA |
-| 423 | Fournisseurs, acomptes versés | Actif | Acomptes fournisseurs | ✅ Confirmé OHADA |
+| 401 | Fournisseurs | Actif | Dettes sur achats de médicaments/fournitures | ✅ Proposition — À CONFIRMER PAR UN EXPERT-COMPTABLE SYSCOHADA EN RDC |
+| 404 | Fournisseurs (autres) | Actif | Dettes sur achats divers | ✅ Proposition — À CONFIRMER PAR UN EXPERT-COMPTABLE SYSCOHADA EN RDC |
+| 423 | Fournisseurs, acomptes versés | Actif | Acomptes fournisseurs | ✅ Proposition — À CONFIRMER PAR UN EXPERT-COMPTABLE SYSCOHADA EN RDC |
 | 43 | Personnel | Actif | Comptes salariaux (avances) | ✅ Confirmé OHADA |
 | 44 | État et autres collectivités publiques | Actif | Dettes fiscales et sociales | ✅ Confirmé OHADA |
-| 441 | État (impôts sur les sociétés) | Actif | Impôts dus | ✅ Confirmé OHADA |
-| 442 | Cotisations sociales à payer | Actif | Charges sociales à reverser | ✅ Confirmé OHADA |
-| 443 | Taxes sur le chiffre d'affaires | Actif | TVA collectée / déductible | ⚠️ À VALIDER (TVA RDC) |
+| 441 | État (impôts sur les sociétés) | Actif | Impôts dus | ⚠️ À CONFIRMER PAR UN EXPERT-COMPTABLE SYSCOHADA EN RDC |
+| 442 | Cotisations sociales à payer | Actif | Charges sociales à reverser | ⚠️ À CONFIRMER PAR UN EXPERT-COMPTABLE SYSCOHADA EN RDC |
+| 443 | Taxes sur le chiffre d'affaires | Actif | TVA collectée / déductible | ⚠️ À CONFIRMER PAR UN EXPERT-COMPTABLE SYSCOHADA EN RDC (TVA RDC) |
 | 45 | Comptes rattachés à des participations | Actif | Intérêts courus | ✅ Confirmé OHADA |
 | 46 | Charges constatées d'avance | Actif | Charges payées d'avance | ✅ Confirmé OHADA |
 | 47 | Produits constatés d'avance | Actif | Revenus perçus d'avance | ✅ Confirmé OHADA |
@@ -91,10 +92,10 @@
 | N° Compte | Intitulé | Type | Usage clinique | Statut |
 |-----------|----------|------|----------------|--------|
 | **511** | **Caisse** | **Actif** | **Espèces physiques** | **✅ Confirmé** |
-| **512** | **Caisse USD** | **Actif** | **Trésorerie dollars** | **✅ Proposé** |
-| **513** | **Caisse FC** | **Actif** | **Trésorerie francs congolais** | **✅ Proposé** |
-| **521** | **Banque USD** | **Actif** | **Compte bancaire USD** | **✅ Proposé** |
-| **522** | **Banque FC** | **Actif** | **Compte bancaire FC** | **✅ Proposé** |
+| **512** | **Caisse USD** | **Actif** | **Trésorerie dollars** | **⚠️ À CONFIRMER PAR UN EXPERT-COMPTABLE SYSCOHADA EN RDC** |
+| **513** | **Caisse FC** | **Actif** | **Trésorerie francs congolais** | **⚠️ À CONFIRMER PAR UN EXPERT-COMPTABLE SYSCOHADA EN RDC** |
+| **521** | **Banque USD** | **Actif** | **Compte bancaire USD** | **⚠️ À CONFIRMER PAR UN EXPERT-COMPTABLE SYSCOHADA EN RDC** |
+| **522** | **Banque FC** | **Actif** | **Compte bancaire FC** | **⚠️ À CONFIRMER PAR UN EXPERT-COMPTABLE SYSCOHADA EN RDC** |
 | 523 | Chèques à encaisser | Actif | Chèques en cours | ✅ Confirmé OHADA |
 | 526 | Valeurs à encaisser | Actif | Effets à encaisser | ✅ Confirmé OHADA |
 | 531 | Établissements financiers | Actif | Comptes chez EFS | ✅ Confirmé OHADA |
@@ -141,7 +142,7 @@
 | 653 | Dotations aux provisions pour opérations sur exercices | Charge | Provisions exercices | ✅ Confirmé OHADA |
 | **66** | **Charges financières** | **Charge** | **Coûts financiers** | **✅ Confirmé** |
 | 661 | Intérêts et frais bancaires | Charge | Frais bancaires | ✅ Confirmé OHADA |
-| 665 | Pertes de change | Charge | Perte de change | ⚠️ À VALIDER |
+| 665 | Pertes de change | Charge | Perte de change | ⚠️ À CONFIRMER PAR UN EXPERT-COMPTABLE SYSCOHADA EN RDC |
 | 667 | Autres charges financières | Charge | Autres frais financiers | ✅ Confirmé OHADA |
 | **67** | **Charges exceptionnelles** | **Charge** | **Événements rares** | **✅ Confirmé** |
 | 671 | Pertes sur créances litigieuses | Charge | Créances irrécouvrables | ✅ Confirmé OHADA |
@@ -157,12 +158,12 @@
 
 | N° Compte | Intitulé | Type | Usage clinique | Statut |
 |-----------|----------|------|----------------|--------|
-| **701** | **Ventes de médicaments** | **Produit** | **Ventes pharmacie** | **✅ Proposé** |
-| 702 | Ventes de produits finis | Produit | Produits finis | ✅ Confirmé OHADA |
-| 703 | Ventes de produits intermédiaires | Produit | Semi-finis | ✅ Confirmé OHADA |
-| 704 | Ventes de marchandises | Produit | Marchandises | ✅ Confirmé OHADA |
-| 706 | Prestations de services | Produit | Prestations médicales | ✅ Proposé |
-| **707** | **Ventes de prestations médicales** | **Produit** | **Consultations, examens** | **✅ Proposé** |
+| **701** | **Ventes de médicaments** | **Produit** | **Ventes pharmacie** | **⚠️ À CONFIRMER PAR UN EXPERT-COMPTABLE SYSCOHADA EN RDC** |
+| 702 | Ventes de produits finis | Produit | Produits finis | ✅ Proposition — À VALIDER |
+| 703 | Ventes de produits intermédiaires | Produit | Semi-finis | ✅ Proposition — À VALIDER |
+| 704 | Ventes de marchandises | Produit | Marchandises | ✅ Proposition — À VALIDER |
+| 706 | Prestations de services | Produit | Prestations médicales | ⚠️ À CONFIRMER PAR UN EXPERT-COMPTABLE SYSCOHADA EN RDC |
+| **707** | **Ventes de prestations médicales** | **Produit** | **Consultations, examens** | **⚠️ À CONFIRMER PAR UN EXPERT-COMPTABLE SYSCOHADA EN RDC** |
 | 708 | Ventes de produits divers | Produit | Autres produits | ✅ Confirmé OHADA |
 | **71** | **Production internalisée** | **Produit** | **Production stockée** | **✅ Confirmé** |
 | 711 | Production immobilisée | Produit | Production capitalisée | ✅ Confirmé OHADA |
@@ -184,7 +185,7 @@
 | 752 | Revenus des prêts et créances rattachés | Produit | Intérêts prêts | ✅ Confirmé OHADA |
 | **76** | **Produits financiers** | **Produit** | **Revenus financiers** | **✅ Confirmé** |
 | 761 | Intérêts et produits assimilés | Produit | Intérêts reçus | ✅ Confirmé OHADA |
-| **765** | **Gains de change** | **Produit** | **Gain change** | **✅ Proposé** |
+| **765** | **Gains de change** | **Produit** | **Gain change** | **⚠️ À CONFIRMER PAR UN EXPERT-COMPTABLE SYSCOHADA EN RDC** |
 | 767 | Autres produits financiers | Produit | Autres produits financiers | ✅ Confirmé OHADA |
 | **77** | **Produits exceptionnels** | **Produit** | **Produits rares** | **✅ Confirmé** |
 | 771 | Gains sur créances litigieuses | Produit | Créances récupérées | ✅ Confirmé OHADA |
@@ -249,6 +250,8 @@
 | 401 | Fournisseurs (médicaments) | Dettes fournisseurs pharmaceutiques | ✅ Proposé |
 | 404 | Fournisseurs (autres) | Dettes fournisseurs divers | ✅ Proposé |
 
+> ⚠️ **Note :** Le compte **421** (Fournisseurs) apparaissait dans une version antérieure de ce document. Il est remplacé par les comptes **401** et **404**, conformément au plan comptable SYSCOHADA/OHADA standard appliqué en RDC. La numérotation exacte (401 vs 421) reste **À VALIDER PAR UN EXPERT-COMPTABLE SYSCOHADA**.
+
 ### Comptes Stocks (Classe 4)
 
 | N° Compte | Intitulé | Usage | Statut |
@@ -260,10 +263,10 @@
 
 | N° Compte | Intitulé | Usage | Statut |
 |-----------|----------|-------|--------|
-| 512 | Caisse USD | Espèces en dollars | ✅ Proposé |
-| 513 | Caisse FC | Espèces en francs congolais | ✅ Proposé |
-| 521 | Banque USD | Compte bancaire en dollars | ✅ Proposé |
-| 522 | Banque FC | Compte bancaire en francs congolais | ✅ Proposé |
+| 512 | Caisse USD | Espèces en dollars | ⚠️ À CONFIRMER PAR UN EXPERT-COMPTABLE SYSCOHADA EN RDC |
+| 513 | Caisse FC | Espèces en francs congolais | ⚠️ À CONFIRMER PAR UN EXPERT-COMPTABLE SYSCOHADA EN RDC |
+| 521 | Banque USD | Compte bancaire en dollars | ⚠️ À CONFIRMER PAR UN EXPERT-COMPTABLE SYSCOHADA EN RDC |
+| 522 | Banque FC | Compte bancaire en francs congolais | ⚠️ À CONFIRMER PAR UN EXPERT-COMPTABLE SYSCOHADA EN RDC |
 
 ### Comptes Charges (Classe 6)
 
@@ -275,15 +278,18 @@
 | 622 | Charges sociales patronales | Part patronale sécurité sociale | ✅ Confirmé |
 | 641 | Amortissements immobilisations incorporelles | Amortissement logiciels, brevets | ✅ Confirmé |
 | 642 | Amortissements immobilisations corporelles | Amortissement équipements médicaux | ✅ Confirmé |
-| 665 | Pertes de change | Perte sur conversion devises | ⚠️ À VALIDER |
+| 665 | Pertes de change | Perte sur conversion devises | ⚠️ À CONFIRMER PAR UN EXPERT-COMPTABLE SYSCOHADA EN RDC |
 
 ### Comptes Produits (Classe 7)
 
 | N° Compte | Intitulé | Usage | Statut |
 |-----------|----------|-------|--------|
-| 706 | Prestations médicales | Revenus des consultations | ✅ Proposé |
-| 707 | Ventes de médicaments | Revenus pharmacie | ✅ Proposé |
-| 765 | Gains de change | Gain sur conversion devises | ⚠️ À VALIDER |
+| 701 | Ventes de médicaments | Revenus pharmacie | ⚠️ À CONFIRMER PAR UN EXPERT-COMPTABLE SYSCOHADA EN RDC |
+| 706 | Prestations de services | Revenus des consultations | ⚠️ À CONFIRMER PAR UN EXPERT-COMPTABLE SYSCOHADA EN RDC |
+| 707 | Ventes de prestations médicales | Consultations, examens | ⚠️ À CONFIRMER PAR UN EXPERT-COMPTABLE SYSCOHADA EN RDC |
+| 765 | Gains de change | Gain sur conversion devises | ⚠️ À CONFIRMER PAR UN EXPERT-COMPTABLE SYSCOHADA EN RDC |
+
+> ⚠️ **Note :** L'affectation exacte des comptes **701**, **706** et **707** (ventes de médicaments vs prestations médicales) varie selon les versions de ce document. Le tableau de la Classe 7 (ci-dessus) est utilisé comme référence principale. L'affectation finale reste **À CONFIRMER PAR UN EXPERT-COMPTABLE SYSCOHADA EN RDC**.
 
 ---
 
@@ -300,7 +306,7 @@
 | **Banque FC** | 522 | Compte bancaire FC |
 | **Achats médicaments** | 601 | Coût d'achat |
 | **Prestations médicales** | 706 | Chiffre d'affaires |
-| **Ventes médicaments** | 707 | Chiffre d'affaires pharmacie |
+| **Ventes médicaments** | 701 | Chiffre d'affaires pharmacie |
 | **Salaires** | 621 | Charges sociales |
 | **Amortissements** | 641, 642 | Dotations aux amortissements |
 | **Pertes de change** | 665 | Écarts change (débit) |

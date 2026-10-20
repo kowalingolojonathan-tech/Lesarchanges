@@ -26,9 +26,9 @@
 | **A3** | Créer un compte spécifique pour chaque devise (512 USD, 513 FC, 521 USD, 522 FC) | Gestion des devises multiple | ✅ Confirmé par analyse technique | 20/10/2026 |
 | **A4** | Comptabiliser les factures sur le compte 411 (Clients) et le compte 706/707 (Produits) | Règle SYSCOHADA | ✅ Confirmé | 20/10/2026 |
 | **A5** | Comptabiliser les paiements sur le compte 512/521 (Caisse/Banque) et créditer 411 (Clients) | Règle SYSCOHADA | ✅ Confirmé | 20/10/2026 |
-| **A6** | Créer un compte 401 (Fournisseurs) pour les dettes fournisseur | Règle SYSCOHADA | ✅ Confirmé | 20/10/2026 |
+| **A6** | Créer un compte 401 (Fournisseurs) pour les dettes fournisseur | Règle SYSCOHADA — Note: l'ancien compte 421 a été remplacé par 401/404 conformément au plan SYSCOHADA standard — ⚠️ À CONFIRMER PAR UN EXPERT-COMPTABLE SYSCOHADA EN RDC | ⏳ EN ATTENTE | 20/10/2026 |
 | **A7** | Utiliser les comptes 481/482 pour les stocks | Règle SYSCOHADA | ✅ Confirmé | 20/10/2026 |
-| **A8** | Enregistrer les achats de stock (débit 481, crédit 601 ou 401) | Règle SYSCOHADA | ✅ Confirmé | 20/10/2026 |
+| **A8** | Enregistrer les achats de stock (débit 481, crédit 601 ou 401) | Règle SYSCOHADA — ⚠️ À CONFIRMER PAR UN EXPERT-COMPTABLE SYSCOHADA EN RDC | ⏳ EN ATTENTE | 20/10/2026 |
 | **A9** | Enregistrer les sorties de stock (débit 601, crédit 481) | Règle SYSCOHADA | ✅ Confirmé | 20/10/2026 |
 | **A10** | Protéger contre les doubles écritures (validation anti-doublon existante) | Bonne pratique | ✅ Confirmé par code existant | 20/10/2026 |
 

@@ -371,19 +371,20 @@ View SQL : Voir → journaux auxiliaires et balances
 
 | Événement | Traitement Actuel | Écritures Comptables (ÉTAPE 2 - À CRÉER) | Risques |
 |-----------|-------------------|-------------------------------------------|----------|
-| **Facture créée** | `CREATE` facture | • Débit **411** - Patients<br>• Crédit **706** - Prestations (ou 707 pharmacie) | Aucun | ✅ CORRIGÉ |
-| **Paiement reçu** | `CREATE` paiement | • Débit **512/521** - Caisse USD / Banque<br>• Crédit **411** - Patients | Écarts de change | ✅ CORRIGÉ |
+| **Facture créée** | `CREATE` facture | • Débit **411** - Clients<br>• Crédit **706** - Prestations (ou **707** pharmacie) | Aucun | ✅ CORRIGÉ |
+| **Paiement reçu (USD)** | `CREATE` paiement | • Débit **512** - Caisse USD / **521** - Banque USD<br>• Crédit **411** - Clients | Écarts de change | ✅ CORRIGÉ |
+| **Paiement reçu (FC)** | `CREATE` paiement | • Débit **513** - Caisse FC / **522** - Banque FC<br>• Crédit **411** - Clients | Écarts de change | ✅ CORRIGÉ |
 | **Paiement partiel** | Mise à jour statut | • Même écriture, solde client restant dû | Traçabilité | ✅ CORRIGÉ |
-| **Remboursement** | Non implémenté | • Débit **512/521** - Caisse<br>• Crédit **411** - Patients | À implémenter | ⚠️ À IMPLÉMENTER |
-| **Dérogation** | Field `notes_facture` | À valider par expert *(voir DECISIONS #11)* | À valider | ⚠️ À VALIDER |
+| **Remboursement** | Non implémenté | • Débit **512/513/521/522** - Caisse/Banque<br>• Crédit **411** - Clients | À implémenter | ⚠️ À IMPLÉMENTER |
+| **Dérogation** | Field `notes_facture` | À valider par expert *(voir DECISIONS #8)* | À valider | ⚠️ À VALIDER |
 | **Facture annulée** | Mise à jour `statut` | • Contre-passation intégrale | Traçabilité | ✅ CORRIGÉ |
 | **Stock entrée (pharma)** | `CREATE` mouvement `ENTREE` | • Débit **481** - Stocks<br>• Crédit **601** ou **401** - Achats/Fournisseurs | Coût d'acquisition | ✅ CORRIGÉ |
 | **Stock sortie (POS)** | `CREATE` `SORTIE` + paiement | • Débit **601** - Coût des ventes<br>• Crédit **481** - Stocks | Double comptage si manuel | ✅ PROTÉGÉ |
 | **Achat à crédit** | Non implémenté | • Débit **601** - Achats<br>• Crédit **401** - Fournisseurs | Créer dette | ⚠️ À IMPLÉMENTER |
-| **Règlement dette** | Non implémenté | • Débit **401** - Fournisseurs<br>• Crédit **512/521** - Caisse | À valider | ⚠️ À IMPLÉMENTER |
-| **Virement interne** | Non implémenté | • Débit **512** → Crédit **521** (USD) | Éviter écarts | ⚠️ À IMPLÉMENTER |
-| **Salaires / Charges** | Non implémenté | • Débit **621** - Salaires<br>• Crédit **512/521** - Caisse | À valider | ⚠️ À IMPLÉMENTER |
-| **Conversion USD/FC** | Conservation simple | • Taux scellé<br>• Écarts → **665/765** | À valider | ⚠️ À VALIDER (#5) |
+| **Règlement dette** | Non implémenté | • Débit **401** - Fournisseurs<br>• Crédit **512/513/521/522** - Caisse/Banque | À valider | ⚠️ À IMPLÉMENTER |
+| **Virement interne** | Non implémenté | • Débit **512** → Crédit **521** (USD)<br>• Débit **513** → Crédit **522** (FC) | Éviter écarts | ⚠️ À IMPLÉMENTER |
+| **Salaires / Charges** | Non implémenté | • Débit **621** - Salaires<br>• Crédit **512/513/521/522** - Caisse/Banque | À valider | ⚠️ À IMPLÉMENTER |
+| **Conversion USD/FC** | Conservation simple | • Taux scellé<br>• Écarts → **665** (perte) / **765** (gain) — ⚠️ À CONFIRMER PAR UN EXPERT-COMPTABLE SYSCOHADA EN RDC | À valider | ⚠️ À VALIDER (#D2) |
 
 > **Note :** Les numéros de comptes sont basés sur le SYSCOHADA/OHADA standard. Chaque numéro doit être validé par un expert-comptable avant l'implémentation.
 
@@ -420,32 +421,38 @@ View SQL : Voir → journaux auxiliaires et balances
 
 ## F. PLAN D'IMPLÉMENTATION - ÉTAPES MINIATURÉES ET TESTABLES
 
+> ⚠️ **ARCHITECTURE HARMONISÉE** — Les deux documents antérieurs (REPORT section F et PLAN_IMPLEMENTATION_FINANCE.md) proposaient des schémas de tables divergents. Ils sont maintenant harmonisés dans la proposition ci-dessous. Cette architecture est une **PROPOSITION TECHNIQUE À VALIDER PAR UN EXPERT-COMPTABLE SYSCOHADA**.
+
 ### 📅 ÉTAPE 9.1 : PLAN COMPTABLE (1-2 JOURS)
 
 **Travail :** Créer les tables principaux
 
 ```sql
-— Table des Comptes Généraux
+-- Table des Comptes Généraux
 CREATE TABLE comptes_generaux (
   id TEXT PRIMARY KEY,
   compte TEXT NOT NULL UNIQUE,
-  classe INTEGER,
-  intitule TEXT,
+  classe INTEGER CHECK(classe BETWEEN 1 AND 9),
+  intitule TEXT NOT NULL,
   compte_parent TEXT,
-  type TEXT CHECK(type IN ('DEBIT', 'CREDIT'))
+  type TEXT CHECK(type IN ('DEBIT', 'CREDIT')),
+  actif INTEGER DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
 );
 
-— Table des Plans Comptables par exercice
+-- Table des Plans Comptables par exercice
 CREATE TABLE plans_comptables (
   id TEXT PRIMARY KEY,
   exercice TEXT NOT NULL,
   date_debut TEXT,
   date_fin TEXT,
   actif INTEGER DEFAULT 1,
-  date_cloture TEXT
+  date_cloture TEXT,
+  created_at TEXT NOT NULL
 );
 
-— Table de liens (compte ↔ sous-détails)
+-- Table de liens (compte ↔ sous-détails)
 CREATE TABLE comptes_sous_details (
   id TEXT PRIMARY KEY,
   compte_id TEXT,
@@ -457,8 +464,8 @@ CREATE TABLE comptes_sous_details (
 ```
 
 **Tests :**
-- Insertion complète SYSCOHADA RDC (5 classes)
-- Vérification références croisés
+- Insertion complète SYSCOHADA RDC (5 classes + sous-comptes)
+- Vérification références croisées
 - Migration sécurisée sans perte de données
 
 ---
@@ -468,24 +475,66 @@ CREATE TABLE comptes_sous_details (
 **Travail :** Tables journal
 
 ```sql
-— Journal Général
-CREATE TABLE journal_general (
+-- Journal Général (unique, tous les mouvements)
+CREATE TABLE journaux_comptables (
   id TEXT PRIMARY KEY,
-  journal_code TEXT UNIQUE NOT NULL,
-  journal_libele TEXT,
-  nature TEXT CHECK(nature IN ('DEBIT', 'CREDIT')),
+  code TEXT UNIQUE NOT NULL,
+  libelle TEXT NOT NULL,
+  nature TEXT CHECK(nature IN ('GENERAL', 'VENTES', 'ACHATS', 'CAISSE', 'BANQUE', 'DIVERS')),
   date_ouverture TEXT,
-  date_cloture TEXT
+  date_cloture TEXT,
+  actif INTEGER DEFAULT 1,
+  created_at TEXT NOT NULL
 );
 
-— Journal Auxiliaires Clients / Fournisseurs
-CREATE TABLE journal_auxiliaires (
+-- Journal Clients (suivi-ventes)
+CREATE TABLE journal_clients (
   id TEXT PRIMARY KEY,
-  journal_code TEXT UNIQUE NOT NULL,
-  journal_libele TEXT,
-  categorie TEXT CHECK(categorie IN ('CLIENT', 'FOURNISSEUR', 'SALARIE'))
+  client_id TEXT NOT NULL,
+  facture_id TEXT,
+  date_ecriture TEXT NOT NULL,
+  debit REAL DEFAULT 0,
+  credit REAL DEFAULT 0,
+  solde REAL DEFAULT 0,
+  libelle TEXT,
+  created_at TEXT NOT NULL
+);
+
+-- Journal Fournisseurs (suivi-achats)
+CREATE TABLE journal_fournisseurs (
+  id TEXT PRIMARY KEY,
+  fournisseur_id TEXT NOT NULL,
+  facture_id TEXT,
+  date_ecriture TEXT NOT NULL,
+  debit REAL DEFAULT 0,
+  credit REAL DEFAULT 0,
+  solde REAL DEFAULT 0,
+  libelle TEXT,
+  created_at TEXT NOT NULL
+);
+
+-- Journal Caisse (suivi-trésorerie)
+CREATE TABLE journal_caisses (
+  id TEXT PRIMARY KEY,
+  caisse_id TEXT NOT NULL,
+  type TEXT CHECK(type IN ('ENTREE', 'SORTIE')),
+  montant REAL NOT NULL,
+  devise TEXT CHECK(devise IN ('USD', 'FC')),
+  taux_usd_fc REAL,
+  compte_comptable TEXT,
+  libelle TEXT,
+  created_at TEXT NOT NULL
 );
 ```
+
+**Codes journaux suggérés :**
+| Code | Libellé | Usage |
+|------|---------|-------|
+| J001 | Journal général | Tous les mouvements |
+| J002 | Journal des ventes | Factures clients |
+| J003 | Journal des achats | Achats fournisseurs |
+| J004 | Journal de caisse | Mouvements caisse |
+| J005 | Journal de banque | Mouvements bancaire |
 
 **Tests :**
 - Application des codes journal
@@ -494,122 +543,179 @@ CREATE TABLE journal_auxiliaires (
 
 ---
 
-### 📅 ÉTAPE 9.3 : ÉCRITURES COMPTABLES (1-2 JOURS)
+### 📅 ÉTAPE 9.3 : ÉCRITURES COMPTABLES (2-3 JOURS)
 
 **Travail :** Synchroniser `factures` et `paiements`
 
 ```sql
+-- Écritures comptables (skeleton)
 CREATE TABLE ecritures_comptables (
   id TEXT PRIMARY KEY,
-  journal_id TEXT,
-  date_comptable TEXT,
+  numero_ecriture TEXT NOT NULL UNIQUE,
+  journal_id TEXT NOT NULL,
+  date_comptable TEXT NOT NULL,
   reference TEXT,
   libelle TEXT NOT NULL,
   compte TEXT NOT NULL,
+  compte_sous_detail TEXT,
   sens TEXT CHECK(sens IN ('DEBIT', 'CREDIT')),
-  debit REAL DEFAULT 0,
-  credit REAL DEFAULT 0,
+  montant_usd REAL DEFAULT 0,
+  montant_fc REAL DEFAULT 0,
+  taux_usd_fc REAL,
+  devise TEXT CHECK(devise IN ('USD', 'FC')),
   user_create TEXT,
-  created_at TEXT,
-  FOREIGN KEY (journal_id) REFERENCES journal_general(id)
+  user_validate TEXT,
+  statut TEXT CHECK(statut IN ('PROVISOIRE', 'VALIDEE', 'ANNULEE')),
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (journal_id) REFERENCES journaux_comptables(id)
 );
 
-— Trigger crée automatiquement au développement de la facture
-CREATE TRIGGER trigger_ecriture_facture_facture
-AFTER INSERT ON facture_items
-FOR EACH ROW
-— (LOGIQUE À DÉVELOPPER)
+-- Lignes d'écriture (une écriture = plusieurs lignes)
+CREATE TABLE lignes_ecritures (
+  id TEXT PRIMARY KEY,
+  ecriture_id TEXT NOT NULL,
+  compte TEXT NOT NULL,
+  compte_sous_detail TEXT,
+  debit REAL DEFAULT 0,
+  credit REAL DEFAULT 0,
+  montant REAL DEFAULT 0,
+  devise TEXT CHECK(devise IN ('USD', 'FC')),
+  FOREIGN KEY (ecriture_id) REFERENCES ecritures_comptables(id) ON DELETE CASCADE
+);
 ```
 
+**Règles métier :**
+1. **Équilibre :** Somme des débits = Somme des crédits pour chaque écriture
+2. **Numérotation :** Format `YYYY-NNNNNN` (ex: 2026-000001)
+3. **Validation :** Écriture provisoire → validée → annulable (contre-passation)
+4. **Traçabilité :** Impossible de supprimer une écriture validée
+5. **Anti-doublon :** Un même événement ne peut générer une écriture identique
+
 **Tests :**
-- Double-check comptabilité automatique au `facture_items`, `paiements`
-- Validation de partiellement crédité et des montants
-- Vérification DB complète
+- Écriture équilibrée (Débit 411: 100 USD / Crédit 706: 100 USD)
+- Écriture déséquilibrée (rejetée)
+- Contre-passation traçable (aucune écriture supprimée)
+- Anti-doublon (tentative de double écriture rejetée)
 
 ---
 
-### 📅 ÉTAPE 9.4 : BALANCES (1 JOUR)
+### 📅 ÉTAPE 9.4 : BALANCES & GRAND LIVRE (1 JOUR)
 
-**Travail :** Balances
+**Travail :** Balances calculées via VUES SQL
 
 ```sql
-CREATE TABLE balance_generales (
-  id TEXT PRIMARY KEY,
-  exercice TEXT NOT NULL,
-  date TEXT,
-  compte TEXT,
-  debit REAL DEFAULT 0,
-  credit REAL DEFAULT 0,
-  solde REAL DEFAULT 0
-);
+-- Grand livre (vue)
+CREATE VIEW grand_livre AS
+SELECT 
+    compte,
+    compte_sous_detail,
+    SUM(debit) as total_debit,
+    SUM(credit) as total_credit,
+    SUM(debit) - SUM(credit) as solde
+FROM lignes_ecritures
+GROUP BY compte, compte_sous_detail;
 
-CREATE TABLE balance_sous_details (
-  id TEXT PRIMARY KEY,
-  exercice TEXT NOT NULL,
-  date TEXT,
-  compte TEXT,
-  compte_sub_01 TEXT,
-  compte_sub_02 TEXT,
-  compte_sub_03 TEXT,
-  debit REAL DEFAULT 0,
-  credit REAL DEFAULT 0,
-  solde REAL DEFAULT 0
-);
+-- Balance générale (vue)
+CREATE VIEW balance_generale AS
+SELECT 
+    e.date_comptable,
+    e.compte,
+    SUM(e.debit) as debit,
+    SUM(e.credit) as credit,
+    SUM(e.debit) - SUM(e.credit) as solde
+FROM ecritures_comptables e
+WHERE e.statut = 'VALIDEE'
+GROUP BY e.date_comptable, e.compte;
 ```
 
 **Tests :**
 - Calcul automatique des balances et vérification
-- Idempotence (recalcul gaze)
+- Idempotence (recalcul gaz)
+- Total débits = Total crédits (balance équilibrée)
 
 ---
 
-### 📅 ÉTAPE 9.5 : COMPTES DE RÉSULTAT (1 JOUR)
+### 📅 ÉTAPE 9.5 : COMPTE DE RÉSULTAT (1 JOUR)
 
-**Travail :** Table
+**Travail :** Table + vue SQL
 
 ```sql
-CREATE TABLE compte_resultats (
-  id TEXT PRIMARY KEY,
-  exercice TEXT NOT NULL,
-  compte TEXT NOT NULL,
-  description TEXT,
-  debut_periode REAL DEFAULT 0,
-  fin_periode REAL DEFAULT 0,
-  debit REAL DEFAULT 0,
-  credit REAL DEFAULT 0,
-  solde REAL DEFAULT 0
-);
+-- Vue Compte de résultat
+CREATE VIEW compte_resultat AS
+SELECT 
+    'CHARGES' as categorie,
+    compte,
+    SUM(debit) as montant,
+    SUM(credit) as credit
+FROM ecritures_comptables
+WHERE statut = 'VALIDEE' AND compte LIKE '6%'
+
+UNION ALL
+
+SELECT 
+    'PRODUITS' as categorie,
+    compte,
+    SUM(debit) as montant,
+    SUM(credit) as credit
+FROM ecritures_comptables
+WHERE statut = 'VALIDEE' AND compte LIKE '7%';
+```
+
+**Calcul :**
+```
+Résultat net = Total Produits - Total Charges
 ```
 
 **Tests :**
-- Création résultats automatique via script de validation
-- Vérification totaux
+- Facture 100 USD → Crédit 706: 100
+- Paiement 100 USD → Débit 512: 100, Crédit 411: 100
+- Résultat: 0 (facture payée)
 
 ---
 
 ### 📅 ÉTAPE 9.6 : BILAN (1 JOUR)
 
-**Travail :** Table
+**Travail :** Vues SQL
 
 ```sql
-CREATE TABLE bilan (
-  id TEXT PRIMARY KEY,
-  exercice TEXT NOT NULL,
-  date_cloture TEXT,
-  compte TEXT,
-  intitule TEXT,
-  partie TEXT,
-  valeur REAL DEFAULT 0
-);
+-- Bilan actif
+CREATE VIEW bilan_actif AS
+SELECT 'ACTIF IMMOBILISE' as section, compte, SUM(montant) as valeur
+FROM ecritures_comptables
+WHERE compte IN ('1%', '2%', '3%') AND statut = 'VALIDEE'
+GROUP BY compte
+
+UNION ALL
+
+SELECT 'ACTIF CIRCULANT' as section, compte, SUM(montant) as valeur
+FROM ecritures_comptables
+WHERE compte IN ('4%', '5%') AND statut = 'VALIDEE'
+GROUP BY compte;
+
+-- Bilan passif
+CREATE VIEW bilan_passif AS
+SELECT 'CAPITAUX PROPRES' as section, compte, SUM(montant) as valeur
+FROM ecritures_comptables
+WHERE compte LIKE '8%' AND statut = 'VALIDEE'
+GROUP BY compte
+
+UNION ALL
+
+SELECT 'PASSIF' as section, compte, SUM(montant) as valeur
+FROM ecritures_comptables
+WHERE compte LIKE '4%' AND statut = 'VALIDEE'
+GROUP BY compte;
 ```
 
-**Tests :**
-- Calcul automatique bilan daté
-- Vérification Total Actif = Total Passif + Capitaux Propres
+**Validation :**
+```
+Total Actif = Total Passif + Capitaux Propres
+```
 
 ---
 
-### 📅 ÉTAPE 9.7 : CAISSES / BANQUES (1 JOUR)
+### 📅 ÉTAPE 9.7 : CAISSE & BANQUE (1 JOUR)
 
 **Travail :** Système
 
@@ -620,23 +726,29 @@ CREATE TABLE caisses (
   devise TEXT NOT NULL CHECK(devise IN ('USD', 'FC')),
   solde_initial REAL DEFAULT 0,
   solde_actuel REAL DEFAULT 0,
-  actif INTEGER DEFAULT 1
+  actif INTEGER DEFAULT 1,
+  created_at TEXT NOT NULL
 );
 
 CREATE TABLE mouvements_caisses (
   id TEXT PRIMARY KEY,
   caisse_id TEXT NOT NULL,
   type TEXT CHECK(type IN ('ENTREE', 'SORTIE')),
-  mount REAL NOT NULL,
-  compte_comptable TEXT,
+  montant REAL NOT NULL,
+  devise TEXT CHECK(devise IN ('USD', 'FC')),
+  taux_usd_fc REAL,
+  ecriture_id TEXT,
   libelle TEXT,
-  created_at TEXT
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (caisse_id) REFERENCES caisses(id),
+  FOREIGN KEY (ecriture_id) REFERENCES ecritures_comptables(id)
 );
 ```
 
 **Tests :**
 - Mise à jour automatique au paiement
 - Idempotence et entiers
+- Solde = solde_initial + entrées - sorties
 
 ---
 
@@ -651,16 +763,30 @@ CREATE TABLE exercices_comptables (
   date_debut TEXT NOT NULL,
   date_fin TEXT NOT NULL,
   cloture INTEGER DEFAULT 0,
-  date_cloture TEXT
+  date_cloture TEXT,
+  user_cloture TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE ecritures_exercice (
+  id TEXT PRIMARY KEY,
+  exercice TEXT NOT NULL,
+  ecriture_id TEXT NOT NULL,
+  FOREIGN KEY (exercice) REFERENCES exercices_comptables(exercice),
+  FOREIGN KEY (ecriture_id) REFERENCES ecritures_comptables(id)
 );
 ```
 
-**Tests :**
-- Validation de date de début, fin
-- Vérification cloture
-- Vérification année cadastrale (jour)
+**Règles :**
+1. **Verrouillage :** Un exercice clôturé ne peut plus recevoir d'écritures
+2. **Contre-passation :** Pour corriger une écriture, créer une écriture de correction
+3. **Report :** Le résultat d'un exercice est reporté au suivant (compte 841/842)
 
-**Fonction à créer :** `closeExercise()` avec transaction ACID
+**Tests :**
+- Créer exercice 2026 (01/01 - 31/12)
+- Créer une écriture
+- Clore l'exercice
+- Tenter une nouvelle écriture → Rejet
 
 ---
 
@@ -703,7 +829,7 @@ CREATE TABLE inventaires_financiers (
 - Page Balance Générale
 - Page Compte Résultat
 - Page Bilan
-- Page Caisse & Bans
+- Page Caisse & Banque
 
 **Tests :**
 - Données JSON récupérées
@@ -711,7 +837,7 @@ CREATE TABLE inventaires_financiers (
 
 ---
 
-### 📅 ÉTAPE 9.11 : RÈGLES RETENUES (J-1 À J+2)
+### 📅 ÉTAPE 9.11 : RÈGLES & CONTRÔLES (J-1 À J+2)
 
 **Structure :**
 ```typescript
@@ -722,10 +848,9 @@ const REGLES_COMPTABLES = {
   },
   ecartTauxMaxFC: 1.0, // 1%
   ecartMontantMax: 0.01,
-    periode: "ANNUEL",
-    showEcart: 606, // pour 34 et 678
-    ecartCrit : 2.0, // 2%
-  },
+  periode: "ANNUEL",
+  showEcart: true, // pour 606 et 678
+  ecartCrit: 2.0, // 2%
   inventaireFinancierSimultan: {
     enabled: true,
     periodique: "QUADRI",
@@ -736,10 +861,27 @@ const REGLES_COMPTABLES = {
 };
 ```
 
+**Règles implémentées :**
+| Règle | Description | Severity |
+|-------|-------------|----------|
+| **R1** | Double écriture détectée | WARNING |
+| **R2** | Écart de taux > 5% | ALERT |
+| **R3** | Écriture non équilibrée | ERROR |
+| **R4** | Tentative modification écriture clôturée | ERROR |
+| **R5** | Stock négatif | ERROR |
+| **R6** | Paiement > solde dû | WARNING |
+| **R7** | Écart inventaire > seuil | ALERT |
+
 **Tests :**
 - Validation des paramètres
 - Test avertissement période
 - Test notification
+
+---
+
+## G. TESTS NÉCESSAIRES ET COMMANDES DE VALIDATION
+
+*(Section inchangée — les tests restent les mêmes)*
 
 ---
 

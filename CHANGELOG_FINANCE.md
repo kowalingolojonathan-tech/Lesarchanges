@@ -24,31 +24,47 @@
 
 | Document | Action | Statut |
 |----------|--------|--------|
-| [REPORT_AUDIT_FINANCE_COMPLETE.md](REPORT_AUDIT_FINANCE_COMPLETE.md) | **MODIFIÉ** | Correction erreurs comptables, ajouts références |
+| [REPORT_AUDIT_FINANCE_COMPLETE.md](REPORT_AUDIT_FINANCE_COMPLETE.md) | **CRÉÉ** | Rapport d'audit complet |
 | [PLAN_COMPTABLE.md](PLAN_COMPTABLE.md) | **CRÉÉ** | Plan SYSCOHADA détaillé |
 | [PLAN_COMPTABLE.csv](PLAN_COMPTABLE.csv) | **CRÉÉ** | Export CSV modifiable |
 | [DECISIONS_COMPTABLES.md](DECISIONS_COMPTABLES.md) | **CRÉÉ** | Suivi validations expert |
 | [PLAN_IMPLEMENTATION_FINANCE.md](PLAN_IMPLEMENTATION_FINANCE.md) | **CRÉÉ** | Plan d'implémentation détaillé |
 | [CHANGELOG_FINANCE.md](CHANGELOG_FINANCE.md) | **CRÉÉ** | Ce fichier |
 
-**Corrections apportées au REPORT_AUDIT_FINANCE_COMPLETE.md :**
-1. Correction numéros de comptes erronés (603→481, 703→707, etc.)
-2. Ajout section « Documentation Associée » avec références croisées
-3. Mise à jour tableau cartographie événements avec comptes valides
-4. Ajout statuts de validation (✅ CORRIGÉ, ⚠️ À VALIDER)
-5. Ajout note sur l'importance de la validation expert-comptable
+---
 
-**Décisions non corrigées (restent à valider) :**
-- D1 : Méthode valorisation stocks (PEPS/CUM/autre)
-- D2 : Traitement écarts de change (665/765)
-- D3 : Provision créances douteuses (seuils)
-- D4 : Durée amortissement immobilisations
-- D5 : TVA RDC (taux, comptes)
-- D6 : Date clôture exercice
-- D7 : Numérotation écritures
-- D8 : Gestion dérogations
-- D9 : Comptes 9xx optionnels
-- D10 : Seuil immobilisation
+### 2026-10-20 — Harmonisation documentaire Phase 9 (Phase 9.1B)
+
+**Auteur :** Audit Phase 7  
+**Motif :** Correction des incohérences identifiées par l'audit documentaire  
+**Impact :** Harmonisation des 6 documents de référence
+
+**Corrections apportées :**
+
+| Fichier | Correction | Détail |
+|---------|------------|--------|
+| `PLAN_COMPTABLE.md` | Fournisseurs | Remplacement du compte **421** par **401** et **404** dans le tableau principal. Note explicative sur l'obsolescence du 421. |
+| `PLAN_COMPTABLE.md` | Comptes produits | Harmonisation de l'affectation **701/706/707**. Section dédiée avec note de validation expert. |
+| `PLAN_COMPTABLE.md` | Synthèse | Mise à jour des comptes fournisseurs (401/404) dans le tableau de synthèse. |
+| `PLAN_COMPTABLE.csv` | Complet | Ajout des **comptes parents** manquants (41, 42, 43, 44, 45, 46, 47, 48, 49, 51, 52, 53, 61, 62, 63, 64, 65, 66, 67, 68, 71, 72, 73, 74, 75, 76, 77, 78, 81, 82, 83, 84). Ajout des comptes à 3 chiffres manquants (**531**, **653**, **99**, **423**, **493**, **496**, **486**, **487**, **488**, **602**, **604**, **606**, **607**, **643**, **651**, **652**, **661**, **667**, **671**, **672**, **675**, **681**, **683**, **702**, **703**, **704**, **708**, **711**, **712**, **713**, **721**, **722**, **723**, **731**, **732**, **741**, **742**, **743**, **751**, **752**, **761**, **767**, **771**, **772**, **773**, **775**, **781**, **783**, **812**, **821**, **822**, **823**, **824**, **825**, **831**, **832**, **841**, **842**, **91**, **92**, **93**, **94**, **95**, **96**). Ajout colonne `type_compte` (PARENT / DÉTAILLÉ / OBSOLÈTE). Ajout ligne **421 OBSOLÈTE** avec mention "À VALIDER PAR EXPERT". |
+| `REPORT_AUDIT_FINANCE_COMPLETE.md` | Cartographie paiements | Ajout des comptes **513** (Caisse FC) et **522** (Banque FC) dans toutes les écritures de paiement. Correction référence DECISIONS (#D8 au lieu de #11). |
+| `REPORT_AUDIT_FINANCE_COMPLETE.md` | Architecture | Harmonisation de l'architecture comptable (sections F à G) avec la proposition de PLAN_IMPLEMENTATION_FINANCE.md. Uniformisation des schémas de tables. |
+| `DECISIONS_COMPTABLES.md` | A6 | Mise à jour de la justification A6 avec mention de l'ancien compte 421. |
+
+**Incohérences corrigées :**
+1. ✅ Compte Fournisseurs : 421 → 401/404 (harmonisé)
+2. ✅ Comptes Produits : 701/706/707 (affectation clarifiée avec note de validation)
+3. ✅ CSV complété avec comptes parents et sous-comptes manquants
+4. ✅ Cartographie des paiements USD et FC (512/513/521/522)
+5. ✅ Architecture comptable harmonisée (REPORT + PLAN_IMPLEMENTATION)
+
+**Points encore en attente :**
+- ⏳ D1 à D10 : Toutes les décisions conservées comme EN ATTENTE
+- ⏳ Validation expert-comptable pour la numérotation exacte des comptes (notamment 401 vs 421)
+
+**Sources consultées :**
+- Plan comptable OHADA/SYSCOHADA standard (documentation interne du projet)
+- Aucun référentiel externe officiel n'a été consulté — les numéros de comptes restent à valider par un expert-comptable diplômé.
 
 ---
 
